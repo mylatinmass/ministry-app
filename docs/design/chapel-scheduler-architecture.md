@@ -1026,8 +1026,8 @@ These are not blockers to approving the architecture, but must be resolved befor
 
 - Confirm the exact First Sunday of Advent 2026 rollout date and internal milestone calendar.
 - Verify all altar-server staffing templates with the altar-server leader.
-- Identify the Schola SME; document Schola participation, music-selection, availability, staffing, notification, and exception workflows; then decide whether a focused Schola capability belongs in the initial Scheduling release. Evaluate the webmaster's existing Schola components for reuse only after the workflow is defined.
-- Identify Hospitality/Events, facilities, venue, food, fundraising, setup, and cleanup SMEs before designing banquets, potlucks, Confirmation receptions, major-feast events, or the annual fundraising gala.
+- The Webmaster is the designated Schola Workflow Steward and Technical Steward because he is also a Schola member and has existing Schola components. Document Schola participation, music-selection, availability, staffing, notification, and exception workflows; complete the applicable stakeholder review; then decide whether a focused Schola capability belongs in the initial Scheduling release.
+- For Hospitality/Events, facilities, venue, food, fundraising, setup, cleanup, priest coordination, and every other pending ministry or workstream, designate a Workflow Steward and Technical Steward before completing the workflow. The Product Owner confirms platform integration, and the Stakeholder Review Group reviews major or disputed decisions. Keep personal assignments and delegated authority in the private project register rather than the public repository.
 - Confirm St. Philomena Foundation Mass precedence behavior.
 - Build the annual local-service rule list over time.
 - Identify the 1962 Ordo maintainer and supported-use terms.

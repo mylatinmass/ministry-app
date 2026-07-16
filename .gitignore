@@ -1,0 +1,41 @@
+# macOS and editor files
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# Alpha runtime data and credentials
+alpha/data/*.db
+alpha/data/telegram_bot_token
+
+# Dependencies and generated caches
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+coverage/
+dist/
+build/
+
+# Real or temporary operational data must never be committed
+private-data/
+production-data/
+uploads/
+exports/
+backups/
+tmp/
+*.log

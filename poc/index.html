@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#6f1725">
+    <title>Chapel Scheduler — Stakeholder POC</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#calendar" aria-label="Chapel Scheduler home">
+        <span class="brand-mark" aria-hidden="true">✠</span>
+        <span>
+          <strong>Chapel Scheduler</strong>
+          <small>Our Lady of Victory</small>
+        </span>
+      </a>
+      <div class="demo-controls">
+        <button class="tour-launch" id="tour-launch">▶ Guided demo</button>
+        <label for="role-select">Demo as</label>
+        <select id="role-select">
+          <option value="volunteer">Michael · Sacristan</option>
+          <option value="leader">Ministry leader</option>
+          <option value="assistant">Father's assistant</option>
+          <option value="public">Public visitor</option>
+          <option value="signup">New visitor · Sign-up demo</option>
+        </select>
+        <button class="icon-button" id="reset-demo" title="Reset fictional demo data" aria-label="Reset demo">↺</button>
+      </div>
+    </header>
+
+    <div class="demo-banner">
+      Stakeholder proof of concept · Fictional data · Nothing is sent or saved outside this browser
+    </div>
+
+    <div class="app-shell">
+      <nav class="side-nav" aria-label="Main navigation">
+        <a href="#calendar" data-route="calendar"><span>▦</span>Calendar</a>
+        <a href="#my-schedule" data-route="my-schedule"><span>✓</span>My schedule</a>
+        <a href="#availability" data-route="availability"><span>◷</span>Availability</a>
+        <a href="#telegram" data-route="telegram"><span>➤</span>Telegram demo</a>
+        <a href="#leader" data-route="leader" data-role="leader"><span>☷</span>Draft review</a>
+        <a href="#assistant" data-route="assistant" data-role="assistant"><span>✦</span>Schedule event</a>
+        <a href="#father-calendar" data-route="father-calendar" data-role="assistant"><span>▣</span>Father's calendar</a>
+        <a href="#documents" data-route="documents"><span>▤</span>Instructions</a>
+      </nav>
+
+      <main id="main-content" tabindex="-1">
+        <section class="view" data-view="signup" hidden>
+          <div class="signup-shell">
+            <div class="signup-intro">
+              <p class="eyebrow">Optional account</p><h1>Stay connected</h1>
+              <p>Create a lightweight account for chapel updates, then choose whether you would like to help. Every choice is optional and can be changed later.</p>
+              <ol class="signup-steps" id="signup-steps">
+                <li class="active"><span>1</span><div><strong>Verify email</strong><small>No password required</small></div></li>
+                <li><span>2</span><div><strong>Choose updates</strong><small>Nothing preselected</small></div></li>
+                <li><span>3</span><div><strong>Ways to help</strong><small>Optional interests</small></div></li>
+                <li><span>4</span><div><strong>Finish</strong><small>Privacy and channels</small></div></li>
+              </ol>
+              <div class="signup-privacy"><strong>Public calendar stays public</strong><p>No account is needed to check Mass times. Email is the only information required for notification-only accounts.</p></div>
+            </div>
+
+            <div class="signup-card">
+              <form class="signup-stage active" data-signup-stage="0">
+                <span class="step-label">Step 1 of 4</span><h2>Get chapel updates</h2><p>Verify your email with a one-time link. You will not need a password, and you can still use the public calendar without an account.</p>
+                <label>Email address<input type="email" value="michael.smith@example.com" required></label>
+                <button class="button primary signup-next" type="submit">Send one-time link</button>
+                <div class="demo-email"><span>DEMO</span><p>No real email will be sent. Continue to simulate opening the verified link.</p></div>
+              </form>
+
+              <form class="signup-stage" data-signup-stage="1" hidden>
+                <span class="step-label">Step 2 of 4</span><h2>What would you like to receive?</h2><p>Nothing is selected for you. Choose only the updates you want, or continue without subscribing.</p>
+                <div class="verified-email">✓ michael.smith@example.com <span>Verified</span></div>
+                <div class="subscription-grid">
+                  <label><input type="checkbox"> <span><strong>Mass schedule changes</strong><small>Cancellations and time changes</small></span></label>
+                  <label><input type="checkbox"> <span><strong>Special services</strong><small>Holy days and added services</small></span></label>
+                  <label><input type="checkbox"> <span><strong>Chapel events</strong><small>Fundraisers and community events</small></span></label>
+                  <label><input type="checkbox"> <span><strong>Volunteer opportunities</strong><small>Open ways to help</small></span></label>
+                  <label><input type="checkbox"> <span><strong>All chapel announcements</strong><small>General notices from the chapel</small></span></label>
+                </div>
+                <div class="signup-actions"><button class="button ghost signup-back" type="button">Back</button><button class="button primary signup-next" type="submit">Continue</button></div>
+              </form>
+
+              <form class="signup-stage" data-signup-stage="2" hidden>
+                <span class="step-label">Step 3 of 4</span><h2>Would you like to help?</h2><p>These are expressions of interest, not commitments. A leader will contact you before anything is assigned.</p>
+                <div class="interest-grid">
+                  <label class="ministry-choice"><input type="checkbox" name="volunteer-interest"><span class="ministry-symbol">S</span><div><strong>Liturgical ministries</strong><small>Sacristy, altar serving, or ushering</small></div></label>
+                  <label class="ministry-choice"><input type="checkbox" name="volunteer-interest"><span class="ministry-symbol league-choice">L</span><div><strong>League of Our Lady of Victory</strong><small>Chapel cleaning or priests' meals</small></div></label>
+                  <label class="ministry-choice"><input type="checkbox" name="volunteer-interest"><span class="ministry-symbol maintenance-choice">M</span><div><strong>Maintenance</strong><small>Scheduled work or individual tasks</small></div></label>
+                  <label class="ministry-choice"><input type="checkbox" name="volunteer-interest"><span class="ministry-symbol event-choice">E</span><div><strong>Events</strong><small>Planning, food, setup, staffing, or cleanup</small></div></label>
+                </div>
+                <div class="volunteer-name" id="volunteer-name" hidden><p><strong>Tell the leader who you are</strong><small>A name is requested only because you selected a volunteer interest.</small></p><div class="field-row"><label>First name<input type="text" value="Michael"></label><label>Last name<input type="text" value="Smith"></label></div></div>
+                <div class="interest-note">One-time help is welcome. Some assignments have additional eligibility requirements; those are handled privately after you express interest.</div>
+                <div class="signup-actions"><button class="button ghost signup-back" type="button">Back</button><button class="button primary signup-next" type="submit">Continue</button></div>
+              </form>
+
+              <form class="signup-stage" data-signup-stage="3" hidden>
+                <span class="step-label">Step 4 of 4</span><h2>Finish your account</h2>
+                <label class="channel-choice"><input type="checkbox" checked disabled><span>✉</span><div><strong>Email</strong><small>Required sign-in and fallback channel</small></div></label>
+                <label class="channel-choice"><input type="checkbox"><span>➤</span><div><strong>Connect Telegram</strong><small>Optional private notifications and bot interaction</small></div></label>
+                <a class="membership-link" href="https://mylatinmass.com" target="_blank" rel="noreferrer"><span>⌂</span><div><strong>Interested in becoming a chapel member?</strong><small>Open the chapel's membership information in a separate window. This does not affect your Scheduler account.</small></div><b>↗</b></a>
+                <label class="consent-choice"><input type="checkbox" id="signup-consent" required><span>I have reviewed and accept the chapel privacy notice and communication policy.</span></label>
+                <div class="signup-actions"><button class="button ghost signup-back" type="button">Back</button><button class="button primary" id="complete-signup" type="submit">Create account</button></div>
+              </form>
+
+              <div class="signup-stage signup-complete" data-signup-stage="4" hidden>
+                <div class="complete-mark">✓</div><p class="eyebrow">Account created</p><h2>You are connected</h2><p>Your selected notifications are active. Any volunteer interests were sent privately to the appropriate leader without committing you to an assignment.</p>
+                <div class="approval-status"><div><span class="status ready">Active</span><p><strong>Notification account</strong><small>Change subscriptions or disconnect Telegram at any time.</small></p></div><div><span class="status pending">Optional</span><p><strong>Volunteer follow-up</strong><small>A leader reviews interests and any eligibility requirements privately.</small></p></div></div>
+                <button class="button primary" id="finish-signup-demo">Return to public calendar</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" data-view="calendar">
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">Master calendar</p>
+              <h1>September 2026</h1>
+              <p class="subtitle public-copy">Public visitors see chapel services and liturgical information only. Volunteer information requires sign-in.</p>
+              <p class="source-note">Priest assignments refreshed from the mission schedule CSV · Davie · September 2026</p>
+            </div>
+            <div class="heading-actions">
+              <div class="permission-toggle" id="calendar-permission-toggle" aria-label="Available calendar views">
+                <button data-calendar-mode="public">◉ Public</button>
+                <button data-calendar-mode="ministry" class="active">◇ Ministry</button>
+                <button data-calendar-mode="father">⌾ Father's restricted</button>
+              </div>
+              <div class="segmented" aria-label="Calendar view">
+                <button class="active">Month</button><button>Week</button><button>Day</button>
+              </div>
+              <button class="button secondary" id="print-button">Print</button>
+            </div>
+          </div>
+
+          <div class="calendar-toolbar">
+            <button class="icon-button" aria-label="Previous month">‹</button>
+            <button class="button ghost">Today</button>
+            <button class="icon-button" aria-label="Next month">›</button>
+            <div class="legend">
+              <span><i class="dot sacristan"></i>Sacristan</span>
+              <span><i class="dot server"></i>Altar servers</span>
+              <span><i class="dot usher"></i>Ushers</span>
+            </div>
+          </div>
+
+          <div class="calendar-access-explainer" id="calendar-access-explainer">
+            <span class="access-icon">⌾</span><div><strong>Restricted member layer is on</strong><p>Approved members see openings and assignment information only for ministries to which they belong.</p></div>
+          </div>
+
+          <div class="public-signup-invite">
+            <div><strong>Stay informed. Find a way to help.</strong><p>Get the chapel updates you choose, or explore volunteer opportunities. The calendar remains available without an account.</p></div>
+            <button class="button primary" id="start-signup" type="button">Get updates or volunteer</button>
+          </div>
+
+          <div class="month-calendar" role="grid" aria-label="September 2026 calendar">
+            <div class="weekday">Sun</div><div class="weekday">Mon</div><div class="weekday">Tue</div>
+            <div class="weekday">Wed</div><div class="weekday">Thu</div><div class="weekday">Fri</div><div class="weekday">Sat</div>
+            <div class="day muted"><span>30</span></div><div class="day muted"><span>31</span></div>
+            <div class="day"><span>1</span></div><div class="day"><span>2</span></div><div class="day"><span>3</span></div>
+            <div class="day"><span>4</span><button class="event open" data-event="fri-4"><b>6:30p</b> Low Mass <em>1 opening</em></button><button class="public-opportunity-link" type="button">Volunteer opportunities available</button></div>
+            <div class="day"><span>5</span><button class="event assigned" data-event="sat-5"><b>9:00a</b> Low Mass <em class="private-name">Michael · pending</em><em class="public-opening">Filled</em></button></div>
+            <div class="day"><span>6</span>
+              <button class="event confirmed" data-event="sun-6-7"><b>7:00a</b> Low Mass <em class="priest-assignment">Fr. Gerrity</em><em class="private-name">Michael · confirmed</em><em class="public-opening">Filled</em></button>
+              <button class="event open" data-event="sun-6-9"><b>9:00a</b> Low Mass <em class="priest-assignment">Fr. Gerrity</em><em>1 opening</em></button><button class="public-opportunity-link" type="button">Volunteer opportunities available</button>
+              <button class="event" data-event="sun-6-11"><b>11:00a</b> Sung Mass <em class="priest-assignment">Fr. Gerrity</em><em>Fully staffed</em></button>
+              <button class="event" data-event="sun-6-5"><b>5:00p</b> Low Mass <em class="priest-assignment">Fr. Gerrity</em><em>Fully staffed</em></button>
+            </div>
+            <div class="day"><span>7</span><button class="event" data-event="mon-7"><b>7:15a</b> Low Mass <em>Fully staffed</em></button><div class="private-month-event"><b>10:00a</b><strong>John Anderson</strong><small>Pre-Cana</small></div></div>
+            <div class="day"><span>8</span><div class="private-month-event"><b>9:30a</b><strong>Robert Miller</strong><small>Private appointment</small></div><div class="private-month-event"><b>6:30p</b><strong>Daniel &amp; Catherine Reed</strong><small>Pre-Cana</small></div></div><div class="day"><span>9</span><div class="private-month-event busy"><b>1:00p</b><strong>Travel / unavailable</strong><small>Until 4:00 p.m.</small></div></div><div class="day"><span>10</span><div class="private-month-event"><b>2:00p</b><strong>William Harris</strong><small>Scheduling follow-up</small></div></div>
+            <div class="day"><span>11</span><button class="event" data-event="fri-11"><b>6:30p</b> Low Mass <em>Fully staffed</em></button><div class="private-month-event"><b>3:30p</b><strong>Private sick call</strong><small>Protected details</small></div></div>
+            <div class="day"><span>12</span><button class="event open" data-event="sat-12"><b>9:00a</b> Low Mass <em>1 opening</em></button><button class="public-opportunity-link" type="button">Volunteer opportunities available</button></div>
+            <div class="day"><span>13</span>
+              <button class="event" data-event="sun-13-7"><b>7:00a</b> Low Mass <em class="priest-assignment">Fr. Gerrity</em></button>
+              <button class="event open" data-event="sun-13-11"><b>11:00a</b> Sung Mass <em class="priest-assignment">Fr. Gerrity</em><em>2 openings</em></button><button class="public-opportunity-link" type="button">Volunteer opportunities available</button>
+            </div>
+            <div class="day"><span>14</span><button class="event" data-event="mon-14"><b>7:15a</b> Low Mass</button></div>
+            <div class="day"><span>15</span></div><div class="day"><span>16</span></div><div class="day"><span>17</span></div>
+            <div class="day"><span>18</span><button class="event" data-event="fri-18"><b>6:30p</b> Low Mass</button></div>
+            <div class="day"><span>19</span><button class="event" data-event="sat-19"><b>9:00a</b> Low Mass</button></div>
+            <div class="day"><span>20</span><button class="event open" data-event="sun-20"><b>11:00a</b> Sung Mass <em class="priest-assignment">Fr. Gerrity</em><em>1 opening</em></button></div>
+            <div class="day"><span>21</span><button class="event" data-event="mon-21"><b>7:15a</b> Low Mass</button></div>
+            <div class="day"><span>22</span></div><div class="day"><span>23</span></div><div class="day"><span>24</span></div>
+            <div class="day"><span>25</span><button class="event" data-event="fri-25"><b>6:30p</b> Low Mass</button></div>
+            <div class="day"><span>26</span><button class="event" data-event="sat-26"><b>9:00a</b> Low Mass</button></div>
+            <div class="day"><span>27</span><button class="event open" data-event="sun-27"><b>9:00a</b> Low Mass <em class="priest-assignment">Fr. Gerrity</em><em>1 opening</em></button></div>
+            <div class="day"><span>28</span><button class="event" data-event="mon-28"><b>7:15a</b> Low Mass</button></div>
+            <div class="day"><span>29</span></div><div class="day"><span>30</span></div><div class="day muted"><span>1</span></div>
+            <div class="day muted"><span>2</span></div><div class="day muted"><span>3</span></div>
+          </div>
+        </section>
+
+        <section class="view" data-view="my-schedule" hidden>
+          <div class="page-heading"><div><p class="eyebrow">Volunteer portal</p><h1>My schedule</h1><p class="subtitle">Review and confirm services assigned to you.</p></div></div>
+          <div class="stat-grid">
+            <article class="stat"><strong id="pending-count">1</strong><span>Needs confirmation</span></article>
+            <article class="stat"><strong>2</strong><span>Confirmed this month</span></article>
+            <article class="stat"><strong>0</strong><span>Substitutes requested</span></article>
+          </div>
+          <div class="stack" id="assignment-list">
+            <article class="assignment-card" id="pending-assignment">
+              <div class="date-badge"><strong>5</strong><span>SEP</span></div>
+              <div class="assignment-body"><span class="status pending">Needs confirmation</span><h2>Saturday Low Mass</h2><p>9:00–10:00 a.m. · Sacristan</p><p class="muted-text">B. V. M. on Saturday</p></div>
+              <div class="card-actions"><button class="button primary" id="confirm-assignment">Confirm</button><button class="button ghost need-sub">I cannot serve</button></div>
+            </article>
+            <article class="assignment-card">
+              <div class="date-badge"><strong>6</strong><span>SEP</span></div>
+              <div class="assignment-body"><span class="status confirmed">Confirmed</span><h2>Sunday Low Mass</h2><p>7:00–8:00 a.m. · Sacristan</p><p class="muted-text">XV Sunday after Pentecost</p></div>
+              <div class="card-actions"><button class="button ghost need-sub">Need a substitute</button></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" data-view="availability" hidden>
+          <div class="page-heading"><div><p class="eyebrow">Scheduling preferences</p><h1>Availability</h1><p class="subtitle">These choices guide the scheduler; a hard maximum is never exceeded automatically.</p></div></div>
+          <div class="two-column">
+            <article class="panel">
+              <h2>Regular preferences</h2>
+              <div class="preference-row"><span>Sunday 7:00 a.m.</span><div class="choice"><button class="selected">Prefer</button><button>Available</button><button>Do not schedule</button></div></div>
+              <div class="preference-row"><span>Sunday 9:00 a.m.</span><div class="choice"><button>Prefer</button><button class="selected">Available</button><button>Do not schedule</button></div></div>
+              <div class="preference-row"><span>Sunday 11:00 a.m.</span><div class="choice"><button>Prefer</button><button class="selected">Available</button><button>Do not schedule</button></div></div>
+              <div class="preference-row"><span>Sunday 5:00 p.m.</span><div class="choice"><button>Prefer</button><button>Available</button><button class="selected danger">Do not schedule</button></div></div>
+              <div class="field-row"><label>Desired services per month<input type="number" value="4" min="0" max="31"></label><label>Hard maximum per month<input type="number" value="6" min="0" max="31"></label></div>
+              <button class="button primary save-preferences">Save preferences</button>
+            </article>
+            <article class="panel">
+              <h2>Planned absences</h2>
+              <form id="absence-form">
+                <div class="field-row"><label>From<input type="date" id="absence-from" value="2026-09-18" required></label><label>Through<input type="date" id="absence-to" value="2026-09-20" required></label></div>
+                <label>Optional note<input type="text" id="absence-note" placeholder="Family trip"></label>
+                <button class="button secondary" type="submit">Add absence</button>
+              </form>
+              <ul class="absence-list" id="absence-list"><li><span><strong>Sep 18–20</strong><small>Family trip</small></span><button aria-label="Remove absence">×</button></li></ul>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" data-view="telegram" hidden>
+          <div class="page-heading"><div><p class="eyebrow">Safe simulation</p><h1>Telegram interaction</h1><p class="subtitle">This demonstrates the proposed group announcements and private bot conversation without sending anything to Telegram.</p></div></div>
+          <div class="telegram-layout">
+            <article class="phone telegram-phone chats-phone">
+              <div class="phone-top"><span>9:41</span><span>● ● ●</span></div>
+              <div class="chats-header"><button aria-label="Edit chats">Edit</button><strong>Chats</strong><button aria-label="New message">□</button></div>
+              <div class="chat-search">⌕ <span>Search</span></div>
+              <div class="chat-list">
+                <button class="chat-list-item" data-open-chat="group">
+                  <span class="telegram-avatar">OLV</span>
+                  <span class="chat-list-copy"><strong id="chat-list-group-name">OLV Sacristans</strong><small id="chat-list-group-preview">Daily openings summary · 8:00 AM</small></span>
+                  <span class="chat-list-meta"><time>8:00 AM</time><b>2</b></span>
+                </button>
+                <button class="chat-list-item" data-open-chat="bot">
+                  <span class="telegram-avatar bot-avatar">✠</span>
+                  <span class="chat-list-copy"><strong id="chat-list-bot-name">Chapel Scheduler</strong><small id="chat-list-bot-preview">Your private scheduling assistant</small></span>
+                  <span class="chat-list-meta"><time>9:41 AM</time></span>
+                </button>
+                <button class="chat-list-item muted-chat" disabled>
+                  <span class="telegram-avatar neutral-avatar">HNS</span>
+                  <span class="chat-list-copy"><strong>Holy Name Society</strong><small>Regular Telegram conversation</small></span>
+                  <span class="chat-list-meta"><time>Mon</time></span>
+                </button>
+              </div>
+              <div class="chat-choice-help"><strong>Two different purposes</strong><p><span>1</span> Open the ministry group for announcements.</p><p><span>2</span> Open the bot privately to act on your own schedule.</p></div>
+              <div class="telegram-tabs"><span>Contacts</span><span class="active">Chats</span><span>Settings</span></div>
+            </article>
+
+            <article class="phone telegram-phone" id="group-phone">
+              <div class="phone-top"><span>9:41</span><span>● ● ●</span></div>
+              <div class="telegram-header"><button aria-label="Back">‹</button><div class="telegram-avatar">OLV</div><div><strong id="telegram-group-name">OLV Sacristans</strong><small id="telegram-group-status">8 members</small></div></div>
+              <div class="telegram-thread group-thread" id="group-thread">
+                <div class="telegram-date">Today</div>
+                <div class="tg-message incoming"><b>Chapel Scheduler Bot</b><p><strong>Daily openings summary</strong></p><p>Friday Sep 4 · 6:30 p.m. — 1 usher</p><p>Sunday Sep 6 · 9:00 a.m. — 1 usher</p><p>Saturday Sep 12 · 9:00 a.m. — 1 usher</p><small>8:00 AM</small></div>
+                <div class="tg-message incoming urgent"><b>Chapel Scheduler Bot</b><p><strong>Urgent substitute needed</strong></p><p>Sunday Sep 6 · 9:00 a.m.</p><p>Reply privately to volunteer.</p><small>10:17 AM</small></div>
+              </div>
+              <div class="telegram-compose"><span>Message</span><button>➤</button></div>
+            </article>
+
+            <article class="phone telegram-phone" id="bot-phone">
+              <div class="phone-top"><span>9:41</span><span>● ● ●</span></div>
+              <div class="telegram-header"><button aria-label="Back">‹</button><div class="telegram-avatar bot-avatar">✠</div><div><strong id="telegram-private-name">Chapel Scheduler</strong><small id="telegram-private-status">bot · private chat</small></div></div>
+              <div class="telegram-thread" id="bot-thread">
+                <div class="telegram-date">Today</div>
+                <div class="tg-message incoming"><p>Hello Michael. Your Telegram account is securely linked to Chapel Scheduler.</p><p>What would you like to do?</p><small>9:41 AM</small></div>
+              </div>
+              <div class="quick-replies" id="quick-replies">
+                <button data-bot-action="openings">Show openings</button>
+                <button data-bot-action="absence">Report absence</button>
+                <button data-bot-action="schedule">My schedule</button>
+              </div>
+              <form class="telegram-compose" id="telegram-form"><input aria-label="Message Chapel Scheduler bot" id="telegram-input" placeholder="Message the bot"><button aria-label="Send">➤</button></form>
+            </article>
+          </div>
+          <div class="notice telegram-note"><strong>Privacy boundary:</strong> group posts contain only public service details and opening counts. Confirmations, absences, assignments, and personal information remain in the private bot chat.</div>
+        </section>
+
+        <section class="view" data-view="leader" hidden>
+          <div class="page-heading"><div><p class="eyebrow">Sacristans</p><h1>Draft schedule review</h1><p class="subtitle">Sep 1–Oct 31 · Generated from preferences, absences, and workload balance</p></div><div class="heading-actions"><button class="button secondary">Print draft</button><button class="button primary" id="publish-draft">Publish schedule</button></div></div>
+          <div class="notice warning"><strong>Review needed:</strong> 2 openings and 1 hard conflict require attention before publication.</div>
+          <div class="review-table-wrap">
+            <table class="review-table">
+              <thead><tr><th>Service</th><th>Suggested sacristan</th><th>Reason</th><th>Status</th><th></th></tr></thead>
+              <tbody>
+                <tr><td><strong>Fri, Sep 4 · 6:30 p.m.</strong><small>Low Mass</small></td><td><select><option>— Open —</option><option>David R.</option><option>Michael S.</option></select></td><td>No available preference match</td><td><span class="status review">Opening</span></td><td><button class="text-button suggest">Suggest</button></td></tr>
+                <tr><td><strong>Sat, Sep 5 · 9:00 a.m.</strong><small>Low Mass</small></td><td><select><option>Michael S.</option><option>David R.</option></select></td><td>Preferred; 3 of 4 desired</td><td><span class="status ready">Ready</span></td><td><button class="text-button">Change</button></td></tr>
+                <tr><td><strong>Sun, Sep 6 · 7:00 a.m.</strong><small>Low Mass</small></td><td><select><option>Michael S.</option><option>Joseph T.</option></select></td><td>Preferred; lowest adjusted load</td><td><span class="status ready">Ready</span></td><td><button class="text-button">Change</button></td></tr>
+                <tr class="conflict-row"><td><strong>Sun, Sep 6 · 11:00 a.m.</strong><small>Sung Mass</small></td><td><select><option>David R.</option><option>Joseph T.</option></select></td><td>Also scheduled as an usher</td><td><span class="status conflict">Conflict</span></td><td><button class="text-button resolve">Resolve</button></td></tr>
+                <tr><td><strong>Mon, Sep 7 · 7:15 a.m.</strong><small>Low Mass</small></td><td><select><option>Thomas L.</option><option>David R.</option></select></td><td>Available; balanced workload</td><td><span class="status ready">Ready</span></td><td><button class="text-button">Change</button></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="view" data-view="assistant" hidden>
+          <div class="page-heading"><div><p class="eyebrow">Father's delegated calendar</p><h1>Schedule an event</h1><p class="subtitle">Use plain language for date and time. Add names and private notes only in protected fields.</p></div></div>
+          <div class="assistant-grid">
+            <article class="assistant-chat">
+              <div class="chat-message bot">What would you like to schedule? Please omit names and confidential details.</div>
+              <div class="chat-message user" id="sample-request">Pre-Cana next Tuesday at 6:30 for one hour</div>
+              <form id="assistant-form"><label for="assistant-input" class="sr-only">Schedule request</label><input id="assistant-input" value="Pre-Cana next Tuesday at 6:30 for one hour"><button class="button primary">Interpret</button></form>
+            </article>
+            <article class="proposal-card" id="proposal-card">
+              <span class="status review">Proposed — not saved</span>
+              <h2>Pre-Cana</h2>
+              <dl><div><dt>Date</dt><dd>Tuesday, September 8, 2026</dd></div><div><dt>Time</dt><dd>6:30–7:30 p.m. EDT</dd></div><div><dt>Calendar</dt><dd>Father's private calendar</dd></div><div><dt>Others see</dt><dd>Father unavailable</dd></div><div><dt>Conflict</dt><dd class="success-text">None found</dd></div></dl>
+              <div class="protected-summary" id="protected-summary">
+                <span class="lock-badge" aria-hidden="true">⌾</span>
+                <div><strong>Protected details</strong><p id="protected-summary-text">No name or private note added</p></div>
+                <button class="button secondary" id="open-protected">Add protected details</button>
+              </div>
+              <div class="card-actions"><button class="button primary" id="save-proposal">Confirm and save</button><button class="button ghost">Edit</button></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" data-view="father-calendar" hidden>
+          <div class="page-heading">
+            <div><p class="eyebrow">Restricted calendar</p><h1>Father's private calendar</h1><p class="subtitle">Full details are visible only to Father and delegates he has personally approved.</p></div>
+            <div class="heading-actions"><span class="access-pill">⌾ Authorized delegate</span><button class="button secondary">Week</button></div>
+          </div>
+
+          <div class="privacy-demo">
+            <div class="private-week">
+              <div class="private-week-head"><button class="icon-button" aria-label="Previous week">‹</button><strong>September 7–13, 2026</strong><button class="icon-button" aria-label="Next week">›</button></div>
+              <div class="private-day-row"><div class="private-date"><strong>7</strong><span>MON</span></div><div class="private-day-events"><article class="private-event public-service"><time>7:15–8:00 a.m.</time><div><strong>Low Mass</strong><small>Our Lady of Victory Chapel · Celebrant</small></div><span>Public</span></article><article class="private-event protected-event"><time>10:00–11:00 a.m.</time><div><strong>John Anderson</strong><small>Pre-Cana · First meeting</small></div><span>Protected</span></article></div></div>
+              <div class="private-day-row"><div class="private-date"><strong>8</strong><span>TUE</span></div><div class="private-day-events"><article class="private-event protected-event"><time>9:30–10:15 a.m.</time><div><strong>Robert Miller</strong><small>Private appointment</small></div><span>Protected</span></article><article class="private-event protected-event"><time>6:30–7:30 p.m.</time><div><strong>Daniel and Catherine Reed</strong><small>Pre-Cana</small></div><span>Protected</span></article></div></div>
+              <div class="private-day-row"><div class="private-date"><strong>9</strong><span>WED</span></div><div class="private-day-events"><article class="private-event busy-event"><time>1:00–4:00 p.m.</time><div><strong>Travel / unavailable</strong><small>No additional details</small></div><span>Private</span></article></div></div>
+              <div class="private-day-row"><div class="private-date"><strong>10</strong><span>THU</span></div><div class="private-day-events"><article class="private-event public-service"><time>10:00–11:00 a.m.</time><div><strong>Funeral Mass</strong><small>Our Lady of Victory Chapel · Celebrant</small></div><span>Public</span></article><article class="private-event protected-event"><time>2:00–2:30 p.m.</time><div><strong>William Harris</strong><small>Scheduling follow-up</small></div><span>Protected</span></article></div></div>
+              <div class="private-day-row"><div class="private-date"><strong>11</strong><span>FRI</span></div><div class="private-day-events"><article class="private-event protected-event"><time>3:30–4:30 p.m.</time><div><strong>Private sick call</strong><small>Address stored in protected record</small></div><span>Protected</span></article><article class="private-event public-service"><time>7:00–8:00 p.m.</time><div><strong>Low Mass</strong><small>Our Lady of Victory Chapel · Celebrant</small></div><span>Public</span></article></div></div>
+            </div>
+
+            <aside class="permission-panel">
+              <p class="eyebrow">Permission preview</p><h2>Who sees what?</h2>
+              <div class="permission-card selected"><span class="permission-icon full">⌾</span><div><strong>Father and approved delegates</strong><p>Names, minimal private notes, times, and conflicts</p></div><b>Full details</b></div>
+              <div class="permission-card"><span class="permission-icon busy">◷</span><div><strong>Main administrators</strong><p>Private times appear only as “Father unavailable”</p></div><b>Busy only</b></div>
+              <div class="permission-card"><span class="permission-icon hidden">—</span><div><strong>Ministry leaders and members</strong><p>Only relevant public services and celebrant assignments</p></div><b>Private hidden</b></div>
+              <div class="permission-card"><span class="permission-icon hidden">—</span><div><strong>Public visitors</strong><p>Public services may show Father as celebrant</p></div><b>Private hidden</b></div>
+              <div class="privacy-rule"><strong>Important:</strong> being a main administrator does not grant access to protected appointment details. Father controls delegation.</div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="view" data-view="documents" hidden>
+          <div class="page-heading"><div><p class="eyebrow">Coming after the pilot</p><h1>Instructions</h1><p class="subtitle">A preview of the planned PDF and photo-guide repository.</p></div></div>
+          <div class="search-box"><span>⌕</span><input type="search" placeholder="Search filenames, categories, or PDF text"></div>
+          <div class="document-grid">
+            <article class="document-card"><span class="file-icon">PDF</span><div><h2>Sunday Sung Mass setup</h2><p>Sacristans · Sung Mass</p><small>Updated Aug 12, 2026</small></div><button class="button ghost">Download</button></article>
+            <article class="document-card"><span class="file-icon photo">8</span><div><h2>First Friday altar guide</h2><p>Sacristans · Photo guide</p><small>8 ordered photos</small></div><button class="button ghost">View</button></article>
+            <article class="document-card"><span class="file-icon">PDF</span><div><h2>Server position notes</h2><p>Altar servers · Positions</p><small>Updated Jul 28, 2026</small></div><button class="button ghost">Download</button></article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="event-dialog">
+      <button class="dialog-close" aria-label="Close">×</button>
+      <p class="eyebrow">Sunday, September 6</p>
+      <h2>9:00 a.m. Low Mass</h2>
+      <p>XV Sunday after Pentecost</p>
+      <hr>
+      <div class="private-detail">
+        <h3>Sacristan</h3><p><strong>1 opening</strong></p>
+        <button class="button primary" id="volunteer-button">Volunteer for this service</button>
+      </div>
+      <div class="public-detail"><h3>Service information</h3><p><strong>Confessions:</strong> 8:30 a.m. · English and Spanish</p><p><strong>Rosary:</strong> 8:30 a.m.</p><p><strong>Celebrant:</strong> Fr. Gerrity</p><p>Our Lady of Victory Chapel · Davie, Florida</p><p class="source-detail">Priest assignment imported from the mission schedule CSV. Volunteer staffing remains fictional demo data.</p></div>
+      <p class="dialog-note">You volunteer for the service. A ministry leader assigns any specific position.</p>
+    </dialog>
+
+    <dialog id="sub-dialog">
+      <button class="dialog-close" aria-label="Close">×</button>
+      <p class="eyebrow">Substitution</p><h2>Choose a qualified substitute</h2>
+      <div class="sub-service"><span class="date-badge"><strong>6</strong><small>SEP</small></span><div><strong>Sunday Low Mass</strong><p>7:00–8:00 a.m. · Sacristan</p></div></div>
+      <p class="sub-intro">Select whom Chapel Scheduler should contact first. Their personal contact details remain private. You remain assigned until someone accepts.</p>
+      <div class="sub-filters"><span>✓ Qualified</span><span>✓ Available</span><span>✓ No conflict</span></div>
+      <fieldset class="sub-candidates" id="sub-candidates">
+        <legend class="sr-only">Qualified substitute candidates</legend>
+        <label class="sub-candidate recommended"><input type="radio" name="substitute" value="David R." checked><span class="candidate-avatar">DR</span><span class="candidate-info"><strong>David R. <em>Recommended</em></strong><small>Prefers early Mass · 2 of 4 desired assignments</small><span class="candidate-tags"><i>Available</i><i>Lowest workload</i></span></span><span class="candidate-rank">1</span></label>
+        <label class="sub-candidate"><input type="radio" name="substitute" value="Joseph T."><span class="candidate-avatar">JT</span><span class="candidate-info"><strong>Joseph T.</strong><small>Available · 4 of 4 desired assignments</small><span class="candidate-tags"><i>Available</i></span></span><span class="candidate-rank">2</span></label>
+        <label class="sub-candidate"><input type="radio" name="substitute" value="Thomas L."><span class="candidate-avatar">TL</span><span class="candidate-info"><strong>Thomas L.</strong><small>Available · 5 of 6 maximum assignments</small><span class="candidate-tags"><i>Available</i><i>Near maximum</i></span></span><span class="candidate-rank">3</span></label>
+      </fieldset>
+      <label>Optional message<textarea rows="2" id="sub-note" placeholder="The system sends this privately; do not include sensitive details"></textarea></label>
+      <label class="consent-choice compact"><input type="checkbox" id="next-candidate" checked><span>If the selected member declines or does not respond within 12 hours, offer it to the next best-balanced qualified member.</span></label>
+      <div class="sub-policy"><strong>Inside 48 hours:</strong> all qualified available members are notified at once and the ministry leader is alerted immediately.</div>
+      <div class="card-actions"><button class="button primary" id="submit-sub">Send substitute request</button><button class="button ghost dialog-cancel">Cancel</button></div>
+    </dialog>
+
+    <dialog id="sub-sent-dialog" class="sub-sent-dialog">
+      <button class="dialog-close" aria-label="Close">×</button>
+      <div class="complete-mark">✓</div><p class="eyebrow">Request sent</p><h2 id="sub-sent-title">David has been contacted</h2>
+      <p>Chapel Scheduler sent the request privately by the member's available channels. Your personal contact information was not shared.</p>
+      <div class="request-timeline"><div class="active"><span>1</span><p><strong>Request sent</strong><small id="sub-sent-member">David R. · awaiting response</small></p></div><div><span>2</span><p><strong>Acceptance</strong><small>The assignment changes only after acceptance.</small></p></div><div><span>3</span><p><strong>You are notified</strong><small>Your calendar and the ministry roster update automatically.</small></p></div></div>
+      <div class="notice warning"><strong>You are still assigned.</strong> If unresolved, the next qualified member will be contacted after 12 hours and the leader will be alerted at 48 hours.</div>
+      <button class="button primary dialog-close-action">Done</button>
+    </dialog>
+
+    <dialog id="protected-dialog" class="protected-dialog">
+      <button class="dialog-close" aria-label="Close">×</button>
+      <div class="protected-heading">
+        <span class="large-lock" aria-hidden="true">⌾</span>
+        <div><p class="eyebrow">Protected chapel record</p><h2>Private appointment details</h2></div>
+      </div>
+      <div class="privacy-callout"><strong>These fields stay inside Chapel Scheduler.</strong> They are not included in the plain-language request and are not sent to an external AI provider.</div>
+      <form id="protected-form">
+        <label>Person's name<input type="text" id="protected-name" autocomplete="off" placeholder="Enter name"></label>
+        <label>Minimal scheduling note<textarea id="protected-note" rows="4" placeholder="Example: First Pre-Cana meeting"></textarea></label>
+        <p class="field-help">Do not enter sacramental records, counseling notes, APR reports, medical details, or other case information.</p>
+        <div class="retention-note"><strong>Retention:</strong> name and note are removed one year after the appointment. Other users see only “Father unavailable.”</div>
+        <div class="card-actions"><button class="button primary" type="submit">Save protected details</button><button class="button ghost dialog-cancel" type="button">Cancel</button></div>
+      </form>
+    </dialog>
+
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <aside class="tour-panel" id="tour-panel" hidden aria-label="Guided stakeholder demo">
+      <div class="tour-panel-head"><div><span id="tour-progress">1 of 10</span><strong>Stakeholder demo</strong></div><button id="tour-close" aria-label="Close guided demo">×</button></div>
+      <div class="tour-panel-body">
+        <p class="eyebrow" id="tour-audience">Public experience</p>
+        <h2 id="tour-title">Start with the public calendar</h2>
+        <p id="tour-script">A chapel member can check Mass times without signing in. No volunteer or restricted-calendar information is exposed.</p>
+        <div class="tour-action" id="tour-action"><strong>Show:</strong><span>Mass times, Confessions, Rosary, and the absence of staffing information.</span></div>
+        <div class="tour-note"><blockquote id="tour-quote">“The public calendar is intentionally simple. It answers when Mass is without revealing who serves.”</blockquote></div>
+      </div>
+      <div class="tour-panel-actions"><button class="button ghost" id="tour-back">Back</button><button class="button primary" id="tour-next">Next</button></div>
+    </aside>
+    <script src="app.js"></script>
+  </body>
+</html>

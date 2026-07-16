@@ -39,6 +39,10 @@ Every workflow must contain:
 
 ## Modeling principles
 
+### Human-Centered Ministry Principle
+
+The OLV Operations Platform exists to support the ministries of the chapel, not to replace them. The platform should automate repetitive administrative work, improve communication, and reduce errors, while preserving meaningful opportunities for parishioners to contribute their time, talents, and judgment. Whenever possible, the system should assist people in carrying out ministry rather than eliminate their participation.
+
 - Model real chapel operations rather than screens.
 - Keep operational cases, liturgical events, business rules, UX, and technical implementation distinct.
 - Prefer authentic liturgical terminology. Research uncertain terminology before modeling it.
@@ -60,4 +64,3 @@ After each logical workflow group:
 - Update permissions, notifications, UX guidance, tests, and architectural implications.
 - Check for contradictions, omissions, and duplication.
 - Produce a documentation-consistency report.
-

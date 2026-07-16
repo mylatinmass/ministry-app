@@ -120,6 +120,8 @@ Not included in the September pilot: document repository, detailed scheduler exp
 ### Future readiness, not an initial commitment
 
 - Additional ministries and service areas using the same shift/task pattern
+- Cross-functional operational cases linking liturgy, Schola, hospitality, meals, facilities, venue reservations, communications, fundraising, setup, cleanup, and volunteer staffing
+- Banquets, potlucks, major-feast hospitality, Confirmation receptions, and annual fundraising events
 - Invitation-only ceremonial staffing, including Apostles, bier bearers, and canopy bearers
 - Priest and delegate scheduling across chapels
 - Sick-call privacy and priest travel buffers
@@ -145,6 +147,7 @@ A notification-only account needs only a verified email address. Telegram linkin
 A chapel organization or ministry has leaders, members, service areas, opportunity templates, documents, and permission rules. Initial examples include:
 
 - Sacristans, altar servers, and ushers;
+- the Schola, with music and ceremony requirements defined and validated by its subject-matter expert;
 - the League of Our Lady of Victory, with separately approved Chapel Cleaning and Priests' Meals service areas;
 - Maintenance;
 - Events, with separately approved planning, food preparation, setup, staffing, and cleanup service areas;
@@ -174,6 +177,8 @@ An event includes:
 An operational case coordinates a real-world matter that may contain several events, decisions, contacts, permissions, and tasks. Examples include Funeral, Wedding, Baptism, and Anniversary Observance. A liturgical event is a rite or service within a case, such as Requiem Mass, Reception of the Body, Absolution, Burial Service, Nuptial Mass, or Baptism.
 
 Cases, liturgical events, ordinary calendar events, and staffing duties remain distinct. For example, a Funeral case may link a viewing at a funeral home, Rosary, Requiem Mass at the chapel, and burial at a cemetery. A simple Requiem selected for an existing ferial Mass does not create a Funeral case.
+
+A major operational case may also contain non-liturgical workstreams without collapsing them into the liturgical event. For example, a Confirmation case may link the Confirmation ceremony, Schola requirements, a reception or banquet, venue and room reservations, food, communications, setup, cleanup, and volunteer opportunities. A major feast or procession may likewise link its Mass and procession to a potluck or banquet. Each workstream retains its own owner, permissions, tasks, status, and SME-approved workflow while sharing the case-level date, dependencies, and change notifications.
 
 Ceremony cases use guided, conditional intake. Family-facing questions remain separate from internal liturgical planning. Restricted contact information is stored in a separately permissioned linked record and is never copied into public or ordinary ministry calendars.
 
@@ -1021,6 +1026,8 @@ These are not blockers to approving the architecture, but must be resolved befor
 
 - Confirm the exact First Sunday of Advent 2026 rollout date and internal milestone calendar.
 - Verify all altar-server staffing templates with the altar-server leader.
+- Identify the Schola SME; document Schola participation, music-selection, availability, staffing, notification, and exception workflows; then decide whether a focused Schola capability belongs in the initial Scheduling release. Evaluate the webmaster's existing Schola components for reuse only after the workflow is defined.
+- Identify Hospitality/Events, facilities, venue, food, fundraising, setup, and cleanup SMEs before designing banquets, potlucks, Confirmation receptions, major-feast events, or the annual fundraising gala.
 - Confirm St. Philomena Foundation Mass precedence behavior.
 - Build the annual local-service rule list over time.
 - Identify the 1962 Ordo maintainer and supported-use terms.

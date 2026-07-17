@@ -763,9 +763,9 @@ Update this document whenever a significant requirement, assumption, rationale, 
 
 **Underlying operational need:** The platform is being shaped through extensive operational discovery. Developers and future maintainers need durable, reviewable requirements instead of relying on conversational history or personal memory.
 
-**Proposed functional requirement:** Maintain version-controlled vision, workflows, domain model, UX guidance, technical decisions, tests, rationale, open questions, and change history. Interview and approve one workflow at a time. Reconcile documents after logical workflow groups.
+**Proposed functional requirement:** Maintain version-controlled vision, workflows, domain model, UX guidance, technical decisions, tests, rationale, open questions, and change history. Interview and approve one workflow at a time. Permit independent Technical Steward review through companion review records that cannot directly alter approved requirements. Require an approved Requirements Change Proposal before technical review results in coordinated changes to authoritative workflows or acceptance criteria. Reconcile documents after logical workflow groups.
 
-**Proposed technical solution:** Repository-managed Markdown specifications linked to future decision records, acceptance tests, release notes, and an access-controlled approval register.
+**Proposed technical solution:** Repository-managed Markdown specifications, one optional technical-review companion per workflow, requirements-change templates, protected pull-request review for authoritative documents, and links to future decision records, acceptance tests, release notes, and an access-controlled approval register.
 
 **Reasoning:** The complexity belongs in explicit rules and acceptance criteria. Without controlled documentation, implementation choices can silently redefine operations.
 

@@ -37,6 +37,55 @@ Every workflow must contain:
 - Open Questions
 - Potential Existing Capabilities to Reuse
 
+## Requirements lifecycle and technical review
+
+The project uses one requirements lifecycle:
+
+**Draft Workflow → Technical Steward Review → Open Questions and Technical Constraints → Product Owner Resolution → Stakeholder or Priest Review when needed → Approved Workflow → Implementation**
+
+Technical review is part of requirements development, not a competing specification process. The authoritative product behavior remains in the workflow specifications and related functional documents.
+
+### Separate approval and review status
+
+A workflow's product-approval status and technical-review status are tracked separately. Opening or reopening technical review does not silently withdraw an existing product approval. An already approved workflow follows this path:
+
+**Approved Workflow → Technical Review Companion → Requirements Change Proposal if needed → Product Owner and applicable stakeholder approval → Coordinated Documentation Update → Revised Approved Workflow**
+
+### Authority boundaries
+
+- **Product Owner** owns functional requirements, business rules, acceptance criteria, priorities, and approval of requirements changes.
+- **Technical Steward** may question or challenge any assumption or requirement; identify technical constraints, risks, and existing capabilities; and recommend alternative functional or technical solutions.
+- **Workflow Steward or subject-matter expert** validates real-world practice, terminology, exceptions, and ministry-specific behavior.
+- **Stakeholder Review Group or Father** reviews changes that exceed delegated product authority, alter chapel policy, affect liturgical judgment, or require broader confirmation.
+- **AI assistants** may analyze documents, find inconsistencies, and draft review items or proposed revisions. They may not treat their recommendation as approval or modify approved requirements automatically.
+
+The underlying operational need is preserved unless the Product Owner and applicable stakeholders determine that the chapel's need has changed. A functional requirement may be revised when review identifies a better way to meet that need. Technical solutions remain subject to technical evaluation and later architecture decisions.
+
+### Protected authoritative documents
+
+Technical review does not directly edit an approved workflow, business rule, or acceptance criterion. Review comments are recorded in the workflow's technical-review companion under `docs/reviews/workflows/`.
+
+If review recommends an actual requirements change:
+
+1. Record a Requirements Change Proposal using the project template.
+2. Identify the operational need being preserved, the exact proposed change, alternatives, dependencies, and affected documents.
+3. Record the Product Owner response and any required stakeholder or priest decision.
+4. Do not modify authoritative requirements while the proposal is pending.
+5. After approval, update every affected workflow, rationale record, architecture section, permission, notification rule, business rule, acceptance criterion, open question, and future test consistently.
+6. Preserve the technical review and change proposal as decision history.
+
+Questions resolved without changing an approved requirement do not require a Requirements Change Proposal.
+
+### Non-duplication rules
+
+- Workflow specifications define **what** the product must do.
+- The requirements-rationale document explains **why** significant requirements exist.
+- Technical-review companions record questions, constraints, alternatives, and recommendations about a particular workflow.
+- Requirements Change Proposals authorize proposed changes before authoritative documents are edited.
+- Technical architecture records accepted implementation direction after review.
+
+Review records reference workflow sections and rationale IDs instead of copying their full contents. The workflow's **Potential Existing Capabilities to Reuse** section identifies candidates; the technical-review companion records the Technical Steward's evaluation of those candidates.
+
 ## Modeling principles
 
 ### Human-Centered Ministry Principle
@@ -76,6 +125,8 @@ After each approved workflow:
 
 - Save the workflow specification.
 - Record decisions, rules, open questions, and affected-document updates.
+- Create or update its technical-review companion when technical review begins.
+- Keep unapproved recommendations outside the authoritative workflow.
 
 After each logical workflow group:
 
@@ -83,3 +134,5 @@ After each logical workflow group:
 - Update permissions, notifications, UX guidance, tests, and architectural implications.
 - Check for contradictions, omissions, and duplication.
 - Produce a documentation-consistency report.
+
+See `docs/reviews/README.md` for the practical review, GitHub, and change-control procedure.

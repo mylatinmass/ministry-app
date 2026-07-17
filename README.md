@@ -12,6 +12,7 @@ The project is currently in design and stakeholder-validation. The browser proof
 - [`docs/design/stakeholder-and-webmaster-questions.md`](docs/design/stakeholder-and-webmaster-questions.md) — validation questions
 - [`docs/project-documentation-framework.md`](docs/project-documentation-framework.md) — authoritative documentation process and structure
 - [`docs/requirements-rationale-and-design-considerations.md`](docs/requirements-rationale-and-design-considerations.md) — operational rationale, assumptions, alternatives, dependencies, and technical-review questions behind the requirements
+- [`docs/reviews/README.md`](docs/reviews/README.md) — lightweight Technical Steward review, requirements change-control, and GitHub collaboration process
 - [`docs/specification/workflows/`](docs/specification/workflows/) — approved workflow specifications
 - [`docs/presentations/chapel-scheduler-august-8-2026.pptx`](docs/presentations/chapel-scheduler-august-8-2026.pptx) — editable stakeholder presentation
 - [`poc/`](poc/) — browser-only stakeholder demonstration

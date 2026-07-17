@@ -1022,6 +1022,7 @@ Ordo import + recurring rules + manual events
 
 ## 18. Open decisions and validation items
 
+- Determine with Father and the Holy Name Society President whether HNS membership should include a positive expectation of practical chapel service according to each member's circumstances and abilities. Treat this as an organizational and pastoral policy, not an automatically enforced software rule.
 These are not blockers to approving the architecture, but must be resolved before the relevant feature is built.
 
 - Confirm the exact First Sunday of Advent 2026 rollout date and internal milestone calendar.

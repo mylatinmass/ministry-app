@@ -339,7 +339,7 @@ Update this document whenever a significant requirement, assumption, rationale, 
 
 ### R-011 — Consolidated confirmation and decline of new assignments
 
-**Status:** In development; decisions below are accepted so far but the workflow interview is not complete.
+**Status:** Approved by Product Owner for stakeholder and technical review.
 
 **Underlying operational need:** Auto-assignment is necessary, but volunteers should not be silently committed to services they cannot perform. At the same time, non-response should not automatically create an opening or reward disengagement.
 
@@ -355,7 +355,7 @@ Update this document whenever a significant requirement, assumption, rationale, 
 
 **Edge cases:** A leader-recorded confirmation is disputed; assignments overlap; multiple Masses occur on the same day; a family contact manages several people; confirmation occurs near the normal one-week service reminder. Confirm All is disabled for conflicts, while non-conflicting assignments remain bulk-confirmable. Same-day multiple Masses are a blocking burden unless the volunteer explicitly allowed them; permitted combinations still receive a neutral notice.
 
-**Unresolved questions:** The next unanswered workflow question is whether a minor with guardian-approved independent access and the Family Scheduling Contact may both confirm, with the first valid response taking effect. Remaining exception, permission, notification, and acceptance-criteria review is also incomplete.
+**Unresolved questions:** Exact channel presentation, maximum consolidated-message size, final escalation timing after a confirmation becomes overdue, and whether the Chapel Coordinator needs a consolidated overdue dashboard.
 
 **Dependencies:** R-003, R-008, R-009, R-010, R-012, R-013, R-018.
 
@@ -796,9 +796,8 @@ The following are not necessarily product defects; they are areas where current 
 5. **Ceremony staffing versus ministry workflows:** Ceremony cases identify required staffing, but each ministry must validate qualifications, minimums, backup rules, and assignment behavior.
 6. **Schola scope:** Schola is operationally important and existing capabilities may be reusable, but its end-to-end workflow still requires SME review before inclusion in a release.
 7. **Facilities and hospitality:** Cases may reserve rooms or link receptions, but banquet, potluck, venue, food, setup, cleanup, and fundraising workflows remain future and require their own stewards.
-8. **Minor confirmation authority:** The confirmation workflow interview paused before resolving concurrent guardian/minor confirmation behavior.
-9. **Retention periods:** Three-year assignment history, seven-year security audit, one-year ceremony contacts/private appointment notes, and APR-specific periods remain provisional pending policy review.
-10. **Production scope and dates:** Early planning dates and phase assumptions should be re-baselined after workflow completion and technical feasibility review rather than treated as current commitments.
+8. **Retention periods:** Three-year assignment history, seven-year security audit, one-year ceremony contacts/private appointment notes, and APR-specific periods remain provisional pending policy review.
+9. **Production scope and dates:** Early planning dates and phase assumptions should be re-baselined after workflow completion and technical feasibility review rather than treated as current commitments.
 
 ## 6. Technical feasibility review checklist
 

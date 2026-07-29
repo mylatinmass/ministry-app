@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Link } from "gatsby"
+import { Link } from "../../compat/gatsby"
 import {
   ArrowLeftIcon,
   Bars3Icon,

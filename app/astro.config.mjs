@@ -1,7 +1,8 @@
 import { defineConfig } from "astro/config"
 import react from "@astrojs/react"
 import vercel from "@astrojs/vercel"
-import { fileURLToPath } from "node:url"
+
+const isDevelopment = process.env.NODE_ENV === "development"
 
 export default defineConfig({
   site: "https://www.mylatinmass.com",
@@ -12,15 +13,6 @@ export default defineConfig({
   }),
   integrations: [react()],
   vite: {
-    ssr: {
-      noExternal: true,
-    },
-    resolve: {
-      alias: {
-        gatsby: fileURLToPath(
-          new URL("./src/react/compat/gatsby.jsx", import.meta.url),
-        ),
-      },
-    },
+    ssr: isDevelopment ? {} : { noExternal: true },
   },
 })

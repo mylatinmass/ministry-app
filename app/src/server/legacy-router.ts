@@ -1,26 +1,79 @@
-import ministryDetail from "./legacy/ministry-detail.js"
-import ministryInvitationResponse from "./legacy/ministry-invitation-response.js"
-import ministryList from "./legacy/ministry-list.js"
-import ministryLogin from "./legacy/ministry-login.js"
-import ministryMembers from "./legacy/ministry-members.js"
-import ministryMembershipRequestResponse from "./legacy/ministry-membership-request-response.js"
-import ministryProfileSeparation from "./legacy/ministry-profile-separation.js"
-import ministryProfile from "./legacy/ministry-profile.js"
-import ministryProfiles from "./legacy/ministry-profiles.js"
-import ministrySession from "./legacy/ministry-session.js"
+type LegacyHandler = (event: any) => Promise<any>
 
-const handlers: Record<string, (event: any) => Promise<any>> = {
-  "ministry-detail": ministryDetail.handler,
-  "ministry-invitation-response": ministryInvitationResponse.handler,
-  "ministry-list": ministryList.handler,
-  "ministry-login": ministryLogin.handler,
-  "ministry-members": ministryMembers.handler,
-  "ministry-membership-request-response":
-    ministryMembershipRequestResponse.handler,
-  "ministry-profile-separation": ministryProfileSeparation.handler,
-  "ministry-profile": ministryProfile.handler,
-  "ministry-profiles": ministryProfiles.handler,
-  "ministry-session": ministrySession.handler,
+type LegacyModule = {
+  handler: LegacyHandler
+}
+
+let handlersPromise: Promise<Record<string, LegacyHandler>> | null = null
+
+const unwrap = (module: any): LegacyModule =>
+  (module.default || module) as LegacyModule
+
+const loadLegacyHandlers = async () => {
+  if (import.meta.env.DEV) {
+    const { createRequire } = await import("node:module")
+    const require = createRequire(import.meta.url)
+    return {
+      "ministry-detail": require("./legacy/ministry-detail.js").handler,
+      "ministry-invitation-response":
+        require("./legacy/ministry-invitation-response.js").handler,
+      "ministry-list": require("./legacy/ministry-list.js").handler,
+      "ministry-login": require("./legacy/ministry-login.js").handler,
+      "ministry-members": require("./legacy/ministry-members.js").handler,
+      "ministry-membership-request-response":
+        require("./legacy/ministry-membership-request-response.js").handler,
+      "ministry-profile-separation":
+        require("./legacy/ministry-profile-separation.js").handler,
+      "ministry-profile": require("./legacy/ministry-profile.js").handler,
+      "ministry-profiles": require("./legacy/ministry-profiles.js").handler,
+      "ministry-session": require("./legacy/ministry-session.js").handler,
+    }
+  }
+
+  const [
+    ministryDetail,
+    ministryInvitationResponse,
+    ministryList,
+    ministryLogin,
+    ministryMembers,
+    ministryMembershipRequestResponse,
+    ministryProfileSeparation,
+    ministryProfile,
+    ministryProfiles,
+    ministrySession,
+  ] = await Promise.all([
+    import("./legacy/ministry-detail.js"),
+    import("./legacy/ministry-invitation-response.js"),
+    import("./legacy/ministry-list.js"),
+    import("./legacy/ministry-login.js"),
+    import("./legacy/ministry-members.js"),
+    import("./legacy/ministry-membership-request-response.js"),
+    import("./legacy/ministry-profile-separation.js"),
+    import("./legacy/ministry-profile.js"),
+    import("./legacy/ministry-profiles.js"),
+    import("./legacy/ministry-session.js"),
+  ])
+
+  return {
+    "ministry-detail": unwrap(ministryDetail).handler,
+    "ministry-invitation-response":
+      unwrap(ministryInvitationResponse).handler,
+    "ministry-list": unwrap(ministryList).handler,
+    "ministry-login": unwrap(ministryLogin).handler,
+    "ministry-members": unwrap(ministryMembers).handler,
+    "ministry-membership-request-response":
+      unwrap(ministryMembershipRequestResponse).handler,
+    "ministry-profile-separation":
+      unwrap(ministryProfileSeparation).handler,
+    "ministry-profile": unwrap(ministryProfile).handler,
+    "ministry-profiles": unwrap(ministryProfiles).handler,
+    "ministry-session": unwrap(ministrySession).handler,
+  }
+}
+
+const getHandlers = () => {
+  if (!handlersPromise) handlersPromise = loadLegacyHandlers()
+  return handlersPromise
 }
 
 const toEvent = async (request: Request) => {
@@ -41,7 +94,7 @@ const toEvent = async (request: Request) => {
 }
 
 export const runLegacyHandler = async (name: string, request: Request) => {
-  const handler = handlers[name]
+  const handler = (await getHandlers())[name]
   if (!handler) return null
 
   const result = await handler(await toEvent(request))

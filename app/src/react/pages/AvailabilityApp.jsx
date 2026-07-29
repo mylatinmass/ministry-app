@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Link } from "gatsby"
+import { Link } from "../compat/gatsby"
 import { ArrowLeftIcon } from "@heroicons/react/24/outline"
 import BrowserLocation from "./BrowserLocation"
 import MinistryAvailability from "../components/ministry/MinistryAvailability"

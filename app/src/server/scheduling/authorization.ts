@@ -1,7 +1,5 @@
 import type { PoolClient } from "pg"
-import ministryAuth from "../legacy/helper/ministry-auth.js"
-
-const { getMinistryIdentityContext, getMinistryTokenPayload } = ministryAuth
+import { getLegacyAuth } from "../legacy-auth"
 
 export type MinistryIdentityContext = {
   actor: Record<string, any>
@@ -16,6 +14,10 @@ export const getIdentityContext = async (
 ): Promise<MinistryIdentityContext> => {
   const jwtSecret = process.env.JWT_SECRET_KEY
   if (!jwtSecret) throw new Error("JWT_SECRET_KEY is not configured")
+  const {
+    getMinistryIdentityContext,
+    getMinistryTokenPayload,
+  } = await getLegacyAuth()
 
   const payload = getMinistryTokenPayload(
     { headers: Object.fromEntries(request.headers.entries()) },

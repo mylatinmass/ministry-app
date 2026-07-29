@@ -2,6 +2,8 @@
 import AppLayout from "../layouts/AppLayout.astro"
 import MinistryPage from "../react/pages/ministry/[slug].jsx"
 
+export const prerender = false
+
 const { slug } = Astro.params
 ---
 

@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Link } from "gatsby"
+import { Link } from "../compat/gatsby"
 import { Helmet } from "react-helmet"
 import Layout from "../components/Layout"
 import Seo from "../components/Seo"

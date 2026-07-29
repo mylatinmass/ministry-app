@@ -528,7 +528,11 @@ const loadEventDetails = async (
   const canManageEvent = (
     await getMinistryAccess(client, context.user, event.ministry_id)
   ).canManage
-  if (!canViewAny && !canManageEvent) {
+  const publicView = !canViewAny && !canManageEvent
+  if (
+    publicView &&
+    !["published", "cancelled", "completed"].includes(event.status)
+  ) {
     throw Object.assign(new Error("You do not have access to this event"), {
       status: 403,
     })
@@ -582,9 +586,11 @@ const loadEventDetails = async (
     `,
     [eventId],
   )
-  const manageableMinistryIds = participantResult.rows
-    .filter((_, index) => accessChecks[index].canManage)
-    .map((participant) => participant.ministry_id)
+  const manageableMinistryIds = publicView
+    ? []
+    : participantResult.rows
+        .filter((_, index) => accessChecks[index].canManage)
+        .map((participant) => participant.ministry_id)
   if (
     canManageEvent &&
     !manageableMinistryIds.includes(event.ministry_id)
@@ -592,26 +598,28 @@ const loadEventDetails = async (
     manageableMinistryIds.push(event.ministry_id)
   }
 
-  const assignmentResult = await client.query(
-    `
-      SELECT
-        assignment.id,
-        assignment.responsibility_id,
-        assignment.user_id,
-        assignment.status,
-        assignment.quantity,
-        assignment.created_at,
-        member.first_name,
-        member.last_name
-      FROM responsibility_assignments assignment
-      JOIN users member ON member.id = assignment.user_id
-      WHERE assignment.event_id = $1
-        AND assignment.user_id IS NOT NULL
-        AND assignment.status NOT IN ('declined', 'cancelled')
-      ORDER BY lower(member.last_name), lower(member.first_name)
-    `,
-    [eventId],
-  )
+  const assignmentResult = publicView
+    ? { rows: [] }
+    : await client.query(
+        `
+          SELECT
+            assignment.id,
+            assignment.responsibility_id,
+            assignment.user_id,
+            assignment.status,
+            assignment.quantity,
+            assignment.created_at,
+            member.first_name,
+            member.last_name
+          FROM responsibility_assignments assignment
+          JOIN users member ON member.id = assignment.user_id
+          WHERE assignment.event_id = $1
+            AND assignment.user_id IS NOT NULL
+            AND assignment.status NOT IN ('declined', 'cancelled')
+          ORDER BY lower(member.last_name), lower(member.first_name)
+        `,
+        [eventId],
+      )
   const candidateResult = manageableMinistryIds.length
     ? await client.query(
         `
@@ -744,7 +752,7 @@ const loadEventDetails = async (
       ministryName: participant.ministry_name,
       isRequired: participant.is_required,
       scheduleStatus: participant.schedule_status,
-      instructions: participant.instructions || "",
+      instructions: publicView ? "" : participant.instructions || "",
       reviewedAt: participant.reviewed_at,
       publishedAt: participant.published_at,
       canManage: accessChecks[index].canManage,
@@ -768,7 +776,7 @@ const loadEventDetails = async (
         Number(responsibility.required_level_rank) || null,
       requiredQualification: responsibility.required_qualification || "",
       relativeStartMinutes: Number(responsibility.relative_start_minutes),
-      instructions: responsibility.instructions || "",
+      instructions: publicView ? "" : responsibility.instructions || "",
       status: responsibility.status,
       sortOrder: Number(responsibility.sort_order),
       assignments:
@@ -783,7 +791,8 @@ const loadEventDetails = async (
       description: level.description || "",
       rankOrder: Number(level.rank_order),
     })),
-    canManageEvent,
+    canManageEvent: publicView ? false : canManageEvent,
+    isPublicView: publicView,
   }
 }
 

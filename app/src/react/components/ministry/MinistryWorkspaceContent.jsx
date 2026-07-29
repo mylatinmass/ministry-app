@@ -3,6 +3,7 @@ import {
   CalendarDaysIcon,
   CheckCircleIcon,
   DocumentDuplicateIcon,
+  FunnelIcon,
   UserGroupIcon,
 } from "@heroicons/react/24/outline"
 import MinistryMonthCalendar from "./MinistryMonthCalendar"
@@ -228,50 +229,78 @@ const MinistryWorkspaceContent = ({
 }) => {
   const [calendarFocusDate, setCalendarFocusDate] = React.useState(null)
   const [selectedEvent, setSelectedEvent] = React.useState(null)
+  const [showOnlyMyEvents, setShowOnlyMyEvents] = React.useState(false)
   let content
 
   if (section.id === "overview") {
     content = <OverviewContent data={data} onEventSelect={setSelectedEvent} />
   } else if (section.id === "schedule") {
+    const calendarEvents = showOnlyMyEvents
+      ? (data.calendarEvents || data.events).filter(
+          (event) => event.is_assigned,
+        )
+      : data.calendarEvents || data.events
+    let calendar
     if (activeAction.id === "month") {
-      content = (
+      calendar = (
         <MinistryMonthCalendar
-          events={data.events}
+          events={calendarEvents}
           selectedDate={calendarFocusDate}
           onSelectedDateChange={setCalendarFocusDate}
           onEventSelect={setSelectedEvent}
         />
       )
     } else if (activeAction.id === "week") {
-      content = (
+      calendar = (
         <MinistryWeekCalendar
-          events={data.events}
+          events={calendarEvents}
           focusDate={calendarFocusDate}
           onFocusDateChange={setCalendarFocusDate}
           onEventSelect={setSelectedEvent}
         />
       )
     } else if (activeAction.id === "today") {
-      content = (
+      calendar = (
         <MinistryTodayCalendar
-          events={data.events}
+          events={calendarEvents}
           onEventSelect={setSelectedEvent}
         />
       )
     } else {
-      content = (
+      calendar = (
         <MinistryCustomCalendar
-          events={data.events}
+          events={calendarEvents}
           onEventSelect={setSelectedEvent}
         />
       )
     }
+    content = (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex shrink-0 justify-end py-2">
+          <button
+            type="button"
+            aria-pressed={showOnlyMyEvents}
+            onClick={() => setShowOnlyMyEvents((current) => !current)}
+            className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${
+              showOnlyMyEvents
+                ? "bg-[#896542] text-white shadow-sm"
+                : "border border-gray-200 bg-white text-gray-600 hover:border-[#C1A387] hover:text-[#896542]"
+            }`}
+          >
+            <FunnelIcon className="size-4" />
+            {showOnlyMyEvents ? "All Events" : "My Events"}
+          </button>
+        </div>
+        <div className="min-h-0 flex-1">{calendar}</div>
+      </div>
+    )
   } else if (section.id === "events") {
     if (data.ministry.accessLevel === "member") {
+      const calendarEvents = data.calendarEvents || data.events
       const visibleEvents =
         activeAction.id === "my-events"
-          ? data.events.filter((event) => event.is_assigned)
-          : data.events
+          ? calendarEvents.filter((event) => event.is_assigned)
+          : calendarEvents
       content = (
         <EventList events={visibleEvents} onEventSelect={setSelectedEvent} />
       )

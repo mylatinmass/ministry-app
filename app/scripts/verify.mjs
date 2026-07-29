@@ -33,6 +33,10 @@ const [
   ministryMembers,
   ministryProfileServer,
   ministryMembersComponent,
+  ministryDetail,
+  ministryWorkspace,
+  ministryNavigation,
+  weekCalendar,
 ] = await Promise.all([
   read("astro.config.mjs"),
   read("src/pages/api/[...path].ts"),
@@ -60,6 +64,10 @@ const [
   read("src/server/legacy/ministry-members.js"),
   read("src/server/legacy/ministry-profile.js"),
   read("src/react/components/ministry/MinistryMembers.jsx"),
+  read("src/server/legacy/ministry-detail.js"),
+  read("src/react/components/ministry/MinistryWorkspace.jsx"),
+  read("src/react/components/ministry/ministryNavigation.jsx"),
+  read("src/react/components/ministry/MinistryWeekCalendar.jsx"),
 ])
 
 assert.match(astroConfig, /site:\s*"https:\/\/www\.mylatinmass\.com"/)
@@ -189,6 +197,24 @@ assert.match(ministryMembersComponent, /Highest ministry level/)
 assert.match(schedulingTemplates, /requiredLevelId/)
 assert.match(schedulingEvents, /granted_level\.rank_order >= required_level\.rank_order/)
 assert.match(eventDetails, /Requires \$\{responsibility\.requiredLevelName\} or higher/)
+assert.match(ministryNavigation, /label:\s*"Calendar"/)
+assert.doesNotMatch(ministryNavigation, /label:\s*"My Calendar"/)
+assert.match(ministryDetail, /calendarEvents/)
+assert.match(
+  ministryDetail,
+  /e\.status IN \('published', 'cancelled', 'completed'\)/,
+)
+assert.match(ministryWorkspace, /data\.calendarEvents \|\| data\.events/)
+assert.doesNotMatch(
+  ministryWorkspace,
+  /\.filter\(\(event\) =>\s*event\.profileAssignments/,
+)
+assert.match(workspaceContent, /showOnlyMyEvents/)
+assert.match(workspaceContent, /showOnlyMyEvents \? "All Events" : "My Events"/)
+assert.match(weekCalendar, /toDateKey\(event\.start_time\) === selectedKey/)
+assert.match(eventDetails, /translate-x-full/)
+assert.match(schedulingEvents, /isPublicView:\s*publicView/)
+assert.match(schedulingEvents, /instructions:\s*publicView \? ""/)
 
 const manifest = JSON.parse(manifestSource)
 assert.equal(manifest.start_url, "/ministry/")

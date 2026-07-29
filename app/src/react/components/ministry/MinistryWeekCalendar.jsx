@@ -61,12 +61,6 @@ const MinistryWeekCalendar = ({
       return eventDate >= weekStart && eventDate < weekEnd
     })
   }, [events, weekStart])
-  const agendaEvents =
-    mode === "today"
-      ? events.filter(
-          (event) => toDateKey(event.start_time) === toDateKey(today),
-        )
-      : visibleWeekEvents
   const eventsByDate = visibleWeekEvents.reduce((byDate, event) => {
     const key = toDateKey(event.start_time)
     if (!byDate[key]) byDate[key] = []
@@ -74,6 +68,19 @@ const MinistryWeekCalendar = ({
     return byDate
   }, {})
   const selectedKey = toDateKey(selectedDate)
+  const agendaEvents =
+    mode === "today"
+      ? events.filter(
+          (event) => toDateKey(event.start_time) === toDateKey(today),
+        )
+      : visibleWeekEvents.filter(
+          (event) => toDateKey(event.start_time) === selectedKey,
+        )
+  const selectedDayLabel = new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  }).format(selectedDate)
 
   React.useEffect(() => {
     setWeekStart(getWeekStart(effectiveFocusDate))
@@ -185,14 +192,14 @@ const MinistryWeekCalendar = ({
 
       <MinistryEventAgenda
         events={agendaEvents}
-        label={mode === "today" ? "Events today" : "Events this week"}
+        label={mode === "today" ? "Events today" : `Events on ${selectedDayLabel}`}
         emptyTitle={
-          mode === "today" ? "No events today" : "No events this week"
+          mode === "today" ? "No events today" : "No events this day"
         }
         emptyText={
           mode === "today"
             ? "There are no ministry events scheduled for today."
-            : "Move to another week or add an event to this ministry schedule."
+            : "Choose another day to see its events."
         }
         onEventSelect={onEventSelect}
       />

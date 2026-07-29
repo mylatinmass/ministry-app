@@ -167,10 +167,10 @@ const ministrySections = [
 const memberSections = [
   {
     id: "schedule",
-    label: "My Calendar",
+    label: "Calendar",
     icon: CalendarDaysIcon,
     description:
-      "See events for this ministry. Events you are signed up for are outlined in orange.",
+      "See every published event. Events assigned to your selected profiles are outlined in orange.",
     actions: [
       action("month", "Month", CalendarIcon),
       action("week", "Week", TableCellsIcon),

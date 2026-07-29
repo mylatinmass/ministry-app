@@ -126,30 +126,29 @@ const MinistryWorkspace = ({ data }) => {
     )
   }
 
-  const visibleEvents = React.useMemo(() => {
-    if (!data.familyProfiles?.length || data.familyProfiles.length === 1) {
-      return data.events
-    }
-    return data.events
-      .filter((event) =>
-        event.profileAssignments?.some((assignment) =>
-          visibleProfileIds.includes(assignment.profileId),
-        ),
-      )
-      .map((event) => ({
-        ...event,
-        is_assigned: event.profileAssignments?.some((assignment) =>
-          visibleProfileIds.includes(assignment.profileId),
-        ),
-        visibleProfileAssignments: event.profileAssignments?.filter(
-          (assignment) => visibleProfileIds.includes(assignment.profileId),
-        ),
-      }))
-  }, [data.events, data.familyProfiles, visibleProfileIds])
+  const visibleCalendarEvents = React.useMemo(() => {
+    const selectedProfileIds = visibleProfileIds.length
+      ? visibleProfileIds
+      : [data.user.id]
+    return (data.calendarEvents || data.events).map((event) => ({
+      ...event,
+      is_assigned: event.profileAssignments?.some((assignment) =>
+        selectedProfileIds.includes(assignment.profileId),
+      ),
+      visibleProfileAssignments: event.profileAssignments?.filter(
+        (assignment) => selectedProfileIds.includes(assignment.profileId),
+      ),
+    }))
+  }, [
+    data.calendarEvents,
+    data.events,
+    data.user.id,
+    visibleProfileIds,
+  ])
 
   const workspaceData = React.useMemo(
-    () => ({ ...data, events: visibleEvents }),
-    [data, visibleEvents],
+    () => ({ ...data, calendarEvents: visibleCalendarEvents }),
+    [data, visibleCalendarEvents],
   )
 
   const selectSection = (section) => {

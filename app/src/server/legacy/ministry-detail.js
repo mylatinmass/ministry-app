@@ -90,6 +90,7 @@ const handler = async (event) => {
       statsResult,
       templatesResult,
       eventsResult,
+      calendarEventsResult,
       familyResult,
       familyAssignmentsResult,
     ] = await Promise.all([
@@ -247,6 +248,31 @@ const handler = async (event) => {
       ),
       client.query(
         `
+          SELECT
+            e.id,
+            e.ministry_id AS coordinator_ministry_id,
+            coordinator.name AS coordinator_ministry_name,
+            e.title,
+            e.description,
+            e.location,
+            e.start_time,
+            e.end_time,
+            e.status,
+            e.participation_type,
+            (
+              SELECT count(*)
+              FROM event_responsibilities er
+              WHERE er.event_id = e.id
+                AND er.status <> 'cancelled'
+            ) AS responsibility_count
+          FROM events e
+          JOIN ministries coordinator ON coordinator.id = e.ministry_id
+          WHERE e.status IN ('published', 'cancelled', 'completed')
+          ORDER BY e.start_time
+        `
+      ),
+      client.query(
+        `
           SELECT u.id, u.first_name, u.last_name
           FROM users u
           WHERE u.id = $1
@@ -272,20 +298,12 @@ const handler = async (event) => {
             er.name AS responsibility_name
           FROM responsibility_assignments ra
           JOIN event_responsibilities er ON er.id = ra.responsibility_id
-          JOIN events e ON e.id = ra.event_id
           JOIN users u ON u.id = ra.user_id
           WHERE (
-              er.ministry_id = $1
-              OR (
-                er.ministry_id IS NULL
-                AND e.ministry_id = $1
-              )
-            )
-            AND (
-              ra.user_id = $2
+              ra.user_id = $1
               OR EXISTS (
                 SELECT 1 FROM managed_profiles mp
-                WHERE mp.guardian_user_id = $2
+                WHERE mp.guardian_user_id = $1
                   AND mp.child_user_id = ra.user_id
                   AND mp.status IN ('active', 'separation_pending')
               )
@@ -295,7 +313,7 @@ const handler = async (event) => {
               'change_requested', 'completed'
             )
         `,
-        [ministry.id, context.actor.id]
+        [context.actor.id]
       ),
     ])
 
@@ -307,6 +325,39 @@ const handler = async (event) => {
             event.status === "published",
         ).length
       : Number(stats.upcoming_events)
+
+    const addProfileAssignments = (event) => {
+      const profileAssignments = familyAssignmentsResult.rows
+        .filter((assignment) => assignment.event_id === event.id)
+        .map((assignment) => ({
+          profileId: assignment.user_id,
+          firstName: assignment.first_name,
+          lastName: assignment.last_name,
+          status: assignment.status,
+          responsibilityName: assignment.responsibility_name,
+        }))
+      return {
+        ...event,
+        responsibility_count: Number(event.responsibility_count),
+        is_assigned: profileAssignments.some(
+          (assignment) => assignment.profileId === user.id
+        ),
+        profileAssignments,
+      }
+    }
+    const calendarEventMap = new Map(
+      calendarEventsResult.rows.map((event) => [
+        event.id,
+        addProfileAssignments(event),
+      ])
+    )
+    if (!isRegularMember) {
+      for (const event of eventsResult.rows) {
+        if (!calendarEventMap.has(event.id)) {
+          calendarEventMap.set(event.id, addProfileAssignments(event))
+        }
+      }
+    }
 
     return jsonResponse(200, {
       actor: toPublicMinistryUser(context.actor),
@@ -339,25 +390,12 @@ const handler = async (event) => {
         ...template,
         responsibility_count: Number(template.responsibility_count),
       })),
-      events: eventsResult.rows.map((event) => {
-        const profileAssignments = familyAssignmentsResult.rows
-          .filter((assignment) => assignment.event_id === event.id)
-          .map((assignment) => ({
-            profileId: assignment.user_id,
-            firstName: assignment.first_name,
-            lastName: assignment.last_name,
-            status: assignment.status,
-            responsibilityName: assignment.responsibility_name,
-          }))
-        return {
-          ...event,
-          responsibility_count: Number(event.responsibility_count),
-          is_assigned: profileAssignments.some(
-            (assignment) => assignment.profileId === user.id
-          ),
-          profileAssignments,
-        }
-      }),
+      events: eventsResult.rows.map(addProfileAssignments),
+      calendarEvents: Array.from(calendarEventMap.values()).sort(
+        (left, right) =>
+          new Date(left.start_time).getTime() -
+          new Date(right.start_time).getTime()
+      ),
     })
   } catch (error) {
     console.error("Unable to load ministry workspace:", error)

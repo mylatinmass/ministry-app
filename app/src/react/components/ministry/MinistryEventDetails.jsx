@@ -37,8 +37,10 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
     React.useState({})
   const [savingAssignmentId, setSavingAssignmentId] =
     React.useState("")
+  const [isPresented, setIsPresented] = React.useState(false)
   const [message, setMessage] = React.useState("")
   const [errorMessage, setErrorMessage] = React.useState("")
+  const closeTimer = React.useRef(null)
 
   const loadDetails = React.useCallback(async () => {
     if (!event?.id) {
@@ -78,7 +80,29 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
     loadDetails()
   }, [loadDetails])
 
+  React.useEffect(() => {
+    if (!event?.id) {
+      setIsPresented(false)
+      return undefined
+    }
+    const frame = window.requestAnimationFrame(() => setIsPresented(true))
+    return () => window.cancelAnimationFrame(frame)
+  }, [event?.id])
+
+  React.useEffect(
+    () => () => {
+      if (closeTimer.current) window.clearTimeout(closeTimer.current)
+    },
+    [],
+  )
+
   if (!event) return null
+
+  const closeDetails = () => {
+    setIsPresented(false)
+    if (closeTimer.current) window.clearTimeout(closeTimer.current)
+    closeTimer.current = window.setTimeout(onClose, 300)
+  }
 
   const displayedEvent = details || event
 
@@ -302,11 +326,18 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
   )
 
   return (
-    <div className="fixed inset-0 z-[90] overflow-y-auto bg-white">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${displayedEvent.title} event details`}
+      className={`fixed inset-0 z-[90] overflow-y-auto bg-white transition-transform duration-300 ease-out lg:transition-none ${
+        isPresented ? "translate-x-0" : "translate-x-full"
+      }`}
+    >
       <header className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-100 bg-white/95 px-4 py-3 backdrop-blur sm:px-6">
         <button
           type="button"
-          onClick={onClose}
+          onClick={closeDetails}
           className="inline-flex items-center gap-2 rounded-lg px-2 py-2 text-sm font-semibold text-[#6f4f34] hover:bg-gray-50"
         >
           <ArrowLeftIcon className="size-5" />
@@ -317,7 +348,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
         </p>
         <button
           type="button"
-          onClick={onClose}
+          onClick={closeDetails}
           aria-label="Close event details"
           className="rounded-lg p-2 text-gray-500 hover:bg-gray-50"
         >

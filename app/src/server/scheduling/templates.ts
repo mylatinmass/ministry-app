@@ -164,7 +164,7 @@ const loadAvailableMinistries = async (client: PoolClient) => {
 const loadTemplates = async (client: PoolClient, ministryId: string) => {
   const templateResult = await client.query(
     `
-      SELECT DISTINCT
+      SELECT
         template.id,
         template.ministry_id AS coordinator_ministry_id,
         coordinator.name AS coordinator_ministry_name,
@@ -177,9 +177,13 @@ const loadTemplates = async (client: PoolClient, ministryId: string) => {
         template.updated_at
       FROM templates template
       JOIN ministries coordinator ON coordinator.id = template.ministry_id
-      LEFT JOIN template_ministries block ON block.template_id = template.id
       WHERE template.ministry_id = $1
-         OR block.ministry_id = $1
+         OR EXISTS (
+           SELECT 1
+           FROM template_ministries block
+           WHERE block.template_id = template.id
+             AND block.ministry_id = $1
+         )
       ORDER BY
         CASE template.status WHEN 'active' THEN 0 WHEN 'inactive' THEN 1 ELSE 2 END,
         lower(template.name)

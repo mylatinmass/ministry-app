@@ -482,7 +482,10 @@ export const handleAvailability = async (request: Request) => {
       throw error
     }
   } catch (error: any) {
-    const status = Number(error?.status || 500)
+    const status = Number(
+      error?.status ||
+        (/session|token|inactive/i.test(error?.message) ? 401 : 500),
+    )
     if (status === 500) console.error("Unable to manage availability:", error)
     return json(
       {

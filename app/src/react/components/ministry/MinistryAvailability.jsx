@@ -10,6 +10,9 @@ import {
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 
+const DISPLAYED_MONTH_COUNT = 12
+const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"]
+
 const toDateKey = (value) => {
   if (typeof value === "string") {
     const dateKey = value.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
@@ -29,16 +32,10 @@ const toDate = (key) => {
 
 const getMonthCells = (month) => {
   const firstDay = new Date(month.getFullYear(), month.getMonth(), 1)
-  const daysInMonth = new Date(
-    month.getFullYear(),
-    month.getMonth() + 1,
-    0,
-  ).getDate()
-  const cellCount = firstDay.getDay() + daysInMonth > 35 ? 42 : 35
   const gridStart = new Date(firstDay)
   gridStart.setDate(firstDay.getDate() - firstDay.getDay())
 
-  return Array.from({ length: cellCount }, (_, index) => {
+  return Array.from({ length: 42 }, (_, index) => {
     const date = new Date(gridStart)
     date.setDate(gridStart.getDate() + index)
     return date
@@ -193,10 +190,21 @@ const MinistryAvailability = () => {
       )
     : []
   const todayKey = toDateKey(new Date())
-  const monthCells = React.useMemo(
-    () => getMonthCells(visibleMonth),
+  const visibleMonths = React.useMemo(
+    () =>
+      Array.from(
+        { length: DISPLAYED_MONTH_COUNT },
+        (_, index) =>
+          new Date(
+            visibleMonth.getFullYear(),
+            visibleMonth.getMonth() + index,
+            1,
+          ),
+      ),
     [visibleMonth],
   )
+  const lastVisibleMonth =
+    visibleMonths[visibleMonths.length - 1] || visibleMonth
 
   const blocksForDate = (key) =>
     availability.blocks.filter(
@@ -296,7 +304,7 @@ const MinistryAvailability = () => {
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-gray-500">
               Tap the first and last date, or drag across the calendar. Dates
               with an assigned duty cannot be blocked; request a change for
-              those duties instead.
+              those duties instead. Scroll to select across different months.
             </p>
           </div>
           {availability.user && (
@@ -332,7 +340,12 @@ const MinistryAvailability = () => {
             {new Intl.DateTimeFormat("en-US", {
               month: "long",
               year: "numeric",
-            }).format(visibleMonth)}
+            }).format(visibleMonth)}{" "}
+            –{" "}
+            {new Intl.DateTimeFormat("en-US", {
+              month: "long",
+              year: "numeric",
+            }).format(lastVisibleMonth)}
           </h3>
           <button
             type="button"
@@ -344,66 +357,94 @@ const MinistryAvailability = () => {
           </button>
         </div>
 
-        <div className="mt-2 grid grid-cols-7 text-center text-xs font-semibold uppercase tracking-[0.14em] text-gray-700 sm:text-sm">
-          {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
-            <div key={`${day}-${index}`} className="py-2">
-              {day}
-            </div>
-          ))}
-        </div>
-
         {isLoading ? (
           <p className="py-14 text-center text-sm text-gray-500">
             Loading availability...
           </p>
         ) : (
-          <div className="grid grid-cols-7 gap-y-2 text-center sm:gap-y-3">
-            {monthCells.map((date) => {
-              const key = toDateKey(date)
-              const inMonth = date.getMonth() === visibleMonth.getMonth()
-              const blocked = blocksForDate(key).length > 0
-              const duties = assignmentsForDate(key)
-              const assigned = duties.length > 0
-              const selected = isSelected(key)
-              const past = key < todayKey
-              const changeRequested = duties.some(
-                (duty) => duty.changeRequestStatus === "pending",
-              )
-
+          <div className="mt-4 grid max-h-[70vh] grid-cols-1 gap-6 overflow-y-auto pr-1 lg:max-h-none lg:grid-cols-2 lg:overflow-visible lg:pr-0">
+            {visibleMonths.map((month) => {
+              const monthKey = `${month.getFullYear()}-${month.getMonth()}`
+              const monthCells = getMonthCells(month)
               return (
-                <button
-                  key={key}
-                  type="button"
-                  disabled={past}
-                  onPointerDown={() => beginDrag(key)}
-                  onPointerEnter={() => extendDrag(key)}
-                  onPointerUp={() => finishPointer(key)}
-                  className={`relative mx-auto flex size-10 items-center justify-center rounded-2xl text-sm font-semibold transition sm:size-12 sm:text-base ${
-                    inMonth ? "text-gray-900" : "text-gray-300"
-                  } ${
-                    selected
-                      ? "bg-[#eee2d5] text-[#6f4f34] ring-2 ring-[#C1A387]"
-                      : assigned
-                        ? "ring-2 ring-orange-400"
-                        : blocked
-                          ? "bg-[#f4ede6] text-[#6f4f34]"
-                          : key === todayKey
-                            ? "ring-1 ring-gray-300"
-                            : ""
-                  } ${
-                    past
-                      ? "cursor-not-allowed opacity-40"
-                      : "hover:bg-gray-50"
-                  }`}
-                  aria-label={`${formatDate(key, {
-                    month: "long",
-                  })}${assigned ? ", assigned duty" : blocked ? ", unavailable" : ""}`}
+                <section
+                  key={monthKey}
+                  className="rounded-xl border border-gray-100 p-3"
                 >
-                  {date.getDate()}
-                  {changeRequested && (
-                    <span className="absolute right-1 top-1 size-1.5 rounded-full bg-orange-500" />
-                  )}
-                </button>
+                  <h4 className="text-center font-semibold text-gray-900">
+                    {new Intl.DateTimeFormat("en-US", {
+                      month: "long",
+                      year: "numeric",
+                    }).format(month)}
+                  </h4>
+                  <div className="mt-2 grid grid-cols-7 text-center text-xs font-semibold uppercase tracking-[0.14em] text-gray-700 sm:text-sm">
+                    {WEEKDAYS.map((day, index) => (
+                      <div key={`${day}-${index}`} className="py-2">
+                        {day}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-7 gap-y-2 text-center sm:gap-y-3">
+                    {monthCells.map((date) => {
+                      const key = toDateKey(date)
+                      const inMonth =
+                        date.getMonth() === month.getMonth() &&
+                        date.getFullYear() === month.getFullYear()
+                      if (!inMonth) {
+                        return (
+                          <span
+                            key={`${monthKey}-${key}`}
+                            aria-hidden="true"
+                            className="mx-auto size-10 sm:size-12"
+                          />
+                        )
+                      }
+                      const blocked = blocksForDate(key).length > 0
+                      const duties = assignmentsForDate(key)
+                      const assigned = duties.length > 0
+                      const selected = isSelected(key)
+                      const past = key < todayKey
+                      const changeRequested = duties.some(
+                        (duty) =>
+                          duty.changeRequestStatus === "pending",
+                      )
+
+                      return (
+                        <button
+                          key={`${monthKey}-${key}`}
+                          type="button"
+                          disabled={past}
+                          onPointerDown={() => beginDrag(key)}
+                          onPointerEnter={() => extendDrag(key)}
+                          onPointerUp={() => finishPointer(key)}
+                          className={`relative mx-auto flex size-10 items-center justify-center rounded-2xl text-sm font-semibold text-gray-900 transition sm:size-12 sm:text-base ${
+                            selected
+                              ? "bg-[#eee2d5] text-[#6f4f34] ring-2 ring-[#C1A387]"
+                              : assigned
+                                ? "ring-2 ring-orange-400"
+                                : blocked
+                                  ? "bg-[#f4ede6] text-[#6f4f34]"
+                                  : key === todayKey
+                                    ? "ring-1 ring-gray-300"
+                                    : ""
+                          } ${
+                            past
+                              ? "cursor-not-allowed opacity-40"
+                              : "hover:bg-gray-50"
+                          }`}
+                          aria-label={`${formatDate(key, {
+                            month: "long",
+                          })}${assigned ? ", assigned duty" : blocked ? ", unavailable" : ""}`}
+                        >
+                          {date.getDate()}
+                          {changeRequested && (
+                            <span className="absolute right-1 top-1 size-1.5 rounded-full bg-orange-500" />
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </section>
               )
             })}
           </div>

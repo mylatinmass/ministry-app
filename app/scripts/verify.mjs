@@ -159,6 +159,9 @@ assert.match(
 )
 assert.match(availabilityComponent, /Block available dates/)
 assert.match(availabilityComponent, /Request change/)
+assert.match(availabilityComponent, /DISPLAYED_MONTH_COUNT = 12/)
+assert.match(availabilityComponent, /max-h-\[70vh\]/)
+assert.match(availabilityComponent, /lg:grid-cols-2/)
 assert.match(availabilityRoute, /AvailabilityApp/)
 assert.match(availabilityApp, /MinistryRouteGuard/)
 

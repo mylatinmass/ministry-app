@@ -3,7 +3,9 @@ import { Link } from "../../compat/gatsby"
 import { ClockIcon } from "@heroicons/react/24/outline"
 import Layout from "../../components/Layout"
 import Seo from "../../components/Seo"
+import BrowserLocation from "../BrowserLocation"
 import { MINISTRY_SESSION_KEY } from "../../components/ministry/MinistryLogin"
+import MinistryRouteGuard from "../../components/ministry/MinistryRouteGuard"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 const accessLabels = {
   owner: "Owner",
@@ -12,7 +14,7 @@ const accessLabels = {
   member: "Member",
 }
 
-const MinistryHome = () => {
+const MinistryHomeContent = () => {
   const [ministries, setMinistries] = React.useState([])
   const [currentUser, setCurrentUser] = React.useState(null)
   const [actor, setActor] = React.useState(null)
@@ -35,7 +37,7 @@ const MinistryHome = () => {
         if (!response.ok) {
           if (response.status === 401) {
             window.sessionStorage.removeItem(MINISTRY_SESSION_KEY)
-            window.location.reload()
+            window.dispatchEvent(new Event("ministry-session-expired"))
           }
           throw new Error(result.message || "Unable to load ministries")
         }
@@ -177,5 +179,15 @@ const MinistryHome = () => {
     </Layout>
   )
 }
+
+const MinistryHomePage = ({ location }) => (
+  <MinistryRouteGuard location={location}>
+    <MinistryHomeContent />
+  </MinistryRouteGuard>
+)
+
+const MinistryHome = () => (
+  <BrowserLocation component={MinistryHomePage} />
+)
 
 export default MinistryHome

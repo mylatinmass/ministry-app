@@ -14,6 +14,21 @@ const MinistryRouteGuard = ({ children, location }) => {
   )
 
   React.useEffect(() => {
+    const handleSessionExpired = () => {
+      window.sessionStorage.removeItem(MINISTRY_SESSION_KEY)
+      window.sessionStorage.removeItem("ministry_visible_profile_ids")
+      setStatus("unauthenticated")
+    }
+
+    window.addEventListener("ministry-session-expired", handleSessionExpired)
+    return () =>
+      window.removeEventListener(
+        "ministry-session-expired",
+        handleSessionExpired
+      )
+  }, [])
+
+  React.useEffect(() => {
     if (!protectedRoute) {
       setStatus("authenticated")
       return

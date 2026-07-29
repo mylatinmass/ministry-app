@@ -1,11 +1,13 @@
 import * as React from "react"
 import { Helmet } from "react-helmet"
 import Seo from "../../components/Seo"
+import BrowserLocation from "../BrowserLocation"
 import { MINISTRY_SESSION_KEY } from "../../components/ministry/MinistryLogin"
+import MinistryRouteGuard from "../../components/ministry/MinistryRouteGuard"
 import MinistryWorkspace from "../../components/ministry/MinistryWorkspace"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 
-const MinistryPage = ({ slug: slugProp, params = {}, location = {} }) => {
+const MinistryPageContent = ({ slug: slugProp, params = {}, location = {} }) => {
   const slug =
     slugProp ||
     params?.slug ||
@@ -36,7 +38,7 @@ const MinistryPage = ({ slug: slugProp, params = {}, location = {} }) => {
         if (!response.ok) {
           if (response.status === 401) {
             window.sessionStorage.removeItem(MINISTRY_SESSION_KEY)
-            window.location.reload()
+            window.dispatchEvent(new Event("ministry-session-expired"))
           }
           throw new Error(result.message || "Unable to load ministry")
         }
@@ -81,5 +83,15 @@ const MinistryPage = ({ slug: slugProp, params = {}, location = {} }) => {
     </div>
   )
 }
+
+const GuardedMinistryPage = ({ location, slug }) => (
+  <MinistryRouteGuard location={location}>
+    <MinistryPageContent location={location} slug={slug} />
+  </MinistryRouteGuard>
+)
+
+const MinistryPage = ({ slug }) => (
+  <BrowserLocation component={GuardedMinistryPage} slug={slug} />
+)
 
 export default MinistryPage

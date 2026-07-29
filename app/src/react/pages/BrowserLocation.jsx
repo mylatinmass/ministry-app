@@ -1,6 +1,6 @@
 import * as React from "react"
 
-const BrowserLocation = ({ component: Component }) => {
+const BrowserLocation = ({ component: Component, ...componentProps }) => {
   const [location, setLocation] = React.useState(null)
 
   React.useEffect(() => {
@@ -19,7 +19,7 @@ const BrowserLocation = ({ component: Component }) => {
     )
   }
 
-  return <Component location={location} />
+  return <Component {...componentProps} location={location} />
 }
 
 export default BrowserLocation

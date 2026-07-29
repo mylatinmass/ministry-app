@@ -102,6 +102,16 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
     return () => controller.abort()
   }, [loadFamily])
 
+  React.useEffect(() => {
+    if (!profile?.isManagedProfile || !familyData) return
+    const activeManagedProfile = familyData.profiles.find(
+      (item) => item.id === profile.id && !item.isGuardian,
+    )
+    if (activeManagedProfile?.relationshipStatus === "separation_pending") {
+      setSeparationEmail(activeManagedProfile.separationEmail || "")
+    }
+  }, [familyData, profile?.id, profile?.isManagedProfile])
+
   const runFamilyAction = async (body) => {
     setIsSaving(true)
     setMessage("")
@@ -137,6 +147,18 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
       setChildForm({ firstName: "", lastName: "" })
       setShowAddChild(false)
     }
+  }
+
+  const cancelSeparation = async () => {
+    const confirmed = window.confirm(
+      "Cancel this independent account activation? The emailed activation link will stop working.",
+    )
+    if (!confirmed) return
+    const saved = await runFamilyAction({
+      action: "cancel_separation",
+      profileId: profile.id,
+    })
+    if (saved) setSeparationEmail("")
   }
 
   const handleChange = (event) => {
@@ -216,6 +238,11 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
     reminderOptions.find(
       ([minutes]) => minutes === profile.notificationLeadMinutes,
     )?.[1] || "1 hour"
+  const activeManagedProfile = familyData?.profiles.find(
+    (item) => item.id === profile.id && !item.isGuardian,
+  )
+  const separationPending =
+    activeManagedProfile?.relationshipStatus === "separation_pending"
 
   return (
     <div className="relative mx-auto max-w-5xl pb-8">
@@ -449,10 +476,21 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
           {profile.isManagedProfile && (
             <div className="mt-5 rounded-xl border border-gray-100 p-4">
               <p className="font-semibold text-gray-900">Create an independent account</p>
-              <p className="mt-1 text-sm text-gray-500">A verified activation email will add a private login while keeping every ministry, assignment, and completed duty on this profile.</p>
+              <p className="mt-1 text-sm text-gray-500">
+                {separationPending
+                  ? "An activation invitation is pending. You can resend it, use a corrected email, or cancel the separation."
+                  : "A verified activation email will add a private login while keeping every ministry, assignment, and completed duty on this profile."}
+              </p>
               <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                 <input type="email" required placeholder="New email address" value={separationEmail} onChange={(event) => setSeparationEmail(event.target.value)} className="h-11 flex-1 rounded-xl border border-gray-200 px-3" />
-                <button type="button" disabled={!separationEmail || isSaving} onClick={() => runFamilyAction({ action: "start_separation", profileId: profile.id, email: separationEmail })} className="rounded-xl border border-[#d8c7b8] px-4 py-2 text-sm font-semibold text-[#6f4f34]">Send activation</button>
+                <button type="button" disabled={!separationEmail || isSaving} onClick={() => runFamilyAction({ action: "start_separation", profileId: profile.id, email: separationEmail })} className="rounded-xl border border-[#d8c7b8] px-4 py-2 text-sm font-semibold text-[#6f4f34]">
+                  {separationPending ? "Resend activation" : "Send activation"}
+                </button>
+                {separationPending && (
+                  <button type="button" disabled={isSaving} onClick={cancelSeparation} className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600">
+                    Cancel
+                  </button>
+                )}
               </div>
             </div>
           )}

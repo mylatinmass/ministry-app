@@ -316,6 +316,13 @@ const MinistryWorkspace = ({ data }) => {
                         )
                       })}
                     </div>
+                    <Link
+                      to="/ministry/availability"
+                      onClick={() => setProfileMenuOpen(false)}
+                      className="block w-full border-t border-gray-100 px-4 py-3 text-left text-sm font-semibold text-[#896542] hover:bg-[#f7f3ef]"
+                    >
+                      Availability
+                    </Link>
                     <button
                       type="button"
                       onClick={() => {

@@ -1,5 +1,6 @@
 import * as React from "react"
 import { Link } from "gatsby"
+import { ClockIcon } from "@heroicons/react/24/outline"
 import Layout from "../../components/Layout"
 import Seo from "../../components/Seo"
 import { MINISTRY_SESSION_KEY } from "../../components/ministry/MinistryLogin"
@@ -92,6 +93,13 @@ const MinistryHome = () => {
               Super Admin access to all ministries
             </p>
           )}
+          <Link
+            to="/ministry/availability"
+            className="inline-flex items-center gap-2 rounded-xl border border-[#d8c7b8] px-4 py-2 text-sm font-semibold text-[#6f4f34] hover:bg-[#f7f3ef]"
+          >
+            <ClockIcon className="size-5" />
+            Availability
+          </Link>
         </header>
 
         <div className="mt-10">

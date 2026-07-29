@@ -22,6 +22,9 @@ const tables = [
   "events",
   "event_responsibilities",
   "responsibility_assignments",
+  "member_availability",
+  "availability_blocks",
+  "assignment_change_requests",
   "managed_profiles",
   "managed_profile_membership_requests",
   "managed_profile_membership_request_recipients",
@@ -37,6 +40,14 @@ const client = new Client({
 await client.connect()
 
 try {
+  const existingTablesResult = await client.query(`
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+  `)
+  const existingTables = new Set(
+    existingTablesResult.rows.map((row) => row.table_name),
+  )
   const snapshot = {
     format: "mylatinmass-ministry-json-v1",
     capturedAt: new Date().toISOString(),
@@ -44,6 +55,7 @@ try {
   }
 
   for (const table of tables) {
+    if (!existingTables.has(table)) continue
     const result = await client.query(`SELECT * FROM ${table}`)
     snapshot.tables[table] = result.rows
   }

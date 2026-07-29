@@ -187,6 +187,15 @@ const memberSections = [
       action("my-events", "My Events", CheckCircleIcon),
     ],
   },
+  {
+    id: "availability",
+    label: "Availability",
+    icon: ClockIcon,
+    description: "Block dates when this profile cannot be scheduled.",
+    actions: [
+      action("my-availability", "Availability", ClockIcon),
+    ],
+  },
 ]
 
 export { memberSections, ministrySections, profileSection }

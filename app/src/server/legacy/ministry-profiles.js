@@ -60,7 +60,15 @@ const listProfiles = async (client, context) => {
           child.last_name,
           child.username,
           child.global_role,
-          child.status
+          child.status,
+          (
+            SELECT separation.new_email
+            FROM managed_profile_separations separation
+            WHERE separation.child_user_id = child.id
+              AND separation.status = 'pending'
+            ORDER BY separation.created_at DESC
+            LIMIT 1
+          ) AS separation_email
         FROM managed_profiles mp
         JOIN users child ON child.id = mp.child_user_id
         WHERE mp.guardian_user_id = $1
@@ -110,6 +118,7 @@ const listProfiles = async (client, context) => {
         isGuardian: false,
         relationshipId: row.relationship_id,
         relationshipStatus: row.relationship_status,
+        separationEmail: row.separation_email || "",
       })),
     ],
     ministries: ministriesResult.rows,
@@ -371,7 +380,9 @@ const startSeparation = async (client, event, actor, body) => {
       SELECT mp.id, child.first_name
       FROM managed_profiles mp
       JOIN users child ON child.id = mp.child_user_id
-      WHERE mp.guardian_user_id = $1 AND mp.child_user_id = $2 AND mp.status = 'active'
+      WHERE mp.guardian_user_id = $1
+        AND mp.child_user_id = $2
+        AND mp.status IN ('active', 'separation_pending')
       LIMIT 1
     `,
     [actor.id, childId]
@@ -437,6 +448,71 @@ const startSeparation = async (client, event, actor, body) => {
   return jsonResponse(201, { success: true, message: "Activation email sent" })
 }
 
+const cancelSeparation = async (client, actor, body) => {
+  const childId = body.profileId?.toString()
+  if (!childId) {
+    return jsonResponse(400, { message: "Profile is required" })
+  }
+
+  await client.query("BEGIN")
+  try {
+    const relationshipResult = await client.query(
+      `
+        SELECT id
+        FROM managed_profiles
+        WHERE guardian_user_id = $1
+          AND child_user_id = $2
+          AND status = 'separation_pending'
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [actor.id, childId]
+    )
+    if (!relationshipResult.rowCount) {
+      await client.query("ROLLBACK")
+      return jsonResponse(409, {
+        message: "There is no pending activation to cancel",
+      })
+    }
+
+    const relationshipId = relationshipResult.rows[0].id
+    await client.query(
+      `
+        UPDATE managed_profile_separations
+        SET status = 'revoked', updated_at = now()
+        WHERE managed_profile_id = $1
+          AND child_user_id = $2
+          AND status = 'pending'
+      `,
+      [relationshipId, childId]
+    )
+    await client.query(
+      `
+        UPDATE managed_profiles
+        SET status = 'active', updated_at = now()
+        WHERE id = $1
+      `,
+      [relationshipId]
+    )
+    await audit(
+      client,
+      actor.id,
+      childId,
+      "separation.cancelled",
+      "managed_profile",
+      relationshipId
+    )
+    await client.query("COMMIT")
+    return jsonResponse(200, {
+      success: true,
+      message: "Independent account activation cancelled",
+    })
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {})
+    throw error
+  }
+}
+
 const handler = async (event) => {
   if (!["GET", "POST", "PATCH"].includes(event.httpMethod)) {
     return jsonResponse(405, { message: "Method not allowed" })
@@ -488,6 +564,9 @@ const handler = async (event) => {
     }
     if (event.httpMethod === "POST" && body.action === "start_separation") {
       return await startSeparation(client, event, context.actor, body)
+    }
+    if (event.httpMethod === "POST" && body.action === "cancel_separation") {
+      return await cancelSeparation(client, context.actor, body)
     }
     return jsonResponse(400, { message: "Unknown profile action" })
   } catch (error) {

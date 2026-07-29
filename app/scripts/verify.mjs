@@ -22,6 +22,13 @@ const [
   schedulingEvents,
   workspaceContent,
   eventDetails,
+  familyProfiles,
+  profileSeparation,
+  availabilityMigration,
+  schedulingAvailability,
+  availabilityComponent,
+  availabilityRoute,
+  availabilityApp,
 ] = await Promise.all([
   read("astro.config.mjs"),
   read("src/pages/api/[...path].ts"),
@@ -38,6 +45,13 @@ const [
   read("src/server/scheduling/events.ts"),
   read("src/react/components/ministry/MinistryWorkspaceContent.jsx"),
   read("src/react/components/ministry/MinistryEventDetails.jsx"),
+  read("src/server/legacy/ministry-profiles.js"),
+  read("src/server/legacy/ministry-profile-separation.js"),
+  read("migrations/20260729_02_add_availability_blocks.sql"),
+  read("src/server/scheduling/availability.ts"),
+  read("src/react/components/ministry/MinistryAvailability.jsx"),
+  read("src/pages/availability.astro"),
+  read("src/react/pages/AvailabilityApp.jsx"),
 ])
 
 assert.match(astroConfig, /site:\s*"https:\/\/www\.mylatinmass\.com"/)
@@ -60,6 +74,7 @@ assert.match(apiRoute, /push\/subscriptions/)
 assert.match(apiRoute, /reminders\/process/)
 assert.match(apiRoute, /scheduling\/templates/)
 assert.match(apiRoute, /scheduling\/events/)
+assert.match(apiRoute, /scheduling\/availability/)
 
 assert.match(authHelper, /activeProfileUserId/)
 assert.match(ministryList, /const user = context\.user/)
@@ -116,6 +131,29 @@ assert.match(workspaceContent, /MinistryTemplates/)
 assert.match(workspaceContent, /MinistryEvents/)
 assert.match(eventDetails, /Add responsibility/)
 assert.match(eventDetails, /Event only/)
+assert.match(familyProfiles, /cancel_separation/)
+assert.match(familyProfiles, /separation\.cancelled/)
+assert.match(familyProfiles, /mp\.status IN \('active', 'separation_pending'\)/)
+assert.match(profileSeparation, /That email is now connected to another account/)
+assert.match(
+  availabilityMigration,
+  /CREATE TABLE IF NOT EXISTS availability_blocks/,
+)
+assert.match(
+  availabilityMigration,
+  /CREATE TABLE IF NOT EXISTS assignment_change_requests/,
+)
+assert.match(schedulingAvailability, /context\.user\.id/)
+assert.match(schedulingAvailability, /splitAroundAssignedDates/)
+assert.match(schedulingAvailability, /assignment\.change_requested/)
+assert.match(
+  schedulingAvailability,
+  /notificationStatus:\s*"pending_implementation"/,
+)
+assert.match(availabilityComponent, /Block available dates/)
+assert.match(availabilityComponent, /Request change/)
+assert.match(availabilityRoute, /AvailabilityApp/)
+assert.match(availabilityApp, /MinistryRouteGuard/)
 
 const manifest = JSON.parse(manifestSource)
 assert.equal(manifest.start_url, "/ministry/")

@@ -14,6 +14,7 @@ import MinistryEvents from "./MinistryEvents"
 import MinistryMembers from "./MinistryMembers"
 import MinistryProfile from "./MinistryProfile"
 import MinistryTemplates from "./MinistryTemplates"
+import MinistryAvailability from "./MinistryAvailability"
 
 const formatEventDate = (value) =>
   new Intl.DateTimeFormat("en-US", {
@@ -287,6 +288,11 @@ const MinistryWorkspaceContent = ({
     content = <MinistryMembers data={data} activeAction={activeAction} />
   } else if (section.id === "templates") {
     content = <MinistryTemplates data={data} activeAction={activeAction} />
+  } else if (
+    section.id === "availability" &&
+    activeAction.id === "my-availability"
+  ) {
+    content = <MinistryAvailability />
   } else if (section.id === "profile") {
     content = (
       <MinistryProfile

@@ -121,6 +121,23 @@ const handler = async (event) => {
         await client.query("ROLLBACK")
         return jsonResponse(409, { message: "This activation is no longer available" })
       }
+      const emailOwner = await client.query(
+        `
+          SELECT 1
+          FROM users
+          WHERE lower(btrim(email)) = $1
+            AND id <> $2
+          LIMIT 1
+        `,
+        [locked.new_email, locked.child_user_id]
+      )
+      if (emailOwner.rowCount) {
+        await client.query("ROLLBACK")
+        return jsonResponse(409, {
+          message:
+            "That email is now connected to another account. Ask your guardian to send a new activation invitation.",
+        })
+      }
       const userResult = await client.query(
         `
           UPDATE users

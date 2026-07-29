@@ -122,6 +122,10 @@ assert.match(schedulingEvents, /set_schedule_status/)
 assert.match(schedulingEvents, /event_responsibility\.created/)
 assert.match(schedulingEvents, /event_responsibility\.updated/)
 assert.match(schedulingEvents, /event_responsibility\.cancelled/)
+assert.match(schedulingEvents, /body\.action === "assign_member"/)
+assert.match(schedulingEvents, /FROM availability_blocks block/)
+assert.match(schedulingEvents, /membership\.can_serve = true/)
+assert.match(schedulingEvents, /responsibility_assignment\.assigned/)
 assert.match(schedulingEvents, /source:\s*"event_override"/)
 assert.match(
   schedulingEvents,
@@ -131,6 +135,8 @@ assert.match(workspaceContent, /MinistryTemplates/)
 assert.match(workspaceContent, /MinistryEvents/)
 assert.match(eventDetails, /Add responsibility/)
 assert.match(eventDetails, /Event only/)
+assert.match(eventDetails, /Choose available member/)
+assert.match(eventDetails, /action:\s*"assign_member"/)
 assert.match(familyProfiles, /cancel_separation/)
 assert.match(familyProfiles, /separation\.cancelled/)
 assert.match(familyProfiles, /mp\.status IN \('active', 'separation_pending'\)/)
@@ -144,6 +150,7 @@ assert.match(
   /CREATE TABLE IF NOT EXISTS assignment_change_requests/,
 )
 assert.match(schedulingAvailability, /context\.user\.id/)
+assert.match(schedulingAvailability, /toStoredDateKey/)
 assert.match(schedulingAvailability, /splitAroundAssignedDates/)
 assert.match(schedulingAvailability, /assignment\.change_requested/)
 assert.match(

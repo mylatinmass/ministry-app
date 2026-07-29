@@ -11,13 +11,21 @@ import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 
 const toDateKey = (value) => {
+  if (typeof value === "string") {
+    const dateKey = value.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
+    if (dateKey) return dateKey
+  }
   const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
   const month = `${date.getMonth() + 1}`.padStart(2, "0")
   const day = `${date.getDate()}`.padStart(2, "0")
   return `${date.getFullYear()}-${month}-${day}`
 }
 
-const toDate = (key) => new Date(`${key}T12:00:00`)
+const toDate = (key) => {
+  const dateKey = toDateKey(key)
+  return dateKey ? new Date(`${dateKey}T12:00:00`) : null
+}
 
 const getMonthCells = (month) => {
   const firstDay = new Date(month.getFullYear(), month.getMonth(), 1)
@@ -37,19 +45,42 @@ const getMonthCells = (month) => {
   })
 }
 
-const formatDate = (key, options = {}) =>
-  new Intl.DateTimeFormat("en-US", {
+const formatDate = (key, options = {}) => {
+  const date = toDate(key)
+  if (!date || Number.isNaN(date.getTime())) return "Date unavailable"
+  return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
     ...options,
-  }).format(toDate(key))
+  }).format(date)
+}
 
-const formatDutyTime = (value) =>
-  new Intl.DateTimeFormat("en-US", {
+const formatDutyTime = (value) => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "Time unavailable"
+  return new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
     minute: "2-digit",
-  }).format(new Date(value))
+  }).format(date)
+}
+
+const normalizeAvailability = (result) => ({
+  ...result,
+  blocks: (result.blocks || [])
+    .map((block) => ({
+      ...block,
+      startDate: toDateKey(block.startDate),
+      endDate: toDateKey(block.endDate),
+    }))
+    .filter((block) => block.startDate && block.endDate),
+  assignments: (result.assignments || [])
+    .map((assignment) => ({
+      ...assignment,
+      date: toDateKey(assignment.date || assignment.startTime),
+    }))
+    .filter((assignment) => assignment.date),
+})
 
 const sortedRange = (first, second) =>
   first <= second
@@ -98,7 +129,7 @@ const MinistryAvailability = () => {
       if (!response.ok) {
         throw new Error(result.message || "Unable to load availability")
       }
-      setAvailability(result)
+      setAvailability(normalizeAvailability(result))
     } catch (error) {
       setErrorMessage(error.message)
     } finally {

@@ -33,6 +33,10 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
     React.useState(false)
   const [responsibilityForm, setResponsibilityForm] =
     React.useState(null)
+  const [assignmentSelections, setAssignmentSelections] =
+    React.useState({})
+  const [savingAssignmentId, setSavingAssignmentId] =
+    React.useState("")
   const [message, setMessage] = React.useState("")
   const [errorMessage, setErrorMessage] = React.useState("")
 
@@ -236,6 +240,48 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
       setErrorMessage(error.message)
     } finally {
       setIsSavingResponsibility(false)
+    }
+  }
+
+  const assignMember = async (responsibility) => {
+    const userId = assignmentSelections[responsibility.id]
+    if (!userId) return
+    setSavingAssignmentId(responsibility.id)
+    setMessage("")
+    setErrorMessage("")
+    try {
+      const response = await fetch(
+        getFunctionEndpoint("scheduling/events"),
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${window.sessionStorage.getItem(
+              MINISTRY_SESSION_KEY,
+            )}`,
+          },
+          body: JSON.stringify({
+            action: "assign_member",
+            eventId: displayedEvent.id,
+            responsibilityId: responsibility.id,
+            userId,
+          }),
+        },
+      )
+      const result = await response.json()
+      if (!response.ok) {
+        throw new Error(result.message || "Unable to assign member")
+      }
+      setMessage(result.message)
+      setAssignmentSelections((current) => ({
+        ...current,
+        [responsibility.id]: "",
+      }))
+      await loadDetails()
+    } catch (error) {
+      setErrorMessage(error.message)
+    } finally {
+      setSavingAssignmentId("")
     }
   }
 
@@ -638,6 +684,11 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                           ministry.ministryId ===
                           responsibility.ministryId,
                       )
+                      const openSlots = Math.max(
+                        0,
+                        responsibility.quantityNeeded -
+                          responsibility.assignedQuantity,
+                      )
                       return (
                         <article
                           key={responsibility.id}
@@ -670,6 +721,80 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                                 {responsibility.instructions}
                               </p>
                             )}
+                            {responsibility.assignments?.length > 0 && (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {responsibility.assignments.map(
+                                  (assignment) => (
+                                    <span
+                                      key={assignment.id}
+                                      className="rounded-full bg-[#f4ede6] px-2 py-1 text-xs text-[#6f4f34]"
+                                    >
+                                      {assignment.firstName}{" "}
+                                      {assignment.lastName} ·{" "}
+                                      {assignment.status.replaceAll("_", " ")}
+                                    </span>
+                                  ),
+                                )}
+                              </div>
+                            )}
+                            {canManage &&
+                              eventCanChange &&
+                              responsibility.status !== "cancelled" &&
+                              openSlots > 0 && (
+                                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                                  <select
+                                    aria-label={`Available members for ${responsibility.name}`}
+                                    value={
+                                      assignmentSelections[
+                                        responsibility.id
+                                      ] || ""
+                                    }
+                                    onChange={(event) =>
+                                      setAssignmentSelections((current) => ({
+                                        ...current,
+                                        [responsibility.id]:
+                                          event.target.value,
+                                      }))
+                                    }
+                                    className="h-10 min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 text-sm"
+                                  >
+                                    <option value="">
+                                      {responsibility.availableMembers?.length
+                                        ? "Choose available member"
+                                        : "No available members"}
+                                    </option>
+                                    {responsibility.availableMembers?.map(
+                                      (member) => (
+                                        <option
+                                          key={member.userId}
+                                          value={member.userId}
+                                        >
+                                          {member.firstName} {member.lastName}
+                                        </option>
+                                      ),
+                                    )}
+                                  </select>
+                                  <button
+                                    type="button"
+                                    disabled={
+                                      !assignmentSelections[
+                                        responsibility.id
+                                      ] ||
+                                      savingAssignmentId ===
+                                        responsibility.id
+                                    }
+                                    onClick={() =>
+                                      assignMember(responsibility)
+                                    }
+                                    className="rounded-lg border border-[#d8c7b8] px-3 py-2 text-sm font-semibold text-[#6f4f34] disabled:opacity-50"
+                                  >
+                                    {savingAssignmentId ===
+                                    responsibility.id
+                                      ? "Assigning..."
+                                      : "Assign"}
+                                  </button>
+                                </div>
+                              )}
                           </div>
                           <div className="flex items-center gap-2 self-start sm:self-auto">
                             {canManage &&

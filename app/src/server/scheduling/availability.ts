@@ -31,6 +31,15 @@ const toDateKey = (value: string | Date) => {
   return `${values.year}-${values.month}-${values.day}`
 }
 
+const toStoredDateKey = (value: string | Date) => {
+  if (typeof value === "string") {
+    const dateKey = value.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
+    if (dateKey) return dateKey
+  }
+  const date = value instanceof Date ? value : new Date(value)
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10)
+}
+
 const parseDateKey = (value: unknown, fieldName: string) => {
   const dateKey = typeof value === "string" ? value.trim() : ""
   const date = new Date(`${dateKey}T00:00:00.000Z`)
@@ -116,8 +125,8 @@ const loadBlocks = async (client: PoolClient, userId: string) => {
   )
   return result.rows.map((row) => ({
     id: row.id,
-    startDate: row.start_date,
-    endDate: row.end_date,
+    startDate: toStoredDateKey(row.start_date),
+    endDate: toStoredDateKey(row.end_date),
     label: row.label || "",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -210,8 +219,10 @@ const createBlock = async (
   let mergedStart = startDate
   let mergedEnd = endDate
   for (const block of overlapping.rows) {
-    if (block.start_date < mergedStart) mergedStart = block.start_date
-    if (block.end_date > mergedEnd) mergedEnd = block.end_date
+    const blockStart = toStoredDateKey(block.start_date)
+    const blockEnd = toStoredDateKey(block.end_date)
+    if (blockStart < mergedStart) mergedStart = blockStart
+    if (blockEnd > mergedEnd) mergedEnd = blockEnd
   }
 
   const conflicts = assignments.filter(
@@ -263,8 +274,8 @@ const createBlock = async (
     const block = result.rows[0]
     createdBlocks.push({
       id: block.id,
-      startDate: block.start_date,
-      endDate: block.end_date,
+      startDate: toStoredDateKey(block.start_date),
+      endDate: toStoredDateKey(block.end_date),
       label: block.label || "",
       createdAt: block.created_at,
       updatedAt: block.updated_at,
@@ -274,8 +285,8 @@ const createBlock = async (
       entityType: "availability_block",
       entityId: block.id,
       afterData: {
-        startDate: block.start_date,
-        endDate: block.end_date,
+        startDate: toStoredDateKey(block.start_date),
+        endDate: toStoredDateKey(block.end_date),
         label: block.label,
       },
       metadata: {
@@ -336,8 +347,8 @@ const cancelBlock = async (
     entityType: "availability_block",
     entityId: block.id,
     beforeData: {
-      startDate: block.start_date,
-      endDate: block.end_date,
+      startDate: toStoredDateKey(block.start_date),
+      endDate: toStoredDateKey(block.end_date),
       label: block.label,
     },
   })

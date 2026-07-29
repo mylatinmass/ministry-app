@@ -22,7 +22,7 @@ const emptyResponsibility = (ministryId = "") => ({
   quantityNeeded: 1,
   approvalRequired: false,
   isRequired: true,
-  requiredQualification: "",
+  requiredLevelId: "",
   relativeStartMinutes: 0,
   instructions: "",
 })
@@ -54,6 +54,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
   const [library, setLibrary] = React.useState({
     templates: [],
     ministries: [],
+    levels: [],
   })
   const [form, setForm] = React.useState(() =>
     initialForm(data.ministry.id),
@@ -174,7 +175,11 @@ const MinistryTemplates = ({ data, activeAction }) => {
           ],
       responsibilities: current.responsibilities.map((responsibility) =>
         responsibility.clientId === clientId
-          ? { ...responsibility, ministryId }
+          ? {
+              ...responsibility,
+              ministryId,
+              requiredLevelId: "",
+            }
           : responsibility,
       ),
     }))
@@ -625,18 +630,33 @@ const MinistryTemplates = ({ data, activeAction }) => {
                                 </option>
                               ))}
                             </select>
-                            <input
-                              value={responsibility.requiredQualification}
+                            <select
+                              value={responsibility.requiredLevelId || ""}
                               onChange={(event) =>
                                 updateResponsibility(
                                   responsibility.clientId,
-                                  "requiredQualification",
+                                  "requiredLevelId",
                                   event.target.value,
                                 )
                               }
-                              placeholder="Required qualification (optional)"
-                              className="h-10 rounded-lg border border-gray-200 px-3 text-sm"
-                            />
+                              aria-label={`Required level for ${
+                                responsibility.name || "responsibility"
+                              }`}
+                              className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm"
+                            >
+                              <option value="">No level required</option>
+                              {library.levels
+                                .filter(
+                                  (level) =>
+                                    level.ministryId ===
+                                    responsibility.ministryId,
+                                )
+                                .map((level) => (
+                                  <option key={level.id} value={level.id}>
+                                    Level {level.rankOrder} · {level.name}
+                                  </option>
+                                ))}
+                            </select>
                             <input
                               type="number"
                               value={responsibility.relativeStartMinutes}

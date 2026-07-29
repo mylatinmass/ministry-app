@@ -18,8 +18,13 @@ const tables = [
   "users",
   "ministries",
   "ministry_members",
+  "ministry_levels",
   "templates",
+  "template_ministries",
+  "template_responsibilities",
+  "template_versions",
   "events",
+  "event_ministries",
   "event_responsibilities",
   "responsibility_assignments",
   "member_availability",
@@ -30,6 +35,10 @@ const tables = [
   "managed_profile_membership_request_recipients",
   "managed_profile_separations",
   "managed_profile_audit",
+  "ministry_audit_log",
+  "push_subscriptions",
+  "ministry_reminders",
+  "ministry_reminder_deliveries",
 ]
 
 const client = new Client({

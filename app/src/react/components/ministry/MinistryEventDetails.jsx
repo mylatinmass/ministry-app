@@ -21,7 +21,7 @@ const blankResponsibility = {
   quantityNeeded: 1,
   approvalRequired: false,
   isRequired: true,
-  requiredQualification: "",
+  requiredLevelId: "",
   relativeStartMinutes: 0,
   instructions: "",
 }
@@ -151,7 +151,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
       quantityNeeded: responsibility.quantityNeeded,
       approvalRequired: responsibility.approvalRequired,
       isRequired: responsibility.isRequired,
-      requiredQualification: responsibility.requiredQualification,
+      requiredLevelId: responsibility.requiredLevelId || "",
       relativeStartMinutes: responsibility.relativeStartMinutes,
       instructions: responsibility.instructions,
     })
@@ -161,6 +161,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
     setResponsibilityForm((current) => ({
       ...current,
       [field]: value,
+      ...(field === "ministryId" ? { requiredLevelId: "" } : {}),
     }))
 
   const saveResponsibility = async (submitEvent) => {
@@ -576,17 +577,30 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                   />
                 </label>
                 <label className="text-sm font-semibold text-gray-700">
-                  Required qualification
-                  <input
-                    value={responsibilityForm.requiredQualification}
+                  Required ministry level
+                  <select
+                    value={responsibilityForm.requiredLevelId || ""}
                     onChange={(event) =>
                       updateResponsibilityField(
-                        "requiredQualification",
+                        "requiredLevelId",
                         event.target.value,
                       )
                     }
-                    className="mt-2 h-10 w-full rounded-lg border border-gray-200 px-3 font-normal"
-                  />
+                    className="mt-2 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal"
+                  >
+                    <option value="">No level required</option>
+                    {(details?.levels || [])
+                      .filter(
+                        (level) =>
+                          level.ministryId ===
+                          responsibilityForm.ministryId,
+                      )
+                      .map((level) => (
+                        <option key={level.id} value={level.id}>
+                          Level {level.rankOrder} · {level.name}
+                        </option>
+                      ))}
+                  </select>
                 </label>
                 <label className="text-sm font-semibold text-gray-700">
                   Minutes relative to event
@@ -712,8 +726,8 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                               )}{" "}
                               · {responsibility.assignedQuantity}/
                               {responsibility.quantityNeeded} assigned
-                              {responsibility.requiredQualification
-                                ? ` · ${responsibility.requiredQualification}`
+                              {responsibility.requiredLevelName
+                                ? ` · Requires ${responsibility.requiredLevelName} or higher`
                                 : ""}
                             </p>
                             {responsibility.instructions && (
@@ -770,6 +784,9 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                                           value={member.userId}
                                         >
                                           {member.firstName} {member.lastName}
+                                          {member.highestLevelName
+                                            ? ` · ${member.highestLevelName}`
+                                            : ""}
                                         </option>
                                       ),
                                     )}

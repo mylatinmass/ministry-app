@@ -26,6 +26,7 @@ type ResponsibilityInput = {
   quantityNeeded?: number
   approvalRequired?: boolean
   isRequired?: boolean
+  requiredLevelId?: string
   requiredQualification?: string
   relativeStartMinutes?: number
   instructions?: string
@@ -92,6 +93,8 @@ const normalizeTemplateInput = (body: any): TemplateInput => {
       quantityNeeded: positiveInteger(responsibility.quantityNeeded),
       approvalRequired: Boolean(responsibility.approvalRequired),
       isRequired: responsibility.isRequired !== false,
+      requiredLevelId:
+        cleanText(responsibility.requiredLevelId, 100) || undefined,
       requiredQualification: cleanText(
         responsibility.requiredQualification,
         250,
@@ -161,6 +164,24 @@ const loadAvailableMinistries = async (client: PoolClient) => {
   return result.rows
 }
 
+const loadAvailableLevels = async (client: PoolClient) => {
+  const result = await client.query(
+    `
+      SELECT id, ministry_id, name, description, rank_order
+      FROM ministry_levels
+      WHERE status = 'active'
+      ORDER BY ministry_id, rank_order
+    `,
+  )
+  return result.rows.map((level) => ({
+    id: level.id,
+    ministryId: level.ministry_id,
+    name: level.name,
+    description: level.description || "",
+    rankOrder: Number(level.rank_order),
+  }))
+}
+
 const loadTemplates = async (client: PoolClient, ministryId: string) => {
   const templateResult = await client.query(
     `
@@ -223,6 +244,9 @@ const loadTemplates = async (client: PoolClient, ministryId: string) => {
           responsibility.quantity_needed,
           responsibility.approval_required,
           responsibility.is_required,
+          responsibility.required_ministry_level_id,
+          ministry_level.name AS required_level_name,
+          ministry_level.rank_order AS required_level_rank,
           responsibility.required_qualification,
           responsibility.relative_start_minutes,
           responsibility.instructions,
@@ -230,6 +254,8 @@ const loadTemplates = async (client: PoolClient, ministryId: string) => {
         FROM template_responsibilities responsibility
         JOIN template_ministries block
           ON block.id = responsibility.template_ministry_id
+        LEFT JOIN ministry_levels ministry_level
+          ON ministry_level.id = responsibility.required_ministry_level_id
         WHERE responsibility.template_id = ANY($1::UUID[])
           AND responsibility.status = 'active'
         ORDER BY responsibility.sort_order, lower(responsibility.name)
@@ -273,6 +299,9 @@ const loadTemplates = async (client: PoolClient, ministryId: string) => {
               responsibility?.approval_required,
             ),
             is_required: responsibility?.is_required !== false,
+            required_ministry_level_id: null,
+            required_level_name: null,
+            required_level_rank: null,
             required_qualification:
               responsibility?.required_qualification || "",
             relative_start_minutes:
@@ -310,6 +339,11 @@ const loadTemplates = async (client: PoolClient, ministryId: string) => {
         quantityNeeded: Number(responsibility.quantity_needed),
         approvalRequired: responsibility.approval_required,
         isRequired: responsibility.is_required,
+        requiredLevelId:
+          responsibility.required_ministry_level_id || "",
+        requiredLevelName: responsibility.required_level_name || "",
+        requiredLevelRank:
+          Number(responsibility.required_level_rank) || null,
         requiredQualification:
           responsibility.required_qualification || "",
         relativeStartMinutes: Number(
@@ -339,6 +373,44 @@ const ensureMinistriesExist = async (
   if (result.rowCount !== new Set(ministryIds).size) {
     throw Object.assign(
       new Error("One or more participating ministries are unavailable"),
+      { status: 400 },
+    )
+  }
+}
+
+const ensureResponsibilityLevelsExist = async (
+  client: PoolClient,
+  responsibilities: ResponsibilityInput[],
+) => {
+  const selected = responsibilities.filter(
+    (responsibility) => responsibility.requiredLevelId,
+  )
+  if (!selected.length) return
+
+  const levelIds = Array.from(
+    new Set(selected.map((responsibility) => responsibility.requiredLevelId)),
+  )
+  const result = await client.query(
+    `
+      SELECT id, ministry_id
+      FROM ministry_levels
+      WHERE id = ANY($1::UUID[])
+        AND status = 'active'
+    `,
+    [levelIds],
+  )
+  const ministryByLevel = new Map(
+    result.rows.map((level) => [level.id, level.ministry_id]),
+  )
+  if (
+    selected.some(
+      (responsibility) =>
+        ministryByLevel.get(responsibility.requiredLevelId) !==
+        responsibility.ministryId,
+    )
+  ) {
+    throw Object.assign(
+      new Error("Every required level must belong to its responsibility ministry"),
       { status: 400 },
     )
   }
@@ -386,13 +458,14 @@ const insertTemplateStructure = async (
           quantity_needed,
           approval_required,
           is_required,
+          required_ministry_level_id,
           required_qualification,
           relative_start_minutes,
           instructions,
           sort_order
         )
         VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
         )
       `,
       [
@@ -404,6 +477,7 @@ const insertTemplateStructure = async (
         responsibility.quantityNeeded || 1,
         Boolean(responsibility.approvalRequired),
         responsibility.isRequired !== false,
+        responsibility.requiredLevelId || null,
         responsibility.requiredQualification || null,
         responsibility.relativeStartMinutes || 0,
         responsibility.instructions || null,
@@ -428,6 +502,10 @@ const createTemplate = async (
   await ensureMinistriesExist(
     client,
     input.ministries!.map((block) => block.ministryId),
+  )
+  await ensureResponsibilityLevelsExist(
+    client,
+    input.responsibilities || [],
   )
 
   const templateResult = await client.query(
@@ -507,6 +585,10 @@ const updateTemplate = async (
   await ensureMinistriesExist(
     client,
     input.ministries!.map((block) => block.ministryId),
+  )
+  await ensureResponsibilityLevelsExist(
+    client,
+    input.responsibilities || [],
   )
 
   const nextVersion = Number(existing.version) + 1
@@ -609,9 +691,10 @@ export const handleTemplates = async (request: Request) => {
     if (request.method === "GET") {
       if (!ministryId) return json({ message: "Ministry is required" }, 400)
       await requireMinistryAccess(client, context.user, ministryId, true)
-      const [loadedTemplates, ministries] = await Promise.all([
+      const [loadedTemplates, ministries, levels] = await Promise.all([
         loadTemplates(client, ministryId),
         loadAvailableMinistries(client),
+        loadAvailableLevels(client),
       ])
       const templates = await Promise.all(
         loadedTemplates.map(async (template) => ({
@@ -625,7 +708,7 @@ export const handleTemplates = async (request: Request) => {
           ).canManage,
         })),
       )
-      return json({ templates, ministries, canManage: true })
+      return json({ templates, ministries, levels, canManage: true })
     }
 
     if (request.method === "POST") {

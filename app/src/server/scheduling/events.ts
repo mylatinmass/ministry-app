@@ -88,6 +88,7 @@ const normalizeEventResponsibility = (body: any) => {
     quantityNeeded,
     approvalRequired: Boolean(body.approvalRequired),
     isRequired: body.isRequired !== false,
+    requiredLevelId: cleanText(body.requiredLevelId, 100) || null,
     requiredQualification:
       cleanText(body.requiredQualification, 500) || null,
     relativeStartMinutes: Number.isInteger(relativeStartMinutes)
@@ -201,6 +202,7 @@ const loadTemplateStructure = async (
           responsibility.quantity_needed,
           responsibility.approval_required,
           responsibility.is_required,
+          responsibility.required_ministry_level_id,
           responsibility.required_qualification,
           responsibility.relative_start_minutes,
           responsibility.instructions,
@@ -252,6 +254,7 @@ const loadTemplateStructure = async (
             ) || 1,
           approval_required: Boolean(responsibility?.approval_required),
           is_required: responsibility?.is_required !== false,
+          required_ministry_level_id: null,
           required_qualification:
             responsibility?.required_qualification || null,
           relative_start_minutes:
@@ -362,6 +365,7 @@ const createEventFromStructure = async (
           quantity_needed,
           approval_required,
           is_required,
+          required_ministry_level_id,
           required_qualification,
           relative_start_minutes,
           instructions,
@@ -369,7 +373,7 @@ const createEventFromStructure = async (
           status
         )
         VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'open'
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'open'
         )
       `,
       [
@@ -382,6 +386,7 @@ const createEventFromStructure = async (
         Number(responsibility.quantity_needed) || 1,
         Boolean(responsibility.approval_required),
         responsibility.is_required !== false,
+        responsibility.required_ministry_level_id || null,
         responsibility.required_qualification || null,
         Number(responsibility.relative_start_minutes) || 0,
         responsibility.instructions || null,
@@ -551,6 +556,9 @@ const loadEventDetails = async (
         responsibility.quantity_needed,
         responsibility.approval_required,
         responsibility.is_required,
+        responsibility.required_ministry_level_id,
+        required_level.name AS required_level_name,
+        required_level.rank_order AS required_level_rank,
         responsibility.required_qualification,
         responsibility.relative_start_minutes,
         responsibility.instructions,
@@ -567,6 +575,8 @@ const loadEventDetails = async (
         ) AS assigned_quantity
       FROM event_responsibilities responsibility
       LEFT JOIN ministries ministry ON ministry.id = responsibility.ministry_id
+      LEFT JOIN ministry_levels required_level
+        ON required_level.id = responsibility.required_ministry_level_id
       WHERE responsibility.event_id = $1
       ORDER BY lower(ministry.name), responsibility.sort_order, lower(responsibility.name)
     `,
@@ -609,7 +619,9 @@ const loadEventDetails = async (
             responsibility.id AS responsibility_id,
             member.id AS user_id,
             member.first_name,
-            member.last_name
+            member.last_name,
+            granted_level.name AS highest_level_name,
+            granted_level.rank_order AS highest_level_rank
           FROM event_responsibilities responsibility
           JOIN ministry_members membership
             ON membership.ministry_id =
@@ -617,10 +629,23 @@ const loadEventDetails = async (
            AND membership.status = 'active'
            AND membership.can_serve = true
           JOIN users member ON member.id = membership.user_id
+          LEFT JOIN ministry_levels required_level
+            ON required_level.id =
+              responsibility.required_ministry_level_id
+          LEFT JOIN ministry_levels granted_level
+            ON granted_level.id = membership.highest_level_id
           WHERE responsibility.event_id = $1
             AND responsibility.status <> 'cancelled'
             AND COALESCE(responsibility.ministry_id, $2)
               = ANY($3::UUID[])
+            AND (
+              required_level.id IS NULL
+              OR (
+                granted_level.ministry_id =
+                  COALESCE(responsibility.ministry_id, $2)
+                AND granted_level.rank_order >= required_level.rank_order
+              )
+            )
             AND NOT EXISTS (
               SELECT 1
               FROM availability_blocks block
@@ -691,9 +716,24 @@ const loadEventDetails = async (
       userId: candidate.user_id,
       firstName: candidate.first_name,
       lastName: candidate.last_name,
+      highestLevelName: candidate.highest_level_name || "",
+      highestLevelRank: Number(candidate.highest_level_rank) || null,
     })
     candidatesByResponsibility.set(candidate.responsibility_id, candidates)
   }
+
+  const levelResult = manageableMinistryIds.length
+    ? await client.query(
+        `
+          SELECT id, ministry_id, name, description, rank_order
+          FROM ministry_levels
+          WHERE ministry_id = ANY($1::UUID[])
+            AND status = 'active'
+          ORDER BY ministry_id, rank_order
+        `,
+        [manageableMinistryIds],
+      )
+    : { rows: [] }
 
   return {
     ...event,
@@ -721,6 +761,11 @@ const loadEventDetails = async (
       assignedQuantity: Number(responsibility.assigned_quantity),
       approvalRequired: responsibility.approval_required,
       isRequired: responsibility.is_required,
+      requiredLevelId:
+        responsibility.required_ministry_level_id || "",
+      requiredLevelName: responsibility.required_level_name || "",
+      requiredLevelRank:
+        Number(responsibility.required_level_rank) || null,
       requiredQualification: responsibility.required_qualification || "",
       relativeStartMinutes: Number(responsibility.relative_start_minutes),
       instructions: responsibility.instructions || "",
@@ -730,6 +775,13 @@ const loadEventDetails = async (
         assignmentsByResponsibility.get(responsibility.id) || [],
       availableMembers:
         candidatesByResponsibility.get(responsibility.id) || [],
+    })),
+    levels: levelResult.rows.map((level) => ({
+      id: level.id,
+      ministryId: level.ministry_id,
+      name: level.name,
+      description: level.description || "",
+      rankOrder: Number(level.rank_order),
     })),
     canManageEvent,
   }
@@ -850,6 +902,8 @@ const cloneEvent = async (
       quantity_needed: responsibility.quantity_needed,
       approval_required: responsibility.approval_required,
       is_required: responsibility.is_required,
+      required_ministry_level_id:
+        responsibility.required_ministry_level_id,
       required_qualification: responsibility.required_qualification,
       relative_start_minutes: responsibility.relative_start_minutes,
       instructions: responsibility.instructions,
@@ -1051,6 +1105,7 @@ const assignMemberToResponsibility = async (
         COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id,
         responsibility.name,
         responsibility.quantity_needed,
+        responsibility.required_ministry_level_id,
         responsibility.status
       FROM event_responsibilities responsibility
       JOIN events event ON event.id = responsibility.event_id
@@ -1080,10 +1135,21 @@ const assignMemberToResponsibility = async (
       SELECT member.id, member.first_name, member.last_name
       FROM ministry_members membership
       JOIN users member ON member.id = membership.user_id
+      LEFT JOIN ministry_levels required_level
+        ON required_level.id = $8
+      LEFT JOIN ministry_levels granted_level
+        ON granted_level.id = membership.highest_level_id
       WHERE membership.ministry_id = $1
         AND membership.user_id = $2
         AND membership.status = 'active'
         AND membership.can_serve = true
+        AND (
+          required_level.id IS NULL
+          OR (
+            granted_level.ministry_id = $1
+            AND granted_level.rank_order >= required_level.rank_order
+          )
+        )
         AND NOT EXISTS (
           SELECT 1
           FROM availability_blocks block
@@ -1114,6 +1180,7 @@ const assignMemberToResponsibility = async (
       event.id,
       event.start_time,
       event.end_time,
+      responsibility.required_ministry_level_id,
     ],
   )
   const member = eligibleResult.rows[0]
@@ -1245,6 +1312,31 @@ const assignMemberToResponsibility = async (
   return "Member assigned"
 }
 
+const validateRequiredMinistryLevel = async (
+  client: PoolClient,
+  requiredLevelId: string | null,
+  ministryId: string,
+) => {
+  if (!requiredLevelId) return
+  const result = await client.query(
+    `
+      SELECT id
+      FROM ministry_levels
+      WHERE id = $1
+        AND ministry_id = $2
+        AND status = 'active'
+      LIMIT 1
+    `,
+    [requiredLevelId, ministryId],
+  )
+  if (!result.rowCount) {
+    throw Object.assign(
+      new Error("Select an active level from this responsibility's ministry"),
+      { status: 400 },
+    )
+  }
+}
+
 const mutateEventResponsibility = async (
   client: PoolClient,
   context: any,
@@ -1283,6 +1375,11 @@ const mutateEventResponsibility = async (
     }
 
     const input = normalizeEventResponsibility(body)
+    await validateRequiredMinistryLevel(
+      client,
+      input.requiredLevelId,
+      ministryId,
+    )
     const createdResult = await client.query(
       `
         INSERT INTO event_responsibilities (
@@ -1294,6 +1391,7 @@ const mutateEventResponsibility = async (
           quantity_needed,
           approval_required,
           is_required,
+          required_ministry_level_id,
           required_qualification,
           relative_start_minutes,
           instructions,
@@ -1301,7 +1399,7 @@ const mutateEventResponsibility = async (
           status
         )
         VALUES (
-          $1, $2, NULL, $3, $4, $5, $6, $7, $8, $9, $10,
+          $1, $2, NULL, $3, $4, $5, $6, $7, $8, $9, $10, $11,
           (
             SELECT COALESCE(max(sort_order), -1) + 1
             FROM event_responsibilities
@@ -1320,6 +1418,7 @@ const mutateEventResponsibility = async (
         input.quantityNeeded,
         input.approvalRequired,
         input.isRequired,
+        input.requiredLevelId,
         input.requiredQualification,
         input.relativeStartMinutes,
         input.instructions,
@@ -1387,6 +1486,11 @@ const mutateEventResponsibility = async (
 
   if (body.action === "update_responsibility") {
     const input = normalizeEventResponsibility(body)
+    await validateRequiredMinistryLevel(
+      client,
+      input.requiredLevelId,
+      responsibility.ministry_id,
+    )
     if (input.quantityNeeded < Number(responsibility.assigned_quantity)) {
       throw Object.assign(
         new Error(
@@ -1403,9 +1507,10 @@ const mutateEventResponsibility = async (
             quantity_needed = $4,
             approval_required = $5,
             is_required = $6,
-            required_qualification = $7,
-            relative_start_minutes = $8,
-            instructions = $9,
+            required_ministry_level_id = $7,
+            required_qualification = $8,
+            relative_start_minutes = $9,
+            instructions = $10,
             updated_at = now()
         WHERE id = $1
         RETURNING *
@@ -1417,6 +1522,7 @@ const mutateEventResponsibility = async (
         input.quantityNeeded,
         input.approvalRequired,
         input.isRequired,
+        input.requiredLevelId,
         input.requiredQualification,
         input.relativeStartMinutes,
         input.instructions,
@@ -1552,10 +1658,11 @@ const updateEvent = async (
                 quantity_needed = $4,
                 approval_required = $5,
                 is_required = $6,
-                required_qualification = $7,
-                relative_start_minutes = $8,
-                instructions = $9,
-                sort_order = $10,
+                required_ministry_level_id = $7,
+                required_qualification = $8,
+                relative_start_minutes = $9,
+                instructions = $10,
+                sort_order = $11,
                 updated_at = now()
             WHERE id = $1
           `,
@@ -1566,6 +1673,7 @@ const updateEvent = async (
             Number(responsibility.quantity_needed) || 1,
             Boolean(responsibility.approval_required),
             responsibility.is_required !== false,
+            responsibility.required_ministry_level_id || null,
             responsibility.required_qualification || null,
             Number(responsibility.relative_start_minutes) || 0,
             responsibility.instructions || null,
@@ -1586,6 +1694,7 @@ const updateEvent = async (
               quantity_needed,
               approval_required,
               is_required,
+              required_ministry_level_id,
               required_qualification,
               relative_start_minutes,
               instructions,
@@ -1593,7 +1702,7 @@ const updateEvent = async (
               status
             )
             VALUES (
-              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'open'
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'open'
             )
           `,
           [
@@ -1606,6 +1715,7 @@ const updateEvent = async (
             Number(responsibility.quantity_needed) || 1,
             Boolean(responsibility.approval_required),
             responsibility.is_required !== false,
+            responsibility.required_ministry_level_id || null,
             responsibility.required_qualification || null,
             Number(responsibility.relative_start_minutes) || 0,
             responsibility.instructions || null,

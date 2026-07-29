@@ -59,9 +59,19 @@ const loadProfile = async (client, context) => {
     ),
     client.query(
       `
-        SELECT m.id, m.slug, m.name, mm.level, mm.can_serve
+        SELECT
+          m.id,
+          m.slug,
+          m.name,
+          mm.level,
+          mm.can_serve,
+          ministry_level.id AS highest_level_id,
+          ministry_level.name AS highest_level_name,
+          ministry_level.rank_order AS highest_level_rank
         FROM ministry_members mm
         JOIN ministries m ON m.id = mm.ministry_id
+        LEFT JOIN ministry_levels ministry_level
+          ON ministry_level.id = mm.highest_level_id
         WHERE mm.user_id = $1
           AND mm.status = 'active'
           AND m.status = 'active'
@@ -92,6 +102,9 @@ const loadProfile = async (client, context) => {
       name: ministry.name,
       level: ministry.level,
       canServe: Boolean(ministry.can_serve),
+      highestLevelId: ministry.highest_level_id,
+      highestLevelName: ministry.highest_level_name,
+      highestLevelRank: Number(ministry.highest_level_rank) || null,
     })),
   }
 }

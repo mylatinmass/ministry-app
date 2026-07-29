@@ -1,7 +1,11 @@
 import * as React from "react"
 import {
+  ArchiveBoxIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
   CheckCircleIcon,
   EnvelopeIcon,
+  PlusIcon,
   UserMinusIcon,
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
@@ -21,6 +25,9 @@ const MinistryMembers = ({ data, activeAction }) => {
   ])
   const [isLoading, setIsLoading] = React.useState(true)
   const [isSubmitting, setIsSubmitting] = React.useState(false)
+  const [newLevelName, setNewLevelName] = React.useState("")
+  const [newLevelDescription, setNewLevelDescription] = React.useState("")
+  const [levelDrafts, setLevelDrafts] = React.useState({})
   const [message, setMessage] = React.useState("")
   const [errorMessage, setErrorMessage] = React.useState("")
 
@@ -46,6 +53,17 @@ const MinistryMembers = ({ data, activeAction }) => {
       const result = await response.json()
       if (!response.ok) throw new Error(result.message || "Unable to load members")
       setMemberData(result)
+      setLevelDrafts(
+        Object.fromEntries(
+          (result.levels || []).map((level) => [
+            level.id,
+            {
+              name: level.name,
+              description: level.description || "",
+            },
+          ]),
+        ),
+      )
       if (result.ministries?.some((ministry) => ministry.id === data.ministry.id)) {
         setSelectedMinistryIds((current) =>
           current.length ? current : [data.ministry.id]
@@ -100,7 +118,7 @@ const MinistryMembers = ({ data, activeAction }) => {
     }
   }
 
-  const updateMembership = async ({ userId, action, level, requestId }) => {
+  const updateMembership = async (membershipChange) => {
     setMessage("")
     setErrorMessage("")
     try {
@@ -113,27 +131,54 @@ const MinistryMembers = ({ data, activeAction }) => {
         },
         body: JSON.stringify({
           ministryId: data.ministry.id,
-          userId,
-          action,
-          level,
-          requestId,
+          ...membershipChange,
         }),
       })
       const result = await response.json()
       if (!response.ok) throw new Error(result.message || "Unable to update member")
       setMessage(result.message)
-      if (action === "leave") {
+      if (membershipChange.action === "leave") {
         if (data.user.globalRole === "regular") {
           window.sessionStorage.removeItem(MINISTRY_SESSION_KEY)
         }
         window.location.assign("/ministry")
-        return
+        return true
       }
       await loadMembers()
+      return true
     } catch (error) {
       setErrorMessage(error.message)
+      return false
     }
   }
+
+  const createMinistryLevel = async (event) => {
+    event.preventDefault()
+    if (!newLevelName.trim()) return
+    setIsSubmitting(true)
+    try {
+      const saved = await updateMembership({
+        action: "create_ministry_level",
+        name: newLevelName,
+        description: newLevelDescription,
+      })
+      if (saved) {
+        setNewLevelName("")
+        setNewLevelDescription("")
+      }
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const updateLevelDraft = (levelId, field, value) =>
+    setLevelDrafts((current) => ({
+      ...current,
+      [levelId]: {
+        ...current[levelId],
+        [field]: value,
+      },
+    }))
 
   if (isLoading) {
     return <p className="p-6 text-center text-gray-500">Loading members...</p>
@@ -149,6 +194,11 @@ const MinistryMembers = ({ data, activeAction }) => {
         <h3 className="century-font text-2xl text-[#6f4f34]">Your membership</h3>
         <p className="mt-3 text-sm leading-relaxed text-gray-600">
           You are a Member of {data.ministry.name}. You may leave this ministry at any time.
+        </p>
+        <p className="mt-3 text-sm font-semibold text-[#6f4f34]">
+          Ministry level:{" "}
+          {memberData.currentMembership?.highestLevelName ||
+            "Not assigned yet"}
         </p>
         <button
           type="button"
@@ -236,41 +286,239 @@ const MinistryMembers = ({ data, activeAction }) => {
       )}
 
       {activeAction.id === "roles" && (
-        <section>
-          <div className="mb-4">
-            <h3 className="century-font text-2xl text-gray-900">Member roles</h3>
-            <p className="mt-1 text-sm text-gray-500">Leaders can manage this ministry. New invitations always begin as Member.</p>
-          </div>
-          <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
-            {memberData.members.map((member) => (
-              <div key={member.id} className="flex flex-col gap-3 border-b border-gray-100 p-4 last:border-0 sm:flex-row sm:items-center">
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-gray-900">{member.firstName} {member.lastName}</p>
-                  <p className="truncate text-sm text-gray-500">{member.email} · {member.username || "Account pending"}</p>
-                </div>
-                {member.level === "owner" ? (
-                  <span className="rounded-full bg-[#f4ede6] px-3 py-1 text-sm font-semibold text-[#896542]">Owner</span>
-                ) : (
-                  <select
-                    aria-label={`Role for ${member.firstName} ${member.lastName}`}
-                    value={member.level}
-                    onChange={(event) =>
-                      updateMembership({
-                        userId: member.userId,
-                        action: "set_role",
-                        level: event.target.value,
-                      })
-                    }
-                    className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700"
+        <div className="space-y-8">
+          <section>
+            <div className="mb-4">
+              <h3 className="century-font text-2xl text-gray-900">
+                Ministry levels
+              </h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Levels run from least to most capable. A member may serve their
+                highest granted level and every level below it.
+              </p>
+            </div>
+            <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+              {[...(memberData.levels || [])].reverse().map((level) => {
+                const levelIndex = memberData.levels.findIndex(
+                  (candidate) => candidate.id === level.id,
+                )
+                const draft = levelDrafts[level.id] || {
+                  name: level.name,
+                  description: level.description || "",
+                }
+                return (
+                  <div
+                    key={level.id}
+                    className="grid gap-3 border-b border-gray-100 p-4 last:border-0 sm:grid-cols-[auto_1fr_auto] sm:items-center"
                   >
-                    <option value="member">Member</option>
-                    <option value="admin">Leader</option>
-                  </select>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
+                    <span className="inline-flex size-8 items-center justify-center rounded-full bg-[#f4ede6] text-sm font-semibold text-[#896542]">
+                      {level.rankOrder}
+                    </span>
+                    <div className="grid gap-2 sm:grid-cols-[0.8fr_1.2fr]">
+                      <input
+                        value={draft.name}
+                        onChange={(event) =>
+                          updateLevelDraft(
+                            level.id,
+                            "name",
+                            event.target.value,
+                          )
+                        }
+                        aria-label={`Name for level ${level.rankOrder}`}
+                        className="h-10 rounded-lg border border-gray-200 px-3 text-sm font-semibold text-gray-800 outline-none focus:border-[#896542]"
+                      />
+                      <input
+                        value={draft.description}
+                        onChange={(event) =>
+                          updateLevelDraft(
+                            level.id,
+                            "description",
+                            event.target.value,
+                          )
+                        }
+                        aria-label={`Description for ${level.name}`}
+                        placeholder="What members at this level can do"
+                        className="h-10 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#896542]"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateMembership({
+                            action: "move_ministry_level",
+                            levelId: level.id,
+                            direction: "up",
+                          })
+                        }
+                        disabled={levelIndex === memberData.levels.length - 1}
+                        aria-label={`Move ${level.name} higher`}
+                        className="rounded-lg border border-gray-200 p-2 text-gray-500 hover:border-[#C1A387] disabled:opacity-30"
+                      >
+                        <ChevronUpIcon className="size-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateMembership({
+                            action: "move_ministry_level",
+                            levelId: level.id,
+                            direction: "down",
+                          })
+                        }
+                        disabled={levelIndex === 0}
+                        aria-label={`Move ${level.name} lower`}
+                        className="rounded-lg border border-gray-200 p-2 text-gray-500 hover:border-[#C1A387] disabled:opacity-30"
+                      >
+                        <ChevronDownIcon className="size-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateMembership({
+                            action: "update_ministry_level",
+                            levelId: level.id,
+                            ...draft,
+                          })
+                        }
+                        className="rounded-lg border border-[#d8c7b8] px-3 py-2 text-sm font-semibold text-[#6f4f34]"
+                      >
+                        Update
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `Archive "${level.name}"? It must not be assigned to members or responsibilities.`,
+                            )
+                          ) {
+                            updateMembership({
+                              action: "archive_ministry_level",
+                              levelId: level.id,
+                            })
+                          }
+                        }}
+                        aria-label={`Archive ${level.name}`}
+                        className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-700"
+                      >
+                        <ArchiveBoxIcon className="size-4" />
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+              {!memberData.levels?.length && (
+                <p className="p-5 text-center text-sm text-gray-500">
+                  No levels have been configured for this ministry.
+                </p>
+              )}
+              <form
+                onSubmit={createMinistryLevel}
+                className="grid gap-3 border-t border-gray-100 bg-[#fcfaf8] p-4 sm:grid-cols-[0.8fr_1.2fr_auto]"
+              >
+                <input
+                  value={newLevelName}
+                  onChange={(event) => setNewLevelName(event.target.value)}
+                  required
+                  placeholder="New level name"
+                  className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#896542]"
+                />
+                <input
+                  value={newLevelDescription}
+                  onChange={(event) =>
+                    setNewLevelDescription(event.target.value)
+                  }
+                  placeholder="What this level can serve"
+                  className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#896542]"
+                />
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#896542] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  <PlusIcon className="size-4" />
+                  Add level
+                </button>
+              </form>
+            </div>
+          </section>
+
+          <section>
+            <div className="mb-4">
+              <h3 className="century-font text-2xl text-gray-900">
+                Member roles and levels
+              </h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Access role controls administration. Highest ministry level
+                controls which responsibilities the member can serve.
+              </p>
+            </div>
+            <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+              {memberData.members.map((member) => (
+                <div
+                  key={member.id}
+                  className="flex flex-col gap-3 border-b border-gray-100 p-4 last:border-0 lg:flex-row lg:items-center"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-gray-900">
+                      {member.firstName} {member.lastName}
+                    </p>
+                    <p className="truncate text-sm text-gray-500">
+                      {member.email} · {member.username || "Account pending"}
+                    </p>
+                  </div>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                    Access
+                    {member.level === "owner" ? (
+                      <span className="mt-1 block rounded-full bg-[#f4ede6] px-3 py-2 text-sm font-semibold normal-case tracking-normal text-[#896542]">
+                        Owner
+                      </span>
+                    ) : (
+                      <select
+                        aria-label={`Role for ${member.firstName} ${member.lastName}`}
+                        value={member.level}
+                        onChange={(event) =>
+                          updateMembership({
+                            userId: member.userId,
+                            action: "set_role",
+                            level: event.target.value,
+                          })
+                        }
+                        className="mt-1 block rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold normal-case tracking-normal text-gray-700"
+                      >
+                        <option value="member">Member</option>
+                        <option value="admin">Leader</option>
+                      </select>
+                    )}
+                  </label>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                    Highest ministry level
+                    <select
+                      aria-label={`Highest ministry level for ${member.firstName} ${member.lastName}`}
+                      value={member.highestLevelId || ""}
+                      onChange={(event) =>
+                        updateMembership({
+                          userId: member.userId,
+                          action: "set_ministry_level",
+                          highestLevelId: event.target.value,
+                        })
+                      }
+                      className="mt-1 block min-w-48 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold normal-case tracking-normal text-gray-700"
+                    >
+                      <option value="">Not assigned</option>
+                      {memberData.levels.map((level) => (
+                        <option key={level.id} value={level.id}>
+                          Level {level.rankOrder} · {level.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
       )}
 
       {activeAction.id === "roster" && (
@@ -284,6 +532,9 @@ const MinistryMembers = ({ data, activeAction }) => {
                     <div>
                       <h4 className="font-semibold text-gray-900">{member.firstName} {member.lastName}</h4>
                       <p className="mt-1 text-sm text-gray-500">{member.email}</p>
+                      <p className="mt-1 text-xs font-semibold text-[#896542]">
+                        {member.highestLevelName || "No ministry level assigned"}
+                      </p>
                     </div>
                     <span className="rounded-full bg-[#f4ede6] px-2 py-1 text-xs font-semibold text-[#896542]">{roleLabels[member.level]}</span>
                   </div>

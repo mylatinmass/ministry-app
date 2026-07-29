@@ -58,15 +58,57 @@ const getManagedMinistries = async (client, user) => {
 const canManageMinistry = (managedMinistries, ministryId) =>
   managedMinistries.some((ministry) => ministry.id === ministryId)
 
+const cleanText = (value, maximum = 1000) =>
+  typeof value === "string" ? value.trim().slice(0, maximum) : ""
+
+const writeLevelAudit = async (
+  client,
+  { actor, user, action, entityType, entityId, ministryId, beforeData, afterData }
+) =>
+  client.query(
+    `
+      INSERT INTO ministry_audit_log (
+        actor_user_id,
+        active_profile_user_id,
+        action,
+        entity_type,
+        entity_id,
+        ministry_id,
+        before_data,
+        after_data
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7::JSONB, $8::JSONB)
+    `,
+    [
+      actor.id,
+      user.id,
+      action,
+      entityType,
+      entityId || null,
+      ministryId,
+      beforeData == null ? null : JSON.stringify(beforeData),
+      afterData == null ? null : JSON.stringify(afterData),
+    ]
+  )
+
 const listMembers = async (client, user, ministryId) => {
   const managedMinistries = await getManagedMinistries(client, user)
 
   if (!canManageMinistry(managedMinistries, ministryId)) {
     const membershipResult = await client.query(
       `
-        SELECT 1
-        FROM ministry_members
-        WHERE ministry_id = $1 AND user_id = $2 AND status = 'active'
+        SELECT
+          membership.level,
+          membership.can_serve,
+          membership.highest_level_id,
+          ministry_level.name AS highest_level_name,
+          ministry_level.rank_order AS highest_level_rank
+        FROM ministry_members membership
+        LEFT JOIN ministry_levels ministry_level
+          ON ministry_level.id = membership.highest_level_id
+        WHERE membership.ministry_id = $1
+          AND membership.user_id = $2
+          AND membership.status = 'active'
         LIMIT 1
       `,
       [ministryId, user.id]
@@ -80,10 +122,19 @@ const listMembers = async (client, user, ministryId) => {
       ministries: [],
       members: [],
       invitations: [],
+      levels: [],
+      currentMembership: {
+        level: membershipResult.rows[0].level,
+        canServe: Boolean(membershipResult.rows[0].can_serve),
+        highestLevelId: membershipResult.rows[0].highest_level_id,
+        highestLevelName: membershipResult.rows[0].highest_level_name,
+        highestLevelRank:
+          Number(membershipResult.rows[0].highest_level_rank) || null,
+      },
     })
   }
 
-  const [membersResult, invitationsResult, requestsResult] = await Promise.all([
+  const [membersResult, invitationsResult, requestsResult, levelsResult] = await Promise.all([
     client.query(
       `
         SELECT
@@ -96,9 +147,14 @@ const listMembers = async (client, user, ministryId) => {
           mm.level,
           mm.status,
           mm.can_serve,
+          mm.highest_level_id,
+          ministry_level.name AS highest_level_name,
+          ministry_level.rank_order AS highest_level_rank,
           mm.joined_at
         FROM ministry_members mm
         JOIN users u ON u.id = mm.user_id
+        LEFT JOIN ministry_levels ministry_level
+          ON ministry_level.id = mm.highest_level_id
         WHERE mm.ministry_id = $1
           AND mm.status = 'active'
         ORDER BY
@@ -149,6 +205,16 @@ const listMembers = async (client, user, ministryId) => {
       `,
       [ministryId]
     ),
+    client.query(
+      `
+        SELECT id, name, description, rank_order, status
+        FROM ministry_levels
+        WHERE ministry_id = $1
+          AND status = 'active'
+        ORDER BY rank_order
+      `,
+      [ministryId]
+    ),
   ])
 
   return jsonResponse(200, {
@@ -165,7 +231,17 @@ const listMembers = async (client, user, ministryId) => {
       level: member.level,
       status: member.status,
       canServe: member.can_serve,
+      highestLevelId: member.highest_level_id,
+      highestLevelName: member.highest_level_name,
+      highestLevelRank: Number(member.highest_level_rank) || null,
       joinedAt: member.joined_at,
+    })),
+    levels: levelsResult.rows.map((level) => ({
+      id: level.id,
+      name: level.name,
+      description: level.description || "",
+      rankOrder: Number(level.rank_order),
+      status: level.status,
     })),
     invitations: invitationsResult.rows.map((invitation) => ({
       id: invitation.id,
@@ -365,6 +441,268 @@ const updateMembership = async (
     return jsonResponse(400, { message: "Membership action is incomplete" })
   }
 
+  if (
+    [
+      "create_ministry_level",
+      "update_ministry_level",
+      "move_ministry_level",
+      "archive_ministry_level",
+    ].includes(action)
+  ) {
+    if (!canManageMinistry(managedMinistries, ministryId)) {
+      return jsonResponse(403, { message: "You cannot manage this ministry" })
+    }
+
+    await client.query("BEGIN")
+    try {
+      if (action === "create_ministry_level") {
+        const name = cleanText(body.name, 100)
+        const description = cleanText(body.description, 1000) || null
+        if (!name) {
+          await client.query("ROLLBACK")
+          return jsonResponse(400, { message: "Level name is required" })
+        }
+        const result = await client.query(
+          `
+            INSERT INTO ministry_levels (
+              ministry_id,
+              name,
+              description,
+              rank_order,
+              created_by,
+              updated_by
+            )
+            VALUES (
+              $1,
+              $2,
+              $3,
+              (
+                SELECT COALESCE(max(rank_order), 0) + 1
+                FROM ministry_levels
+                WHERE ministry_id = $1
+                  AND status = 'active'
+              ),
+              $4,
+              $4
+            )
+            RETURNING id, name, description, rank_order, status
+          `,
+          [ministryId, name, description, actor.id]
+        )
+        const created = result.rows[0]
+        await writeLevelAudit(client, {
+          actor,
+          user,
+          action: "ministry_level.created",
+          entityType: "ministry_level",
+          entityId: created.id,
+          ministryId,
+          afterData: created,
+        })
+        await client.query("COMMIT")
+        return jsonResponse(201, {
+          success: true,
+          message: `${created.name} added as the highest ministry level`,
+        })
+      }
+
+      const levelId = cleanText(body.levelId, 100)
+      if (!levelId) {
+        await client.query("ROLLBACK")
+        return jsonResponse(400, { message: "Ministry level is required" })
+      }
+      const levelResult = await client.query(
+        `
+          SELECT id, name, description, rank_order, status
+          FROM ministry_levels
+          WHERE id = $1
+            AND ministry_id = $2
+            AND status = 'active'
+          FOR UPDATE
+        `,
+        [levelId, ministryId]
+      )
+      const existingLevel = levelResult.rows[0]
+      if (!existingLevel) {
+        await client.query("ROLLBACK")
+        return jsonResponse(404, { message: "Ministry level not found" })
+      }
+
+      if (action === "update_ministry_level") {
+        const name = cleanText(body.name, 100)
+        const description = cleanText(body.description, 1000) || null
+        if (!name) {
+          await client.query("ROLLBACK")
+          return jsonResponse(400, { message: "Level name is required" })
+        }
+        const result = await client.query(
+          `
+            UPDATE ministry_levels
+            SET name = $2,
+                description = $3,
+                updated_by = $4,
+                updated_at = now()
+            WHERE id = $1
+            RETURNING id, name, description, rank_order, status
+          `,
+          [levelId, name, description, actor.id]
+        )
+        const updated = result.rows[0]
+        await writeLevelAudit(client, {
+          actor,
+          user,
+          action: "ministry_level.updated",
+          entityType: "ministry_level",
+          entityId: levelId,
+          ministryId,
+          beforeData: existingLevel,
+          afterData: updated,
+        })
+        await client.query("COMMIT")
+        return jsonResponse(200, {
+          success: true,
+          message: "Ministry level updated",
+        })
+      }
+
+      if (action === "move_ministry_level") {
+        const direction = body.direction === "up" ? "up" : "down"
+        const levelsResult = await client.query(
+          `
+            SELECT id, name, description, rank_order, status
+            FROM ministry_levels
+            WHERE ministry_id = $1
+              AND status = 'active'
+            ORDER BY rank_order
+            FOR UPDATE
+          `,
+          [ministryId]
+        )
+        const levels = levelsResult.rows.map((level) => ({ ...level }))
+        const currentIndex = levels.findIndex((level) => level.id === levelId)
+        const nextIndex = direction === "up" ? currentIndex + 1 : currentIndex - 1
+        if (currentIndex < 0 || nextIndex < 0 || nextIndex >= levels.length) {
+          await client.query("ROLLBACK")
+          return jsonResponse(409, {
+            message:
+              direction === "up"
+                ? "This is already the highest level"
+                : "This is already the lowest level",
+          })
+        }
+        ;[levels[currentIndex], levels[nextIndex]] = [
+          levels[nextIndex],
+          levels[currentIndex],
+        ]
+        const offset =
+          Math.max(...levels.map((level) => Number(level.rank_order)), 0) +
+          levels.length +
+          100
+        await client.query(
+          `
+            UPDATE ministry_levels
+            SET rank_order = rank_order + $2,
+                updated_by = $3,
+                updated_at = now()
+            WHERE ministry_id = $1
+              AND status = 'active'
+          `,
+          [ministryId, offset, actor.id]
+        )
+        for (const [index, level] of levels.entries()) {
+          await client.query(
+            `
+              UPDATE ministry_levels
+              SET rank_order = $2,
+                  updated_by = $3,
+                  updated_at = now()
+              WHERE id = $1
+            `,
+            [level.id, index + 1, actor.id]
+          )
+        }
+        await writeLevelAudit(client, {
+          actor,
+          user,
+          action: "ministry_level.reordered",
+          entityType: "ministry_level",
+          entityId: levelId,
+          ministryId,
+          beforeData: levelsResult.rows,
+          afterData: levels.map((level, index) => ({
+            id: level.id,
+            rank_order: index + 1,
+          })),
+        })
+        await client.query("COMMIT")
+        return jsonResponse(200, {
+          success: true,
+          message: "Ministry level order updated",
+        })
+      }
+
+      const usageResult = await client.query(
+        `
+          SELECT
+            EXISTS (
+              SELECT 1
+              FROM ministry_members
+              WHERE highest_level_id = $1
+            ) AS has_members,
+            EXISTS (
+              SELECT 1
+              FROM template_responsibilities
+              WHERE required_ministry_level_id = $1
+                AND status = 'active'
+            ) AS has_templates,
+            EXISTS (
+              SELECT 1
+              FROM event_responsibilities
+              WHERE required_ministry_level_id = $1
+                AND status <> 'cancelled'
+            ) AS has_events
+        `,
+        [levelId]
+      )
+      const usage = usageResult.rows[0]
+      if (usage.has_members || usage.has_templates || usage.has_events) {
+        await client.query("ROLLBACK")
+        return jsonResponse(409, {
+          message:
+            "This level is in use by members or responsibilities and cannot be archived",
+        })
+      }
+      await client.query(
+        `
+          UPDATE ministry_levels
+          SET status = 'archived',
+              updated_by = $2,
+              updated_at = now()
+          WHERE id = $1
+        `,
+        [levelId, actor.id]
+      )
+      await writeLevelAudit(client, {
+        actor,
+        user,
+        action: "ministry_level.archived",
+        entityType: "ministry_level",
+        entityId: levelId,
+        ministryId,
+        beforeData: existingLevel,
+        afterData: { ...existingLevel, status: "archived" },
+      })
+      await client.query("COMMIT")
+      return jsonResponse(200, {
+        success: true,
+        message: "Ministry level archived",
+      })
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {})
+      throw error
+    }
+  }
+
   if (["approve_request", "decline_request"].includes(action)) {
     if (!canManageMinistry(managedMinistries, ministryId)) {
       return jsonResponse(403, { message: "You cannot manage this ministry" })
@@ -461,6 +799,97 @@ const updateMembership = async (
     })
   }
 
+  if (action === "set_ministry_level") {
+    const highestLevelId = cleanText(body.highestLevelId, 100) || null
+    if (highestLevelId) {
+      const levelResult = await client.query(
+        `
+          SELECT id, name, rank_order
+          FROM ministry_levels
+          WHERE id = $1
+            AND ministry_id = $2
+            AND status = 'active'
+          LIMIT 1
+        `,
+        [highestLevelId, ministryId]
+      )
+      if (!levelResult.rowCount) {
+        return jsonResponse(400, {
+          message: "Select an active level from this ministry",
+        })
+      }
+    }
+    await client.query("BEGIN")
+    try {
+      const existingResult = await client.query(
+        `
+          SELECT
+            membership.id,
+            membership.highest_level_id,
+            (
+              SELECT name
+              FROM ministry_levels
+              WHERE id = membership.highest_level_id
+            ) AS highest_level_name,
+            (
+              SELECT rank_order
+              FROM ministry_levels
+              WHERE id = membership.highest_level_id
+            ) AS highest_level_rank
+          FROM ministry_members membership
+          WHERE membership.ministry_id = $1
+            AND membership.user_id = $2
+            AND membership.status = 'active'
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [ministryId, targetUserId]
+      )
+      const existing = existingResult.rows[0]
+      if (!existing) {
+        await client.query("ROLLBACK")
+        return jsonResponse(404, { message: "Member not found" })
+      }
+
+      const result = await client.query(
+        `
+          UPDATE ministry_members
+          SET highest_level_id = $1,
+              updated_at = now()
+          WHERE id = $2
+          RETURNING id, highest_level_id
+        `,
+        [highestLevelId, existing.id]
+      )
+      await writeLevelAudit(client, {
+        actor,
+        user,
+        action: "ministry_member.level_granted",
+        entityType: "ministry_member",
+        entityId: existing.id,
+        ministryId,
+        beforeData: {
+          highestLevelId: existing.highest_level_id,
+          highestLevelName: existing.highest_level_name,
+          highestLevelRank: Number(existing.highest_level_rank) || null,
+        },
+        afterData: {
+          highestLevelId: result.rows[0].highest_level_id,
+        },
+      })
+      await client.query("COMMIT")
+      return jsonResponse(200, {
+        success: true,
+        message: highestLevelId
+          ? "Member ministry level updated"
+          : "Member ministry level cleared",
+      })
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {})
+      throw error
+    }
+  }
+
   if (action === "remove" || isLeaving) {
     const result = await client.query(
       `
@@ -545,6 +974,11 @@ const handler = async (event) => {
     )
   } catch (error) {
     console.error("Unable to manage ministry members:", error)
+    if (error.code === "23505") {
+      return jsonResponse(409, {
+        message: "A ministry level with this name already exists",
+      })
+    }
     return jsonResponse(500, {
       message:
         error.message === "Invitation email is not configured"

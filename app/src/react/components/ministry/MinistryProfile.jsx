@@ -411,6 +411,9 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
                 <p className="mt-1 text-sm text-gray-500">
                   {membershipLabels[ministry.level] || ministry.level}
                   {ministry.canServe ? " · Serving member" : ""}
+                  {ministry.highestLevelName
+                    ? ` · ${ministry.highestLevelName}`
+                    : ""}
                 </p>
               </Link>
             ))}

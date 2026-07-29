@@ -29,6 +29,10 @@ const [
   availabilityComponent,
   availabilityRoute,
   availabilityApp,
+  ministryLevelsMigration,
+  ministryMembers,
+  ministryProfileServer,
+  ministryMembersComponent,
 ] = await Promise.all([
   read("astro.config.mjs"),
   read("src/pages/api/[...path].ts"),
@@ -52,6 +56,10 @@ const [
   read("src/react/components/ministry/MinistryAvailability.jsx"),
   read("src/pages/availability.astro"),
   read("src/react/pages/AvailabilityApp.jsx"),
+  read("migrations/20260729_03_add_ministry_levels.sql"),
+  read("src/server/legacy/ministry-members.js"),
+  read("src/server/legacy/ministry-profile.js"),
+  read("src/react/components/ministry/MinistryMembers.jsx"),
 ])
 
 assert.match(astroConfig, /site:\s*"https:\/\/www\.mylatinmass\.com"/)
@@ -167,6 +175,20 @@ assert.match(availabilityComponent, /lg:w-\[calc\(50%-0\.75rem\)\]/)
 assert.match(schedulingAvailability, /body\.requireConflictFree === true/)
 assert.match(availabilityRoute, /AvailabilityApp/)
 assert.match(availabilityApp, /MinistryRouteGuard/)
+assert.match(
+  ministryLevelsMigration,
+  /CREATE TABLE IF NOT EXISTS ministry_levels/,
+)
+assert.match(ministryLevelsMigration, /highest_level_id/)
+assert.match(ministryLevelsMigration, /required_ministry_level_id/)
+assert.match(ministryMembers, /ministry_level\.created/)
+assert.match(ministryMembers, /ministry_member\.level_granted/)
+assert.match(ministryMembers, /move_ministry_level/)
+assert.match(ministryProfileServer, /highest_level_name/)
+assert.match(ministryMembersComponent, /Highest ministry level/)
+assert.match(schedulingTemplates, /requiredLevelId/)
+assert.match(schedulingEvents, /granted_level\.rank_order >= required_level\.rank_order/)
+assert.match(eventDetails, /Requires \$\{responsibility\.requiredLevelName\} or higher/)
 
 const manifest = JSON.parse(manifestSource)
 assert.equal(manifest.start_url, "/ministry/")

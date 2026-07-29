@@ -368,14 +368,14 @@ const MinistryAvailability = () => {
             Loading availability...
           </p>
         ) : (
-          <div className="mt-4 grid h-[60vh] grid-cols-1 content-start gap-6 overflow-y-auto pr-1 lg:h-[36rem] lg:grid-cols-2">
+          <div className="mt-4 flex snap-x snap-mandatory gap-6 overflow-x-auto overflow-y-hidden pb-3 pr-1 touch-pan-x">
             {visibleMonths.map((month) => {
               const monthKey = `${month.getFullYear()}-${month.getMonth()}`
               const monthCells = getMonthCells(month)
               return (
                 <section
                   key={monthKey}
-                  className="rounded-xl border border-gray-100 p-3"
+                  className="w-full shrink-0 snap-start rounded-xl border border-gray-100 p-3 lg:w-[calc(50%-0.75rem)]"
                 >
                   <h4 className="text-center font-semibold text-gray-900">
                     {new Intl.DateTimeFormat("en-US", {

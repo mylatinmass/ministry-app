@@ -1,0 +1,10 @@
+---
+import AppLayout from "../layouts/AppLayout.astro"
+import MinistryPage from "../react/pages/ministry/[slug].jsx"
+
+const { slug } = Astro.params
+---
+
+<AppLayout title="Ministry | MyLatinMass.com">
+  <MinistryPage slug={slug} client:only="react" />
+</AppLayout>

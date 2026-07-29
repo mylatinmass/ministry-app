@@ -1,0 +1,8 @@
+---
+import AppLayout from "../layouts/AppLayout.astro"
+import MembershipRequestApp from "../react/pages/MembershipRequestApp.jsx"
+---
+
+<AppLayout title="Membership Request | MyLatinMass.com" referrer="no-referrer">
+  <MembershipRequestApp client:only="react" />
+</AppLayout>

@@ -1,0 +1,8 @@
+---
+import AppLayout from "../layouts/AppLayout.astro"
+import ProfileSeparateApp from "../react/pages/ProfileSeparateApp.jsx"
+---
+
+<AppLayout title="Activate Ministry Profile | MyLatinMass.com" referrer="no-referrer">
+  <ProfileSeparateApp client:only="react" />
+</AppLayout>

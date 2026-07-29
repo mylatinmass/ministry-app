@@ -30,6 +30,7 @@ __pycache__/
 coverage/
 dist/
 build/
+.vercel/
 
 # Real or temporary operational data must never be committed
 private-data/

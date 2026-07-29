@@ -1,0 +1,8 @@
+---
+import AppLayout from "../layouts/AppLayout.astro"
+import MinistryHome from "../react/pages/ministry/index.jsx"
+---
+
+<AppLayout title="Ministries | MyLatinMass.com">
+  <MinistryHome client:only="react" />
+</AppLayout>

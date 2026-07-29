@@ -21,6 +21,7 @@ const [
   schedulingTemplates,
   schedulingEvents,
   workspaceContent,
+  eventDetails,
 ] = await Promise.all([
   read("astro.config.mjs"),
   read("src/pages/api/[...path].ts"),
@@ -36,6 +37,7 @@ const [
   read("src/server/scheduling/templates.ts"),
   read("src/server/scheduling/events.ts"),
   read("src/react/components/ministry/MinistryWorkspaceContent.jsx"),
+  read("src/react/components/ministry/MinistryEventDetails.jsx"),
 ])
 
 assert.match(astroConfig, /site:\s*"https:\/\/www\.mylatinmass\.com"/)
@@ -102,8 +104,18 @@ assert.match(schedulingTemplates, /template_versions/)
 assert.match(schedulingTemplates, /writeSchedulingAudit/)
 assert.match(schedulingEvents, /createEventFromStructure/)
 assert.match(schedulingEvents, /set_schedule_status/)
+assert.match(schedulingEvents, /event_responsibility\.created/)
+assert.match(schedulingEvents, /event_responsibility\.updated/)
+assert.match(schedulingEvents, /event_responsibility\.cancelled/)
+assert.match(schedulingEvents, /source:\s*"event_override"/)
+assert.match(
+  schedulingEvents,
+  /responsibility\.template_responsibility_id\s*&&/,
+)
 assert.match(workspaceContent, /MinistryTemplates/)
 assert.match(workspaceContent, /MinistryEvents/)
+assert.match(eventDetails, /Add responsibility/)
+assert.match(eventDetails, /Event only/)
 
 const manifest = JSON.parse(manifestSource)
 assert.equal(manifest.start_url, "/ministry/")

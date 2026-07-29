@@ -25,9 +25,64 @@ const SCHEDULE_STATUSES = new Set([
   "cancelled",
   "completed",
 ])
+const RESPONSIBILITY_TYPES = new Set([
+  "position",
+  "food",
+  "task",
+  "time_slot",
+])
+const RESPONSIBILITY_ACTIONS = new Set([
+  "add_responsibility",
+  "update_responsibility",
+  "cancel_responsibility",
+])
 
 const cleanText = (value: unknown, maximum = 5000) =>
   typeof value === "string" ? value.trim().slice(0, maximum) : ""
+
+const normalizeEventResponsibility = (body: any) => {
+  const name = cleanText(body.name, 250)
+  const responsibilityType = RESPONSIBILITY_TYPES.has(
+    body.responsibilityType,
+  )
+    ? body.responsibilityType
+    : "position"
+  const quantityNeeded = Number.parseInt(body.quantityNeeded, 10)
+  const relativeStartMinutes = Number.parseInt(
+    body.relativeStartMinutes,
+    10,
+  )
+
+  if (!name) {
+    throw Object.assign(new Error("Responsibility name is required"), {
+      status: 400,
+    })
+  }
+  if (
+    !Number.isInteger(quantityNeeded) ||
+    quantityNeeded < 1 ||
+    quantityNeeded > 100
+  ) {
+    throw Object.assign(
+      new Error("Responsibility quantity must be between 1 and 100"),
+      { status: 400 },
+    )
+  }
+
+  return {
+    name,
+    responsibilityType,
+    quantityNeeded,
+    approvalRequired: Boolean(body.approvalRequired),
+    isRequired: body.isRequired !== false,
+    requiredQualification:
+      cleanText(body.requiredQualification, 500) || null,
+    relativeStartMinutes: Number.isInteger(relativeStartMinutes)
+      ? relativeStartMinutes
+      : 0,
+    instructions: cleanText(body.instructions) || null,
+  }
+}
 
 const parseDate = (value: unknown, fieldName: string) => {
   const date = new Date(typeof value === "string" ? value : "")
@@ -441,6 +496,7 @@ const loadEventDetails = async (
     ),
   )
   const canViewAny = accessChecks.some((access) => access.canView)
+  const canManageAny = accessChecks.some((access) => access.canManage)
   const canManageEvent = (
     await getMinistryAccess(client, context.user, event.ministry_id)
   ).canManage
@@ -449,7 +505,11 @@ const loadEventDetails = async (
       status: 403,
     })
   }
-  if (!canManageEvent && !["published", "cancelled", "completed"].includes(event.status)) {
+  if (
+    !canManageEvent &&
+    !canManageAny &&
+    !["published", "cancelled", "completed"].includes(event.status)
+  ) {
     throw Object.assign(new Error("This event is not published"), {
       status: 403,
     })
@@ -460,6 +520,7 @@ const loadEventDetails = async (
       SELECT
         responsibility.id,
         responsibility.ministry_id,
+        responsibility.template_responsibility_id,
         ministry.name AS ministry_name,
         responsibility.name,
         responsibility.description,
@@ -506,6 +567,7 @@ const loadEventDetails = async (
     responsibilities: responsibilityResult.rows.map((responsibility) => ({
       id: responsibility.id,
       ministryId: responsibility.ministry_id,
+      templateResponsibilityId: responsibility.template_responsibility_id,
       ministryName: responsibility.ministry_name,
       name: responsibility.name,
       description: responsibility.description || "",
@@ -689,6 +751,7 @@ const previewTemplateReplacement = async (
       SELECT
         responsibility.id,
         COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id,
+        responsibility.template_responsibility_id,
         responsibility.name,
         responsibility.responsibility_type,
         EXISTS (
@@ -722,23 +785,27 @@ const previewTemplateReplacement = async (
       ].join("|"),
     ),
   )
-  const preserved = currentResult.rows.filter((responsibility) =>
-    nextKeys.has(
-      [
-        responsibility.ministry_id,
-        responsibility.name.toLowerCase(),
-        responsibility.responsibility_type,
-      ].join("|"),
-    ),
+  const preserved = currentResult.rows.filter(
+    (responsibility) =>
+      !responsibility.template_responsibility_id ||
+      nextKeys.has(
+        [
+          responsibility.ministry_id,
+          responsibility.name.toLowerCase(),
+          responsibility.responsibility_type,
+        ].join("|"),
+      ),
   )
-  const removed = currentResult.rows.filter((responsibility) =>
-    !nextKeys.has(
-      [
-        responsibility.ministry_id,
-        responsibility.name.toLowerCase(),
-        responsibility.responsibility_type,
-      ].join("|"),
-    ),
+  const removed = currentResult.rows.filter(
+    (responsibility) =>
+      responsibility.template_responsibility_id &&
+      !nextKeys.has(
+        [
+          responsibility.ministry_id,
+          responsibility.name.toLowerCase(),
+          responsibility.responsibility_type,
+        ].join("|"),
+      ),
   )
   const added = structure.responsibilities.filter(
     (responsibility: any) =>
@@ -776,6 +843,267 @@ const previewTemplateReplacement = async (
   }
 }
 
+const markEventMinistryChanged = async (
+  client: PoolClient,
+  eventId: string,
+  ministryId: string,
+) => {
+  await client.query(
+    `
+      UPDATE events
+      SET version = version + 1,
+          updated_at = now()
+      WHERE id = $1
+    `,
+    [eventId],
+  )
+  await client.query(
+    `
+      UPDATE event_ministries
+      SET schedule_status = CASE
+            WHEN schedule_status IN ('under_review', 'ready', 'published')
+              THEN 'incomplete'
+            ELSE schedule_status
+          END,
+          updated_at = now()
+      WHERE event_id = $1
+        AND ministry_id = $2
+    `,
+    [eventId, ministryId],
+  )
+}
+
+const mutateEventResponsibility = async (
+  client: PoolClient,
+  context: any,
+  event: any,
+  body: any,
+) => {
+  if (["cancelled", "completed", "archived"].includes(event.status)) {
+    throw Object.assign(
+      new Error("Responsibilities cannot be changed for this event"),
+      { status: 409 },
+    )
+  }
+
+  if (body.action === "add_responsibility") {
+    const ministryId = cleanText(body.ministryId, 100)
+    if (!ministryId) {
+      throw Object.assign(new Error("Ministry is required"), { status: 400 })
+    }
+    await requireMinistryAccess(client, context.user, ministryId, true)
+    const participantResult = await client.query(
+      `
+        SELECT ministry_id
+        FROM event_ministries
+        WHERE event_id = $1
+          AND ministry_id = $2
+          AND schedule_status <> 'cancelled'
+        FOR UPDATE
+      `,
+      [event.id, ministryId],
+    )
+    if (!participantResult.rowCount) {
+      throw Object.assign(
+        new Error("This ministry is not participating in the event"),
+        { status: 400 },
+      )
+    }
+
+    const input = normalizeEventResponsibility(body)
+    const createdResult = await client.query(
+      `
+        INSERT INTO event_responsibilities (
+          event_id,
+          ministry_id,
+          template_responsibility_id,
+          name,
+          responsibility_type,
+          quantity_needed,
+          approval_required,
+          is_required,
+          required_qualification,
+          relative_start_minutes,
+          instructions,
+          sort_order,
+          status
+        )
+        VALUES (
+          $1, $2, NULL, $3, $4, $5, $6, $7, $8, $9, $10,
+          (
+            SELECT COALESCE(max(sort_order), -1) + 1
+            FROM event_responsibilities
+            WHERE event_id = $1
+              AND ministry_id = $2
+          ),
+          'open'
+        )
+        RETURNING *
+      `,
+      [
+        event.id,
+        ministryId,
+        input.name,
+        input.responsibilityType,
+        input.quantityNeeded,
+        input.approvalRequired,
+        input.isRequired,
+        input.requiredQualification,
+        input.relativeStartMinutes,
+        input.instructions,
+      ],
+    )
+    const created = createdResult.rows[0]
+    await markEventMinistryChanged(client, event.id, ministryId)
+    await writeSchedulingAudit(client, context, {
+      action: "event_responsibility.created",
+      entityType: "event_responsibility",
+      entityId: created.id,
+      ministryId,
+      afterData: created,
+      metadata: {
+        eventId: event.id,
+        source: "event_override",
+      },
+    })
+    return "Responsibility added to this event"
+  }
+
+  const responsibilityId = cleanText(body.responsibilityId, 100)
+  if (!responsibilityId) {
+    throw Object.assign(new Error("Responsibility is required"), {
+      status: 400,
+    })
+  }
+  const responsibilityResult = await client.query(
+    `
+      SELECT
+        responsibility.*,
+        (
+          SELECT count(*)::INT
+          FROM responsibility_assignments assignment
+          WHERE assignment.responsibility_id = responsibility.id
+            AND assignment.status IN (
+              'interested', 'pending', 'assigned', 'confirmed',
+              'change_requested', 'completed'
+            )
+        ) AS assigned_quantity
+      FROM event_responsibilities responsibility
+      WHERE responsibility.id = $1
+        AND responsibility.event_id = $2
+      FOR UPDATE
+    `,
+    [responsibilityId, event.id],
+  )
+  const responsibility = responsibilityResult.rows[0]
+  if (!responsibility) {
+    throw Object.assign(new Error("Responsibility not found"), {
+      status: 404,
+    })
+  }
+  await requireMinistryAccess(
+    client,
+    context.user,
+    responsibility.ministry_id,
+    true,
+  )
+  if (responsibility.status === "cancelled") {
+    throw Object.assign(new Error("Responsibility is already cancelled"), {
+      status: 409,
+    })
+  }
+
+  if (body.action === "update_responsibility") {
+    const input = normalizeEventResponsibility(body)
+    if (input.quantityNeeded < Number(responsibility.assigned_quantity)) {
+      throw Object.assign(
+        new Error(
+          "Quantity cannot be lower than the number of active assignments",
+        ),
+        { status: 409 },
+      )
+    }
+    const updatedResult = await client.query(
+      `
+        UPDATE event_responsibilities
+        SET name = $2,
+            responsibility_type = $3,
+            quantity_needed = $4,
+            approval_required = $5,
+            is_required = $6,
+            required_qualification = $7,
+            relative_start_minutes = $8,
+            instructions = $9,
+            updated_at = now()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [
+        responsibilityId,
+        input.name,
+        input.responsibilityType,
+        input.quantityNeeded,
+        input.approvalRequired,
+        input.isRequired,
+        input.requiredQualification,
+        input.relativeStartMinutes,
+        input.instructions,
+      ],
+    )
+    const updated = updatedResult.rows[0]
+    await markEventMinistryChanged(
+      client,
+      event.id,
+      responsibility.ministry_id,
+    )
+    await writeSchedulingAudit(client, context, {
+      action: "event_responsibility.updated",
+      entityType: "event_responsibility",
+      entityId: responsibilityId,
+      ministryId: responsibility.ministry_id,
+      beforeData: responsibility,
+      afterData: updated,
+      metadata: { eventId: event.id },
+    })
+    return "Event responsibility updated"
+  }
+
+  await client.query(
+    `
+      UPDATE event_responsibilities
+      SET status = 'cancelled',
+          updated_at = now()
+      WHERE id = $1
+    `,
+    [responsibilityId],
+  )
+  await client.query(
+    `
+      UPDATE responsibility_assignments
+      SET status = 'cancelled',
+          updated_at = now()
+      WHERE responsibility_id = $1
+        AND status NOT IN ('cancelled', 'completed')
+    `,
+    [responsibilityId],
+  )
+  await markEventMinistryChanged(
+    client,
+    event.id,
+    responsibility.ministry_id,
+  )
+  await writeSchedulingAudit(client, context, {
+    action: "event_responsibility.cancelled",
+    entityType: "event_responsibility",
+    entityId: responsibilityId,
+    ministryId: responsibility.ministry_id,
+    beforeData: responsibility,
+    afterData: { ...responsibility, status: "cancelled" },
+    metadata: { eventId: event.id },
+  })
+  return "Responsibility cancelled and retained in history"
+}
+
 const updateEvent = async (
   client: PoolClient,
   context: any,
@@ -788,7 +1116,14 @@ const updateEvent = async (
   )
   const event = eventResult.rows[0]
   if (!event) throw Object.assign(new Error("Event not found"), { status: 404 })
-  await requireMinistryAccess(client, context.user, event.ministry_id, true)
+
+  if (RESPONSIBILITY_ACTIONS.has(body.action)) {
+    return mutateEventResponsibility(client, context, event, body)
+  }
+
+  if (body.action !== "set_schedule_status") {
+    await requireMinistryAccess(client, context.user, event.ministry_id, true)
+  }
 
   if (body.action === "replace_template") {
     const nextTemplateId = cleanText(body.templateId, 100)
@@ -905,7 +1240,9 @@ const updateEvent = async (
     }
 
     const removed = currentResponsibilities.rows.filter(
-      (responsibility) => !retainedIds.has(responsibility.id),
+      (responsibility) =>
+        responsibility.template_responsibility_id &&
+        !retainedIds.has(responsibility.id),
     )
     if (removed.length) {
       const removedIds = removed.map((responsibility) => responsibility.id)
@@ -1203,9 +1540,12 @@ export const handleEvents = async (request: Request) => {
         )
       }
       if (request.method === "PATCH") {
-        await updateEvent(client, context, body)
+        const message = await updateEvent(client, context, body)
         await client.query("COMMIT")
-        return json({ message: "Event updated", eventId: body.eventId })
+        return json({
+          message: message || "Event updated",
+          eventId: body.eventId,
+        })
       }
       await client.query("ROLLBACK")
       return json({ message: "Method not allowed" }, 405)

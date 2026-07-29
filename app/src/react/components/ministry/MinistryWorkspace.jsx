@@ -187,6 +187,7 @@ const MinistryWorkspace = ({ data }) => {
                   <button
                     key={section.id}
                     type="button"
+                    data-section-id={section.id}
                     onClick={() => selectSection(section)}
                     className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${
                       active
@@ -429,6 +430,7 @@ const MinistryWorkspace = ({ data }) => {
                   <button
                     key={section.id}
                     type="button"
+                    data-section-id={section.id}
                     onClick={() => selectSection(section)}
                     className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left ${
                       active

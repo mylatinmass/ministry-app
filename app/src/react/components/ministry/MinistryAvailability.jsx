@@ -262,8 +262,14 @@ const MinistryAvailability = () => {
       startDate: selection.startDate,
       endDate: selection.endDate,
       label,
+      requireConflictFree: true,
     })
-    if (result && !result.conflicts?.length) {
+    if (result?.conflicts?.length) {
+      setMessage("")
+      setErrorMessage(result.message)
+      return
+    }
+    if (result?.updated) {
       setSelectionStart("")
       setSelectionEnd("")
       setLabel("")
@@ -362,7 +368,7 @@ const MinistryAvailability = () => {
             Loading availability...
           </p>
         ) : (
-          <div className="mt-4 grid max-h-[70vh] grid-cols-1 gap-6 overflow-y-auto pr-1 lg:max-h-none lg:grid-cols-2 lg:overflow-visible lg:pr-0">
+          <div className="mt-4 grid h-[60vh] grid-cols-1 content-start gap-6 overflow-y-auto pr-1 lg:h-[36rem] lg:grid-cols-2">
             {visibleMonths.map((month) => {
               const monthKey = `${month.getFullYear()}-${month.getMonth()}`
               const monthCells = getMonthCells(month)
@@ -480,8 +486,8 @@ const MinistryAvailability = () => {
                     )}`}
               </h3>
               <p className="mt-1 text-sm text-gray-500">
-                Assigned dates will remain available until their change
-                requests are resolved.
+                Nothing is saved until you select UPDATE. Assigned dates
+                require a change request before this range can be blocked.
               </p>
             </div>
           </div>
@@ -502,7 +508,7 @@ const MinistryAvailability = () => {
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
             >
               <NoSymbolIcon className="size-5" />
-              Block available dates
+              {isSaving ? "UPDATING..." : "UPDATE"}
             </button>
           </div>
 

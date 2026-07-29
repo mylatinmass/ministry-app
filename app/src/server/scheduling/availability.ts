@@ -229,6 +229,17 @@ const createBlock = async (
     (assignment) =>
       assignment.date >= mergedStart && assignment.date <= mergedEnd,
   )
+  if (body.requireConflictFree === true && conflicts.length) {
+    return {
+      message:
+        conflicts.length === 1
+          ? "This range contains an assigned duty. Request a change before updating availability."
+          : `This range contains ${conflicts.length} assigned duties. Request changes before updating availability.`,
+      blocks: [],
+      conflicts,
+      updated: false,
+    }
+  }
   const assignedDates = new Set(
     assignments.map((assignment) => assignment.date),
   )
@@ -303,6 +314,7 @@ const createBlock = async (
       : "Availability blocked",
     blocks: createdBlocks,
     conflicts,
+    updated: createdBlocks.length > 0,
   }
 }
 

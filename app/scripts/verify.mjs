@@ -37,6 +37,9 @@ const [
   ministryWorkspace,
   ministryNavigation,
   weekCalendar,
+  ordoMigration,
+  schedulingOrdo,
+  ordoReference,
 ] = await Promise.all([
   read("astro.config.mjs"),
   read("src/pages/api/[...path].ts"),
@@ -68,6 +71,9 @@ const [
   read("src/react/components/ministry/MinistryWorkspace.jsx"),
   read("src/react/components/ministry/ministryNavigation.jsx"),
   read("src/react/components/ministry/MinistryWeekCalendar.jsx"),
+  read("migrations/20260730_01_add_ordo_reference.sql"),
+  read("src/server/scheduling/ordo.ts"),
+  read("src/react/components/ministry/MinistryOrdoReference.jsx"),
 ])
 
 assert.match(astroConfig, /site:\s*"https:\/\/www\.mylatinmass\.com"/)
@@ -91,6 +97,7 @@ assert.match(apiRoute, /reminders\/process/)
 assert.match(apiRoute, /scheduling\/templates/)
 assert.match(apiRoute, /scheduling\/events/)
 assert.match(apiRoute, /scheduling\/availability/)
+assert.match(apiRoute, /scheduling\/ordo/)
 
 assert.match(authHelper, /activeProfileUserId/)
 assert.match(ministryList, /const user = context\.user/)
@@ -215,6 +222,26 @@ assert.match(weekCalendar, /toDateKey\(event\.start_time\) === selectedKey/)
 assert.match(eventDetails, /translate-x-full/)
 assert.match(schedulingEvents, /isPublicView:\s*publicView/)
 assert.match(schedulingEvents, /instructions:\s*publicView \? ""/)
+assert.match(
+  ordoMigration,
+  /CREATE TABLE IF NOT EXISTS ordo_days/,
+)
+assert.match(
+  ordoMigration,
+  /CREATE TABLE IF NOT EXISTS event_ordo_selections/,
+)
+assert.match(ordoMigration, /selected_mass_option_snapshot JSONB/)
+assert.match(schedulingOrdo, /get-liturgical-days/)
+assert.match(schedulingOrdo, /classLabel/)
+assert.doesNotMatch(schedulingOrdo, /rankLabel|liturgicalRank/)
+assert.match(schedulingOrdo, /massOptions/)
+assert.match(schedulingOrdo, /sourceHash/)
+assert.match(schedulingOrdo, /event\.ordo_updated/)
+assert.match(ordoReference, /View 1962 Ordo/)
+assert.match(ordoReference, /Sacristy page and setup notes/)
+assert.match(ordoReference, /Selection required/)
+assert.match(ordoReference, /The Ordo does not explicitly state the vestment color/)
+assert.match(schedulingEvents, /event\.ordo_reset_for_date_change/)
 
 const manifest = JSON.parse(manifestSource)
 assert.equal(manifest.start_url, "/ministry/")

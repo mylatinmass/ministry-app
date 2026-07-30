@@ -12,6 +12,7 @@ import {
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
+import MinistryOrdoReference from "./MinistryOrdoReference"
 
 const blankResponsibility = {
   responsibilityId: "",
@@ -389,6 +390,13 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
             {message}
           </p>
         )}
+
+        <div className="mt-8">
+          <MinistryOrdoReference
+            eventId={displayedEvent.id}
+            startTime={displayedEvent.start_time}
+          />
+        </div>
 
         <div className="mt-8 grid gap-3 sm:grid-cols-2">
           <div className="flex gap-3 rounded-2xl border border-gray-100 p-4">

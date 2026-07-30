@@ -1952,6 +1952,27 @@ const updateEvent = async (
       status: 400,
     })
   }
+  const previousOrdoDate = toChapelDateKey(event.start_time)
+  const nextOrdoDate = toChapelDateKey(start)
+  if (previousOrdoDate !== nextOrdoDate) {
+    const previousSelection = await client.query(
+      `DELETE FROM event_ordo_selections WHERE event_id = $1 RETURNING *`,
+      [eventId],
+    )
+    if (previousSelection.rowCount) {
+      await writeSchedulingAudit(client, context, {
+        action: "event.ordo_reset_for_date_change",
+        entityType: "event",
+        entityId: eventId,
+        ministryId: event.ministry_id,
+        beforeData: previousSelection.rows[0],
+        afterData: {
+          previousOrdoDate,
+          nextOrdoDate,
+        },
+      })
+    }
+  }
   await client.query(
     `
       UPDATE events

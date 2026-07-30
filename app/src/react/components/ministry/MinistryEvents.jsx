@@ -8,6 +8,7 @@ import {
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
+import MinistryOrdoReference from "./MinistryOrdoReference"
 
 const requestHeaders = () => ({
   "Content-Type": "application/json",
@@ -489,6 +490,12 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
               />
             </label>
           </div>
+
+          {form.startTime && (
+            <div className="mt-5">
+              <MinistryOrdoReference startTime={form.startTime} />
+            </div>
+          )}
 
           {!form.eventId && !form.sourceEventId && (
             <fieldset className="mt-5 rounded-xl border border-gray-100 p-4">

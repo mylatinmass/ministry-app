@@ -2,7 +2,9 @@ import * as React from "react"
 import { Link } from "../../compat/gatsby"
 import {
   Bars3Icon,
+  BellAlertIcon,
   CalendarDaysIcon,
+  ChatBubbleLeftRightIcon,
   CheckCircleIcon,
   ChevronRightIcon,
   ClockIcon,
@@ -65,6 +67,37 @@ const sections = [
     description: "Manage personal details and account-wide preferences.",
   },
 ]
+
+const formatAssignmentDate = (value) =>
+  new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value))
+
+const EmptyDashboardBlock = ({ title, text }) => (
+  <div className="rounded-xl border border-dashed border-gray-200 px-4 py-6 text-center">
+    <p className="font-semibold text-gray-700">{title}</p>
+    <p className="mx-auto mt-1 max-w-md text-sm leading-relaxed text-gray-500">
+      {text}
+    </p>
+  </div>
+)
+
+const DashboardBlock = ({ icon: Icon, title, children }) => (
+  <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+    <div className="mb-4 flex items-center gap-3">
+      <span className="rounded-xl bg-[#f4ede6] p-2 text-[#896542]">
+        <Icon className="size-5" />
+      </span>
+      <h2 className="century-font text-2xl text-gray-950">{title}</h2>
+    </div>
+    {children}
+  </section>
+)
 
 const MinistryCards = ({ ministries, isManagedProfile, actor, onReturn }) => {
   if (!ministries.length) {
@@ -164,6 +197,17 @@ const MinistryHomeWorkspace = ({ data }) => {
           new Date(second.start_time).getTime(),
       )
   }, [myEvents])
+  const actionRequiredEvents = React.useMemo(
+    () =>
+      upcomingAssignments.filter((event) =>
+        event.visibleProfileAssignments?.some((assignment) =>
+          ["pending", "assigned", "change_requested"].includes(
+            assignment.status,
+          ),
+        ),
+      ),
+    [upcomingAssignments],
+  )
   const today = React.useMemo(() => new Date(), [])
   const todayLabel = React.useMemo(
     () =>
@@ -261,6 +305,48 @@ const MinistryHomeWorkspace = ({ data }) => {
             startTime={today.toISOString()}
           />
         </div>
+        <DashboardBlock icon={CheckCircleIcon} title="Action Required">
+          {actionRequiredEvents.length ? (
+            <div className="space-y-3">
+              {actionRequiredEvents.map((event) => (
+                <button
+                  key={event.id}
+                  type="button"
+                  onClick={() => setSelectedEvent(event)}
+                  className="flex w-full items-center gap-4 rounded-xl border border-amber-200 bg-amber-50/50 p-4 text-left transition hover:border-amber-300"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-gray-900">
+                      {event.title}
+                    </p>
+                    <p className="mt-1 text-sm text-gray-600">
+                      {formatAssignmentDate(event.start_time)} ·{" "}
+                      {event.coordinator_ministry_name}
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {event.visibleProfileAssignments
+                        .filter((assignment) =>
+                          ["pending", "assigned", "change_requested"].includes(
+                            assignment.status,
+                          ),
+                        )
+                        .map((assignment) => assignment.responsibilityName)
+                        .join(" · ")}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-sm font-semibold text-[#896542]">
+                    Review
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <EmptyDashboardBlock
+              title="You are all caught up"
+              text="Assignments requiring confirmation or review will appear here."
+            />
+          )}
+        </DashboardBlock>
         <section>
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="century-font text-2xl text-gray-950">
@@ -282,6 +368,23 @@ const MinistryHomeWorkspace = ({ data }) => {
             onEventSelect={setSelectedEvent}
           />
         </section>
+        <div className="grid gap-5 lg:grid-cols-2">
+          <DashboardBlock icon={BellAlertIcon} title="Alerts & Reminders">
+            <EmptyDashboardBlock
+              title="No new alerts"
+              text="Schedule changes, cancellations, conflicts, and assignment reminders will appear here."
+            />
+          </DashboardBlock>
+          <DashboardBlock
+            icon={ChatBubbleLeftRightIcon}
+            title="Ministry Notices"
+          >
+            <EmptyDashboardBlock
+              title="No new notices"
+              text="Announcements sent by your ministry leaders will appear here."
+            />
+          </DashboardBlock>
+        </div>
       </div>
     )
   } else if (sectionId === "calendar") {

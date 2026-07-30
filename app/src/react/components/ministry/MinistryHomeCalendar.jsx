@@ -19,7 +19,11 @@ const getMonthCells = (month) => {
   })
 }
 
-const MinistryHomeCalendar = ({ events = [], onEventSelect }) => {
+const MinistryHomeCalendar = ({
+  events = [],
+  onEventSelect,
+  title = "Calendar",
+}) => {
   const [visibleMonth, setVisibleMonth] = React.useState(() => {
     const today = new Date()
     return new Date(today.getFullYear(), today.getMonth(), 1)
@@ -95,7 +99,7 @@ const MinistryHomeCalendar = ({ events = [], onEventSelect }) => {
         >
           <ChevronLeftIcon className="size-5" />
         </button>
-        <h2 className="century-font text-2xl text-gray-950">Calendar</h2>
+        <h2 className="century-font text-2xl text-gray-950">{title}</h2>
         <button
           type="button"
           aria-label="Next month"

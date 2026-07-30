@@ -133,11 +133,81 @@ const handler = async (event) => {
           [user.id]
         )
 
+    const [calendarEventsResult, assignmentsResult] = await Promise.all([
+      client.query(
+        `
+          SELECT
+            e.id,
+            e.ministry_id AS coordinator_ministry_id,
+            coordinator.name AS coordinator_ministry_name,
+            e.title,
+            e.description,
+            e.location,
+            e.start_time,
+            e.end_time,
+            e.status,
+            e.participation_type,
+            (
+              SELECT count(*)
+              FROM event_responsibilities er
+              WHERE er.event_id = e.id
+                AND er.status <> 'cancelled'
+            ) AS responsibility_count
+          FROM events e
+          JOIN ministries coordinator ON coordinator.id = e.ministry_id
+          WHERE e.status IN ('published', 'cancelled', 'completed')
+          ORDER BY e.start_time
+        `
+      ),
+      client.query(
+        `
+          SELECT
+            ra.event_id,
+            ra.status,
+            er.name AS responsibility_name
+          FROM responsibility_assignments ra
+          JOIN event_responsibilities er ON er.id = ra.responsibility_id
+          WHERE ra.user_id = $1
+            AND ra.status IN (
+              'interested', 'pending', 'assigned', 'confirmed',
+              'change_requested', 'completed'
+            )
+        `,
+        [user.id]
+      ),
+    ])
+
+    const assignmentsByEvent = assignmentsResult.rows.reduce(
+      (byEvent, assignment) => {
+        if (!byEvent[assignment.event_id]) byEvent[assignment.event_id] = []
+        byEvent[assignment.event_id].push(assignment)
+        return byEvent
+      },
+      {}
+    )
+    const calendarEvents = calendarEventsResult.rows.map((event) => {
+      const assignments = assignmentsByEvent[event.id] || []
+      const visibleProfileAssignments = assignments.map((assignment) => ({
+        profileId: user.id,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        status: assignment.status,
+        responsibilityName: assignment.responsibility_name,
+      }))
+      return {
+        ...event,
+        responsibility_count: Number(event.responsibility_count),
+        is_assigned: assignments.length > 0,
+        visibleProfileAssignments,
+      }
+    })
+
     return jsonResponse(200, {
       actor: toPublicMinistryUser(context.actor),
       user: toPublicMinistryUser(user),
       isManagedProfile: context.isManagedProfile,
       ministries: result.rows.map(toMinistry),
+      calendarEvents,
     })
   } catch (error) {
     console.error("Unable to list ministries:", error)

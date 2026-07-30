@@ -5,6 +5,8 @@ import Layout from "../../components/Layout"
 import Seo from "../../components/Seo"
 import BrowserLocation from "../BrowserLocation"
 import { MINISTRY_SESSION_KEY } from "../../components/ministry/MinistryLogin"
+import MinistryEventDetails from "../../components/ministry/MinistryEventDetails"
+import MinistryHomeCalendar from "../../components/ministry/MinistryHomeCalendar"
 import MinistryRouteGuard from "../../components/ministry/MinistryRouteGuard"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 const accessLabels = {
@@ -19,6 +21,8 @@ const MinistryHomeContent = () => {
   const [currentUser, setCurrentUser] = React.useState(null)
   const [actor, setActor] = React.useState(null)
   const [isManagedProfile, setIsManagedProfile] = React.useState(false)
+  const [calendarEvents, setCalendarEvents] = React.useState([])
+  const [selectedEvent, setSelectedEvent] = React.useState(null)
   const [isLoading, setIsLoading] = React.useState(true)
   const [errorMessage, setErrorMessage] = React.useState("")
 
@@ -48,7 +52,8 @@ const MinistryHomeContent = () => {
         setActor(result.actor || result.user)
         setCurrentUser(result.user)
         setIsManagedProfile(Boolean(result.isManagedProfile))
-        setMinistries(result.ministries)
+        setMinistries(result.ministries || [])
+        setCalendarEvents(result.calendarEvents || [])
       })
       .catch((error) => {
         if (error.name !== "AbortError") {
@@ -85,10 +90,9 @@ const MinistryHomeContent = () => {
       />
       <section className="w-11/12 max-w-[1000px] mx-auto my-10">
         <header className="flex flex-col items-center gap-3 text-center">
-          <h1 className="century-font text-[#C1A387] text-4xl">Ministries</h1>
+          <h1 className="century-font text-[#C1A387] text-4xl">Calendar</h1>
           <p className="max-w-[600px] text-lg leading-relaxed text-gray-600">
-            Welcome to the ministry project management center for Our Lady of
-            Victory Chapel.
+            See every published ministry event in one place.
           </p>
           {currentUser?.globalRole === "super_admin" && (
             <p className="rounded-full bg-[#f4ede6] px-4 py-1 text-sm font-semibold text-[#896542]">
@@ -104,17 +108,31 @@ const MinistryHomeContent = () => {
           </Link>
         </header>
 
+        {isLoading && (
+          <p className="mt-10 text-center text-gray-500">
+            Loading calendar...
+          </p>
+        )}
+
+        {errorMessage && (
+          <p role="alert" className="mt-10 text-center text-red-600">
+            {errorMessage}
+          </p>
+        )}
+
+        {!isLoading && !errorMessage && (
+          <MinistryHomeCalendar
+            events={calendarEvents}
+            onEventSelect={setSelectedEvent}
+          />
+        )}
+
         <div className="mt-10">
-          {isLoading && (
-            <p className="text-center text-gray-500">Loading ministries...</p>
+          {!isLoading && !errorMessage && (
+            <h2 className="mb-5 century-font text-2xl text-gray-950">
+              My Ministries
+            </h2>
           )}
-
-          {errorMessage && (
-            <p role="alert" className="text-center text-red-600">
-              {errorMessage}
-            </p>
-          )}
-
           {!isLoading && !errorMessage && ministries.length === 0 && (
             <div className="rounded-xl border border-gray-200 p-8 text-center text-gray-500">
               You do not have access to any ministries yet.
@@ -175,6 +193,11 @@ const MinistryHomeContent = () => {
             </div>
           )}
         </div>
+        <MinistryEventDetails
+          event={selectedEvent}
+          ministryName={selectedEvent?.coordinator_ministry_name || "Ministry"}
+          onClose={() => setSelectedEvent(null)}
+        />
       </section>
     </Layout>
   )

@@ -16,6 +16,7 @@ import MinistryAvailability from "./MinistryAvailability"
 import MinistryEventAgenda from "./MinistryEventAgenda"
 import MinistryEventDetails from "./MinistryEventDetails"
 import MinistryHomeCalendar from "./MinistryHomeCalendar"
+import MinistryOrdoReference from "./MinistryOrdoReference"
 import MinistryProfile from "./MinistryProfile"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 
@@ -146,6 +147,35 @@ const MinistryHomeWorkspace = ({ data }) => {
     () => data.calendarEvents.filter((event) => event.is_assigned),
     [data.calendarEvents],
   )
+  const upcomingAssignments = React.useMemo(() => {
+    const now = Date.now()
+    return myEvents
+      .filter((event) => {
+        const endTime = new Date(event.end_time || event.start_time).getTime()
+        return (
+          event.status === "published" &&
+          !Number.isNaN(endTime) &&
+          endTime >= now
+        )
+      })
+      .sort(
+        (first, second) =>
+          new Date(first.start_time).getTime() -
+          new Date(second.start_time).getTime(),
+      )
+  }, [myEvents])
+  const today = React.useMemo(() => new Date(), [])
+  const todayLabel = React.useMemo(
+    () =>
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/New_York",
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      }).format(today),
+    [today],
+  )
 
   React.useEffect(() => {
     const loadProfiles = () => {
@@ -213,30 +243,43 @@ const MinistryHomeWorkspace = ({ data }) => {
   let content
   if (sectionId === "home") {
     content = (
-      <div className="space-y-10">
-        <MinistryHomeCalendar
-          title="My Calendar"
-          events={myEvents}
-          onEventSelect={setSelectedEvent}
-        />
+      <div className="space-y-8">
+        <div className="grid gap-5 lg:grid-cols-[0.7fr_1.3fr]">
+          <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wider text-[#896542]">
+              Today
+            </p>
+            <h2 className="mt-2 century-font text-3xl leading-tight text-gray-950">
+              {todayLabel}
+            </h2>
+            <p className="mt-4 text-sm text-gray-500">
+              Schedule for {currentUser?.firstName || "this profile"}
+            </p>
+          </section>
+          <MinistryOrdoReference
+            compact
+            startTime={today.toISOString()}
+          />
+        </div>
         <section>
-          <div className="mb-5 flex items-center justify-between gap-3">
+          <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="century-font text-2xl text-gray-950">
-              My Ministries
+              My Upcoming Assignments
             </h2>
             <button
               type="button"
-              onClick={() => selectSection("ministries")}
+              onClick={() => selectSection("events")}
               className="text-sm font-semibold text-[#896542]"
             >
               View all
             </button>
           </div>
-          <MinistryCards
-            ministries={data.ministries}
-            isManagedProfile={data.isManagedProfile}
-            actor={data.actor}
-            onReturn={returnToGuardian}
+          <MinistryEventAgenda
+            events={upcomingAssignments}
+            label="My Upcoming Assignments"
+            emptyTitle="No upcoming assignments"
+            emptyText="New duties assigned to this profile will appear here."
+            onEventSelect={setSelectedEvent}
           />
         </section>
       </div>

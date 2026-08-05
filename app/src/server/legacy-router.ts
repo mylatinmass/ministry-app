@@ -9,31 +9,30 @@ let handlersPromise: Promise<Record<string, LegacyHandler>> | null = null
 const unwrap = (module: any): LegacyModule =>
   (module.default || module) as LegacyModule
 
-const loadLegacyHandlers = async () => {
+const loadLegacyHandlers = async (): Promise<Record<string, LegacyHandler>> => {
   if (import.meta.env.DEV) {
     const { createRequire } = await import("node:module")
     const require = createRequire(import.meta.url)
+    const freshHandler = (relativePath: string) => {
+      const resolvedPath = require.resolve(relativePath)
+      delete require.cache[resolvedPath]
+      return require(resolvedPath).handler as LegacyHandler
+    }
     return {
-      "ministry-access-request": require("./legacy/ministry-access-request.js")
-        .handler,
-      "ministry-global-members": require("./legacy/ministry-global-members.js")
-        .handler,
-      "ministry-detail": require("./legacy/ministry-detail.js").handler,
-      "ministry-invitation-response":
-        require("./legacy/ministry-invitation-response.js").handler,
-      "ministry-list": require("./legacy/ministry-list.js").handler,
-      "ministry-login": require("./legacy/ministry-login.js").handler,
-      "ministry-login-link": require("./legacy/ministry-login-link.js").handler,
-      "ministry-login-link-response":
-        require("./legacy/ministry-login-link-response.js").handler,
-      "ministry-members": require("./legacy/ministry-members.js").handler,
-      "ministry-membership-request-response":
-        require("./legacy/ministry-membership-request-response.js").handler,
-      "ministry-profile-separation":
-        require("./legacy/ministry-profile-separation.js").handler,
-      "ministry-profile": require("./legacy/ministry-profile.js").handler,
-      "ministry-profiles": require("./legacy/ministry-profiles.js").handler,
-      "ministry-session": require("./legacy/ministry-session.js").handler,
+      "ministry-access-request": freshHandler("./legacy/ministry-access-request.js"),
+      "ministry-global-members": freshHandler("./legacy/ministry-global-members.js"),
+      "ministry-detail": freshHandler("./legacy/ministry-detail.js"),
+      "ministry-invitation-response": freshHandler("./legacy/ministry-invitation-response.js"),
+      "ministry-list": freshHandler("./legacy/ministry-list.js"),
+      "ministry-login": freshHandler("./legacy/ministry-login.js"),
+      "ministry-login-link": freshHandler("./legacy/ministry-login-link.js"),
+      "ministry-login-link-response": freshHandler("./legacy/ministry-login-link-response.js"),
+      "ministry-members": freshHandler("./legacy/ministry-members.js"),
+      "ministry-membership-request-response": freshHandler("./legacy/ministry-membership-request-response.js"),
+      "ministry-profile-separation": freshHandler("./legacy/ministry-profile-separation.js"),
+      "ministry-profile": freshHandler("./legacy/ministry-profile.js"),
+      "ministry-profiles": freshHandler("./legacy/ministry-profiles.js"),
+      "ministry-session": freshHandler("./legacy/ministry-session.js"),
     }
   }
 
@@ -90,6 +89,7 @@ const loadLegacyHandlers = async () => {
 }
 
 const getHandlers = () => {
+  if (import.meta.env.DEV) return loadLegacyHandlers()
   if (!handlersPromise) handlersPromise = loadLegacyHandlers()
   return handlersPromise
 }

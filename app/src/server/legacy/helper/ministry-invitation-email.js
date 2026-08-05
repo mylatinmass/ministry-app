@@ -85,7 +85,7 @@ const buildMinistryInvitationEmail = ({
 }
 
 const sendMinistryInvitationEmail = async (options) => {
-  assertLiveDeliveryAllowed()
+  assertLiveDeliveryAllowed("ALLOW_LOCAL_INVITATION_DELIVERY")
   if (!process.env.GMAIL_USER || !process.env.GMAIL_PASS) {
     throw new Error("Invitation email is not configured")
   }

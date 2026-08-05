@@ -91,11 +91,20 @@ configuration names only; secrets and production data must never be committed.
   privileged email addresses to prevent account discovery.
 - Owner and Super Admin accounts can never request or redeem email sign-in links.
 - Password-authenticated Owners and Super Admins have a global **Members** menu.
-  It lists every active member account, including accounts not currently assigned
-  to a ministry, shows each person's
-  ministry memberships, and permits audited ministry additions, removals, Leader
-  or Member access changes, and ministry-level assignments. New people are added
-  through the existing private email invitation flow.
+  It lists only active Ministry app members with an active ministry membership;
+  unrelated website accounts are excluded. It shows each person's ministry
+  memberships and permits audited ministry additions, removals, Leader or Member
+  access changes, ministry-level assignments, and audited Super Admin access
+  changes. The Global Owner and the signed-in administrator's own global access
+  cannot be changed from this screen. New people are added through the existing
+  private email invitation flow and may be promoted after accepting.
+- Global administrators can suppress a Ministry member profile without deleting
+  the shared account or any historical assignments, memberships, or audit data.
+  Suppression is recorded in `ministry_profile_suppressions`, deactivates all
+  Ministry memberships, removes global Ministry privileges, revokes outstanding
+  Ministry login links, and hides the profile from active rosters. If the same
+  email later accepts a new private invitation, the existing profile is
+  reactivated for the invited ministries and its prior history remains attached.
 - An unregistered person may submit a public access request with their name,
   email, optional phone number, and optional message. The form deliberately does
   not ask for a chapel or ministry and does not create an account or membership.

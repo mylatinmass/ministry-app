@@ -481,8 +481,223 @@ const updateMembership = async (
   const targetUserId = body.userId?.toString()
   const action = body.action?.toString()
 
-  if (!ministryId || !action) {
+  if (!action) {
     return jsonResponse(400, { message: "Membership action is incomplete" })
+  }
+
+  if (action === "set_global_role") {
+    if (!isGlobalManager(user)) {
+      return jsonResponse(403, {
+        message: "Only a global administrator can change global access",
+      })
+    }
+    if (!targetUserId) {
+      return jsonResponse(400, { message: "Member is required" })
+    }
+    if (targetUserId === user.id) {
+      return jsonResponse(409, {
+        message: "You cannot change your own global access",
+      })
+    }
+    const globalRole =
+      body.globalRole === "super_admin" ? "super_admin" : "regular"
+
+    await client.query("BEGIN")
+    try {
+      const existingResult = await client.query(
+        `
+          SELECT target.id, target.global_role, target.status
+          FROM users target
+          WHERE target.id = $1
+            AND target.status = 'active'
+            AND target.global_role <> 'owner'
+            AND EXISTS (
+              SELECT 1
+              FROM ministry_members membership
+              WHERE membership.user_id = target.id
+                AND membership.status = 'active'
+            )
+          FOR UPDATE
+        `,
+        [targetUserId]
+      )
+      const existing = existingResult.rows[0]
+      if (!existing) {
+        await client.query("ROLLBACK")
+        return jsonResponse(404, { message: "Ministry member not found" })
+      }
+      const result = await client.query(
+        `
+          UPDATE users
+          SET global_role = $1, updated_at = now()
+          WHERE id = $2
+          RETURNING id, global_role, status
+        `,
+        [globalRole, targetUserId]
+      )
+      await writeLevelAudit(client, {
+        actor,
+        user,
+        action: "ministry_user.global_role_changed",
+        entityType: "user",
+        entityId: targetUserId,
+        ministryId: null,
+        beforeData: existing,
+        afterData: result.rows[0],
+      })
+      await client.query("COMMIT")
+      return jsonResponse(200, {
+        success: true,
+        message:
+          globalRole === "super_admin"
+            ? "Super Admin access granted"
+            : "Super Admin access removed",
+      })
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {})
+      throw error
+    }
+  }
+
+  if (action === "suppress_profile") {
+    if (!isGlobalManager(user)) {
+      return jsonResponse(403, {
+        message: "Only a global administrator can suppress a member profile",
+      })
+    }
+    if (!targetUserId) {
+      return jsonResponse(400, { message: "Member is required" })
+    }
+    if (targetUserId === user.id) {
+      return jsonResponse(409, {
+        message: "You cannot suppress your own profile",
+      })
+    }
+
+    await client.query("BEGIN")
+    try {
+      const targetResult = await client.query(
+        `
+          SELECT id, first_name, last_name, email, global_role, status
+          FROM users
+          WHERE id = $1
+            AND status = 'active'
+            AND global_role <> 'owner'
+          FOR UPDATE
+        `,
+        [targetUserId]
+      )
+      const target = targetResult.rows[0]
+      if (!target) {
+        await client.query("ROLLBACK")
+        return jsonResponse(404, { message: "Active Ministry member not found" })
+      }
+
+      const activeSuppression = await client.query(
+        `
+          SELECT id
+          FROM ministry_profile_suppressions
+          WHERE user_id = $1
+            AND reactivated_at IS NULL
+          FOR UPDATE
+        `,
+        [targetUserId]
+      )
+      if (activeSuppression.rowCount) {
+        await client.query("ROLLBACK")
+        return jsonResponse(409, { message: "This profile is already suppressed" })
+      }
+
+      const membershipsResult = await client.query(
+        `
+          SELECT id, ministry_id, level, status, can_serve, highest_level_id
+          FROM ministry_members
+          WHERE user_id = $1
+            AND status = 'active'
+          FOR UPDATE
+        `,
+        [targetUserId]
+      )
+      if (!membershipsResult.rowCount) {
+        await client.query("ROLLBACK")
+        return jsonResponse(404, { message: "Active Ministry member not found" })
+      }
+
+      const suppressionResult = await client.query(
+        `
+          INSERT INTO ministry_profile_suppressions (
+            user_id, suppressed_by, reason
+          )
+          VALUES ($1, $2, $3)
+          RETURNING id, user_id, suppressed_by, suppressed_at
+        `,
+        [targetUserId, actor.id, cleanText(body.reason, 500) || null]
+      )
+
+      await client.query(
+        `
+          UPDATE ministry_members
+          SET status = 'inactive', updated_at = now()
+          WHERE user_id = $1
+            AND status = 'active'
+        `,
+        [targetUserId]
+      )
+      await client.query(
+        `
+          UPDATE users
+          SET global_role = 'regular', updated_at = now()
+          WHERE id = $1
+            AND global_role <> 'owner'
+        `,
+        [targetUserId]
+      )
+      await client.query(
+        `
+          UPDATE ministry_login_links
+          SET revoked_at = now()
+          WHERE user_id = $1
+            AND consumed_at IS NULL
+            AND revoked_at IS NULL
+        `,
+        [targetUserId]
+      )
+
+      await writeLevelAudit(client, {
+        actor,
+        user,
+        action: "ministry_profile.suppressed",
+        entityType: "user",
+        entityId: targetUserId,
+        ministryId: null,
+        beforeData: {
+          ...target,
+          memberships: membershipsResult.rows,
+        },
+        afterData: {
+          status: "suppressed",
+          suppressionId: suppressionResult.rows[0].id,
+          activeMemberships: 0,
+          globalRole: "regular",
+        },
+      })
+      await client.query("COMMIT")
+
+      const name = [target.first_name, target.last_name]
+        .filter(Boolean)
+        .join(" ")
+      return jsonResponse(200, {
+        success: true,
+        message: `${name || target.email || "Member"} was suppressed and removed from active member lists`,
+      })
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {})
+      throw error
+    }
+  }
+
+  if (!ministryId) {
+    return jsonResponse(400, { message: "Ministry is required" })
   }
 
   if (
@@ -1052,7 +1267,7 @@ const updateMembership = async (
         success: true,
         message:
           level === "admin"
-            ? "Member assigned as Leader"
+            ? "Member assigned as Ministry Admin"
             : "Member role updated",
       })
     } catch (error) {
@@ -1206,7 +1421,7 @@ const updateMembership = async (
         success: true,
         message: isLeaving
           ? "You left the ministry"
-          : "Member removed from ministry",
+          : "Member removed from this ministry",
       })
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {})

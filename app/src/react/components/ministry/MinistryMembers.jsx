@@ -13,7 +13,7 @@ import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 
 const roleLabels = {
   owner: "Owner",
-  admin: "Leader",
+  admin: "Ministry Admin",
   member: "Member",
 }
 
@@ -488,7 +488,7 @@ const MinistryMembers = ({ data, activeAction }) => {
                         className="mt-1 block rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold normal-case tracking-normal text-gray-700"
                       >
                         <option value="member">Member</option>
-                        <option value="admin">Leader</option>
+                        <option value="admin">Ministry Admin</option>
                       </select>
                     )}
                   </label>

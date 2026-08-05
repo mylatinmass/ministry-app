@@ -293,6 +293,18 @@ const acceptInvitation = async (client, token, body, jwtSecret) => {
       return jsonResponse(403, { message: "This account is inactive" })
     }
 
+    const reactivatedSuppression = await client.query(
+      `
+        UPDATE ministry_profile_suppressions
+        SET reactivated_by = $1,
+            reactivated_at = now()
+        WHERE user_id = $1
+          AND reactivated_at IS NULL
+        RETURNING id, suppressed_at, suppressed_by, reactivated_at
+      `,
+      [userId]
+    )
+
     const ministries = await getInvitationMinistries(client, invitation.id)
     for (const ministry of ministries) {
       await client.query(
@@ -325,6 +337,37 @@ const acceptInvitation = async (client, token, body, jwtSecret) => {
       `,
       [userId, invitation.id]
     )
+
+    if (reactivatedSuppression.rowCount) {
+      await client.query(
+        `
+          INSERT INTO ministry_audit_log (
+            actor_user_id,
+            active_profile_user_id,
+            action,
+            entity_type,
+            entity_id,
+            before_data,
+            after_data
+          )
+          VALUES (
+            $1, $1, 'ministry_profile.reactivated', 'user', $1,
+            $2::JSONB, $3::JSONB
+          )
+        `,
+        [
+          userId,
+          JSON.stringify({
+            status: "suppressed",
+            suppression: reactivatedSuppression.rows[0],
+          }),
+          JSON.stringify({
+            status: "active",
+            ministryIds: ministries.map((ministry) => ministry.id),
+          }),
+        ]
+      )
+    }
     await client.query("COMMIT")
 
     return jsonResponse(200, {

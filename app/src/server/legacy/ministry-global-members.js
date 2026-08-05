@@ -76,16 +76,16 @@ const handler = async (event) => {
             ministry.name AS ministry_name,
             ministry.slug AS ministry_slug,
             membership.joined_at
-          FROM users user_account
-          LEFT JOIN ministry_members membership
-            ON membership.user_id = user_account.id
-           AND membership.status = 'active'
-          LEFT JOIN ministries ministry
+          FROM ministry_members membership
+          JOIN users user_account
+            ON user_account.id = membership.user_id
+           AND user_account.status = 'active'
+          JOIN ministries ministry
             ON ministry.id = membership.ministry_id
            AND ministry.status = 'active'
           LEFT JOIN ministry_levels ministry_level
             ON ministry_level.id = membership.highest_level_id
-          WHERE user_account.status = 'active'
+          WHERE membership.status = 'active'
           ORDER BY
             lower(user_account.last_name),
             lower(user_account.first_name),
@@ -125,23 +125,22 @@ const handler = async (event) => {
           memberships: [],
         })
       }
-      if (row.membership_id && row.ministry_id) {
-        membersById.get(row.user_id).memberships.push({
-          id: row.membership_id,
-          ministryId: row.ministry_id,
-          ministryName: row.ministry_name,
-          ministrySlug: row.ministry_slug,
-          role: row.membership_role,
-          canServe: Boolean(row.can_serve),
-          highestLevelId: row.highest_level_id,
-          highestLevelName: row.highest_level_name,
-          highestLevelRank: Number(row.highest_level_rank) || null,
-          joinedAt: row.joined_at,
-        })
-      }
+      membersById.get(row.user_id).memberships.push({
+        id: row.membership_id,
+        ministryId: row.ministry_id,
+        ministryName: row.ministry_name,
+        ministrySlug: row.ministry_slug,
+        role: row.membership_role,
+        canServe: Boolean(row.can_serve),
+        highestLevelId: row.highest_level_id,
+        highestLevelName: row.highest_level_name,
+        highestLevelRank: Number(row.highest_level_rank) || null,
+        joinedAt: row.joined_at,
+      })
     }
 
     return jsonResponse(200, {
+      currentUserId: context.user.id,
       members: Array.from(membersById.values()),
       ministries: ministriesResult.rows.map((ministry) => ({
         id: ministry.id,

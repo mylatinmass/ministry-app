@@ -52,6 +52,8 @@ const [
   globalMembersServer,
   globalMembersUi,
   homeWorkspace,
+  profileSuppressionMigration,
+  invitationResponse,
 ] = await Promise.all([
   read("astro.config.mjs"),
   read("src/pages/api/[...path].ts"),
@@ -98,6 +100,8 @@ const [
   read("src/server/legacy/ministry-global-members.js"),
   read("src/react/components/ministry/MinistryGlobalMembers.jsx"),
   read("src/react/components/ministry/MinistryHomeWorkspace.jsx"),
+  read("migrations/20260805_03_add_ministry_profile_suppressions.sql"),
+  read("src/server/legacy/ministry-invitation-response.js"),
 ])
 
 assert.match(astroConfig, /site:\s*"https:\/\/ministry\.mylatinmass\.com"/)
@@ -159,17 +163,34 @@ assert.match(ministryMembers, /context\.isEmailLinkSession/)
 assert.match(membershipReview, /identity\.authMethod !== "password"/)
 assert.match(globalMembersServer, /\["owner", "super_admin"\]\.includes/)
 assert.match(globalMembersServer, /context\.authMethod !== "password"/)
-assert.match(globalMembersServer, /WHERE user_account\.status = 'active'/)
-assert.match(globalMembersServer, /LEFT JOIN ministry_members membership/)
-assert.match(globalMembersUi, /Search name, email, username, or ministry/)
+assert.match(globalMembersServer, /FROM ministry_members membership/)
+assert.match(globalMembersServer, /WHERE membership\.status = 'active'/)
+assert.doesNotMatch(globalMembersServer, /FROM users user_account\s+LEFT JOIN ministry_members/)
+assert.match(globalMembersUi, /Search name, email, username, ministry, or access/)
 assert.match(globalMembersUi, /action: "add_existing_member"/)
 assert.match(globalMembersUi, /action: "set_role"/)
 assert.match(globalMembersUi, /action: "set_ministry_level"/)
+assert.match(globalMembersUi, /action: "set_global_role"/)
+assert.match(ministryMembers, /ministry_user\.global_role_changed/)
+assert.match(ministryMembers, /You cannot change your own global access/)
 assert.match(homeWorkspace, /globalOnly: true/)
 assert.match(homeWorkspace, /<MinistryGlobalMembers \/>/)
 assert.match(ministryMembers, /ministry_member\.added/)
 assert.match(ministryMembers, /ministry_member\.role_changed/)
 assert.match(ministryMembers, /ministry_member\.removed/)
+assert.match(
+  profileSuppressionMigration,
+  /CREATE TABLE IF NOT EXISTS ministry_profile_suppressions/
+)
+assert.match(
+  profileSuppressionMigration,
+  /WHERE reactivated_at IS NULL/
+)
+assert.match(globalMembersUi, /action: "suppress_profile"/)
+assert.match(ministryMembers, /ministry_profile\.suppressed/)
+assert.match(ministryMembers, /SET status = 'inactive', updated_at = now\(\)/)
+assert.match(invitationResponse, /ministry_profile\.reactivated/)
+assert.match(invitationResponse, /SET reactivated_by = \$1/)
 
 const leadValues = [
   ...profile.matchAll(/\[(15|30|45|60|120|180|240),\s*"/g),

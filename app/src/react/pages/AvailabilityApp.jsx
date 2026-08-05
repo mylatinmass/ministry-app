@@ -4,7 +4,7 @@ import MinistryRouteGuard from "../components/ministry/MinistryRouteGuard"
 
 const AvailabilityRedirect = () => {
   React.useEffect(() => {
-    window.location.replace("/ministry?section=availability")
+    window.location.replace("/?section=availability")
   }, [])
 
   return (

@@ -19,6 +19,9 @@ const loadLegacyHandlers = async () => {
         require("./legacy/ministry-invitation-response.js").handler,
       "ministry-list": require("./legacy/ministry-list.js").handler,
       "ministry-login": require("./legacy/ministry-login.js").handler,
+      "ministry-login-link": require("./legacy/ministry-login-link.js").handler,
+      "ministry-login-link-response":
+        require("./legacy/ministry-login-link-response.js").handler,
       "ministry-members": require("./legacy/ministry-members.js").handler,
       "ministry-membership-request-response":
         require("./legacy/ministry-membership-request-response.js").handler,
@@ -35,6 +38,8 @@ const loadLegacyHandlers = async () => {
     ministryInvitationResponse,
     ministryList,
     ministryLogin,
+    ministryLoginLink,
+    ministryLoginLinkResponse,
     ministryMembers,
     ministryMembershipRequestResponse,
     ministryProfileSeparation,
@@ -46,6 +51,8 @@ const loadLegacyHandlers = async () => {
     import("./legacy/ministry-invitation-response.js"),
     import("./legacy/ministry-list.js"),
     import("./legacy/ministry-login.js"),
+    import("./legacy/ministry-login-link.js"),
+    import("./legacy/ministry-login-link-response.js"),
     import("./legacy/ministry-members.js"),
     import("./legacy/ministry-membership-request-response.js"),
     import("./legacy/ministry-profile-separation.js"),
@@ -60,6 +67,8 @@ const loadLegacyHandlers = async () => {
       unwrap(ministryInvitationResponse).handler,
     "ministry-list": unwrap(ministryList).handler,
     "ministry-login": unwrap(ministryLogin).handler,
+    "ministry-login-link": unwrap(ministryLoginLink).handler,
+    "ministry-login-link-response": unwrap(ministryLoginLinkResponse).handler,
     "ministry-members": unwrap(ministryMembers).handler,
     "ministry-membership-request-response":
       unwrap(ministryMembershipRequestResponse).handler,

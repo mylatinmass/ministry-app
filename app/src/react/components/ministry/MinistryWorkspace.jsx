@@ -16,6 +16,7 @@ import {
   memberSections,
   ministrySections,
   profileSection,
+  supportSection,
 } from "./ministryNavigation"
 
 const accessLabels = {
@@ -27,7 +28,10 @@ const accessLabels = {
 
 const MinistryWorkspace = ({ data }) => {
   const isMember = data.ministry.accessLevel === "member"
-  const availableSections = isMember ? memberSections : ministrySections
+  const availableSections = [
+    ...(isMember ? memberSections : ministrySections),
+    supportSection,
+  ]
   const [currentUser, setCurrentUser] = React.useState(data.user)
   const [sectionId, setSectionId] = React.useState(() =>
     isMember ? "schedule" : "overview",
@@ -122,7 +126,7 @@ const MinistryWorkspace = ({ data }) => {
       (ministry) => ministry.slug === data.ministry.slug,
     )
     window.location.assign(
-      canOpenCurrent ? `/ministry/${data.ministry.slug}` : "/ministry",
+      canOpenCurrent ? `/${data.ministry.slug}` : "/",
     )
   }
 
@@ -163,7 +167,7 @@ const MinistryWorkspace = ({ data }) => {
         <aside className="hidden w-72 shrink-0 border-r border-gray-100 bg-white lg:block">
           <div className="sticky top-0 flex max-h-screen flex-col overflow-y-auto px-4 py-6">
             <Link
-              to="/ministry"
+              to="/"
               className="mb-6 flex items-center gap-2 px-3 text-sm text-gray-500 hover:text-[#896542]"
             >
               <ArrowLeftIcon className="size-4" />
@@ -216,7 +220,7 @@ const MinistryWorkspace = ({ data }) => {
               <div className="order-1 min-w-0">
                 <div className=" flex items-center gap-2 lg:hidden">
                   <Link
-                    to="/ministry"
+                    to="/"
                     aria-label="Back to ministries"
                     className="rounded-lg border border-gray-200 bg-white p-2 text-gray-600"
                   >
@@ -317,7 +321,7 @@ const MinistryWorkspace = ({ data }) => {
                       })}
                     </div>
                     <Link
-                      to="/ministry?section=availability"
+                      to="/?section=availability"
                       onClick={() => setProfileMenuOpen(false)}
                       className="block w-full border-t border-gray-100 px-4 py-3 text-left text-sm font-semibold text-[#896542] hover:bg-[#f7f3ef]"
                     >
@@ -413,7 +417,7 @@ const MinistryWorkspace = ({ data }) => {
             >
               {isMember && (
                 <Link
-                  to="/ministry"
+                  to="/"
                   onClick={() => setMobileMenuOpen(false)}
                   className="mb-2 flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-gray-600"
                 >

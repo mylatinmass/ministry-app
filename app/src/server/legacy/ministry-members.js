@@ -958,6 +958,13 @@ const handler = async (event) => {
       return await listMembers(client, user, ministryId)
     }
 
+    if (context.isEmailLinkSession) {
+      return jsonResponse(403, {
+        message:
+          "Sign in with your username and password to approve members or change member access.",
+      })
+    }
+
     const body = parseBody(event)
     if (!body) return jsonResponse(400, { message: "Invalid request" })
     const managedMinistries = await getManagedMinistries(client, user)

@@ -270,7 +270,7 @@ const sendEmailFallback = async (context: any) => {
     subject: "Upcoming ministry assignment",
     text: `You have an upcoming ministry assignment at ${new Date(
       context.start_time,
-    ).toLocaleString("en-US", { timeZone: "America/New_York" })}. Open https://www.mylatinmass.com/ministry/${context.ministry_slug} for details.`,
+    ).toLocaleString("en-US", { timeZone: "America/New_York" })}. Open https://ministry.mylatinmass.com/${context.ministry_slug} for details.`,
   })
   await recordDelivery(context.id, null, "email", "sent")
   return true
@@ -333,7 +333,7 @@ const deliverReminder = async (reminder: any) => {
         minute: "2-digit",
         timeZone: "America/New_York",
       }).format(new Date(context.start_time))}.`,
-      url: `/ministry/${context.ministry_slug}?event=${context.event_id}`,
+      url: `/${context.ministry_slug}?event=${context.event_id}`,
       tag: `ministry-reminder-${context.assignment_id}`,
     })
 

@@ -1,0 +1,10 @@
+---
+import AppLayout from "../layouts/AppLayout.astro"
+import LoginLinkApp from "../react/pages/LoginLinkApp.jsx"
+
+export const prerender = false
+---
+
+<AppLayout title="Ministries Sign-in | MyLatinMass.com" referrer="no-referrer">
+  <LoginLinkApp client:only="react" />
+</AppLayout>

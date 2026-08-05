@@ -16,6 +16,7 @@ const getMinistryUserById = async (client, userId) => {
         u.id,
         u.first_name,
         u.last_name,
+        u.email,
         u.username,
         u.global_role,
         u.status,
@@ -43,6 +44,7 @@ const getMinistryUserByUsername = async (client, username) => {
         u.id,
         u.first_name,
         u.last_name,
+        u.email,
         u.username,
         u.password_hash,
         u.global_role,
@@ -84,9 +86,10 @@ const createMinistryToken = (user, secret, options = {}) =>
       userId: user.id,
       username: user.username,
       globalRole: user.global_role,
+      authMethod: options.authMethod || "password",
     },
     secret,
-    { expiresIn: "12h" }
+    { expiresIn: options.expiresIn || "12h" }
   )
 
 const getMinistryTokenPayload = (event, secret) => {
@@ -121,12 +124,27 @@ const getMinistryIdentityContext = async (client, payload) => {
     payload.actorUserId || payload.userId
   )
   if (!actor) return null
+  const authMethod = payload.authMethod || "password"
+  if (
+    authMethod === "email_link" &&
+    ["owner", "super_admin"].includes(actor.global_role)
+  ) {
+    return null
+  }
 
   const activeProfileUserId =
     payload.activeProfileUserId || payload.actorUserId || payload.userId
   if (activeProfileUserId === actor.id) {
-    return { actor, user: actor, isManagedProfile: false }
+    return {
+      actor,
+      user: actor,
+      isManagedProfile: false,
+      authMethod,
+      isEmailLinkSession: authMethod === "email_link",
+    }
   }
+
+  if (authMethod === "email_link") return null
 
   const relationshipResult = await client.query(
     `
@@ -149,6 +167,8 @@ const getMinistryIdentityContext = async (client, payload) => {
     user,
     isManagedProfile: true,
     managedProfileId: relationshipResult.rows[0].id,
+    authMethod,
+    isEmailLinkSession: false,
   }
 }
 

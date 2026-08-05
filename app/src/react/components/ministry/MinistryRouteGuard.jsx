@@ -2,10 +2,7 @@ import * as React from "react"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import MinistryLogin, { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 
-const isMinistryPath = (pathname = "") =>
-  ["/ministry", "/ministries"].some(
-    (root) => pathname === root || pathname.startsWith(`${root}/`)
-  )
+const isMinistryPath = () => true
 
 const MinistryRouteGuard = ({ children, location }) => {
   const protectedRoute = isMinistryPath(location?.pathname)

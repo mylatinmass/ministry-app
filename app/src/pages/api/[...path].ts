@@ -10,6 +10,7 @@ import { handleEvents } from "../../server/scheduling/events"
 import { handleTemplates } from "../../server/scheduling/templates"
 import { handleAvailability } from "../../server/scheduling/availability"
 import { handleOrdo } from "../../server/scheduling/ordo"
+import { handleSupport } from "../../server/support"
 
 export const prerender = false
 
@@ -36,6 +37,9 @@ const route: APIRoute = async ({ params, request }) => {
   }
   if (path === "scheduling/ordo") {
     return handleOrdo(request)
+  }
+  if (path === "support") {
+    return handleSupport(request)
   }
 
   const legacyResponse = await runLegacyHandler(path, request)

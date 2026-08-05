@@ -6,6 +6,8 @@ export type MinistryIdentityContext = {
   user: Record<string, any>
   isManagedProfile: boolean
   managedProfileId?: string
+  authMethod: "password" | "email_link"
+  isEmailLinkSession: boolean
 }
 
 export const getIdentityContext = async (
@@ -125,6 +127,6 @@ export const writeSchedulingAudit = (
       ministryId,
       beforeData == null ? null : JSON.stringify(beforeData),
       afterData == null ? null : JSON.stringify(afterData),
-      JSON.stringify(metadata),
+      JSON.stringify({ authMethod: context.authMethod, ...metadata }),
     ],
   )

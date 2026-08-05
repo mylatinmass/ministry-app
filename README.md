@@ -38,9 +38,66 @@ python3 alpha/server.py --reset
 
 Then open `http://127.0.0.1:8081`. The alpha uses a local SQLite database and enforces its demonstration permissions on the server. See [`alpha/README.md`](alpha/README.md) for the five-minute walkthrough and current boundaries.
 
-## Planned integrations
+## Standalone application and integration contract
 
-Potential integrations include the public website, Klaviyo, authenticated email, Telegram, the SSPX Ordo, a priory priest-assignment Google Sheet or CSV, personal calendar subscriptions, and later public calendar feeds. Integration boundaries and data-sharing rules must be approved before implementation.
+Chapel Scheduler is a standalone application. Its user interface, authorization,
+scheduling rules, and private operational data do not depend on the public chapel
+website. It may be linked from, embedded behind, or connected to other approved
+websites and services through documented interfaces without coupling those systems
+to its internal database schema.
+
+This section is the canonical integration inventory. Every integration change must
+update this table, `app/.env.example`, and the relevant migration or interface
+documentation in the same reviewed change. The table describes capabilities and
+configuration names only; secrets and production data must never be committed.
+
+| Integration | Status | Purpose and data boundary | Required configuration / interface |
+| --- | --- | --- | --- |
+| CockroachDB | Current | System of record for accounts, ministries, memberships, profiles, templates, events, responsibilities, assignments, availability, audit history, cached Ordo references, and future delivery records. Private operational data remains here and is accessed only through server-side application APIs. | `COCKROACHDB_CONNECTION_STRING`; reviewed SQL migrations in `app/migrations/`; least-privilege production credentials; backup and restore ownership still required. |
+| Astro application API | Current | Stable boundary used by the standalone web client. Other websites must use an approved API or feed rather than read application tables directly. Private endpoints require Ministry authentication and return only role-authorized data. | Routes under `https://ministry.mylatinmass.com/api/`; request/response contract must be documented before third-party use. |
+| Vercel | Current deployment target | Hosts the standalone Astro Ministry application at `ministry.mylatinmass.com`, including its API routes, static assets, PWA manifest, and Ministry-only service worker. The public `mylatinmass.com` Gatsby website remains a separate Netlify deployment. | Chapel-owned `ministry-app` Vercel project, subdomain DNS, environment variables, deployment access, monitoring, and rollback ownership. |
+| 1962ordo.today | Current read-only reference | Supplies public liturgical reference data. The application normalizes and caches it; the source never receives ministry rosters, assignments, contact data, or private notes. | Outbound HTTPS; cache/refresh behavior in the Ordo service; source-failure monitoring and terms review remain required. |
+| MyLatinMass/public websites | Current link boundary; future data integration | The Netlify-hosted public website redirects its legacy `/ministry` URLs to the standalone Vercel app and may later consume an explicitly public, privacy-filtered calendar feed. Public sites must not receive volunteer names, staffing details, private notes, eligibility, family data, or private events. | `ministry.mylatinmass.com` link/redirect contract now; approved public API/feed contract, origin policy, cache policy, webmaster coordination, and publication-permission rules before data sharing. |
+| Klaviyo | Future preferred communications platform | Intended provider for permission-based email and SMS, including assignment messages, reminders, schedule changes, cancellations, volunteer opportunities, and chapel subscriptions. CockroachDB remains the operational source of truth; Klaviyo receives only the minimum approved profile, consent, subscription, and event data needed for delivery. | Klaviyo account ownership; private API key/credential; list and segment design; event schema; consent and unsubscribe mapping; sender/domain authentication; webhook handling; retry, deduplication, delivery-status, retention, and deletion rules. |
+| SMTP/Nodemailer | Transitional, limited | Existing account invitation, one-time member sign-in, managed-profile review, and authenticated Support contact flows can send transactional email. Sign-in links are single-use, expire after 15 minutes, are unavailable to Owner/Super Admin accounts, and create restricted sessions that cannot change account or member access. The Support recipient list stays server-side and may contain the webmaster and other designated people; it falls back to `GMAIL_USER` until a dedicated list is configured. This is not the completed Ministry notification system and should be replaced or deliberately retained when Klaviyo is integrated. | `GMAIL_USER`, `GMAIL_PASS`, comma-separated `SUPPORT_RECIPIENTS`, `SITE_URL`, `MINISTRY_LOGIN_LINK_TTL_MINUTES`, delivery-safety controls, and an approved migration plan to Klaviyo. |
+| Browser push | Designed, not operationally accepted | The codebase contains a subscription and reminder-delivery foundation, but notifications are still considered Pending until production configuration, scheduling, consent, delivery testing, and stakeholder acceptance are complete. | VAPID keys, `VAPID_SUBJECT`, scheduler identity, delivery monitoring, retry policy, and user-facing consent. |
+| Telegram | Future optional channel | May provide direct volunteer interactions and privacy-safe opening summaries. It must never be the only participation method or expose sensitive records. | Chapel-owned bot, account-linking and authorization design, webhook secret, privacy review, delivery fallback, and acceptance testing. |
+| Google Calendar / Apple Calendar | Future | May import approved future events and provide private revocable personal calendar subscriptions. External calendars must receive only the view authorized for that subscriber. | Import contract, duplicate/conflict rules, revocable feed tokens, visibility filtering, and transition/archive plan. |
+| Priory priest-assignment Google Sheet or CSV | Future optional input | May provide celebrant assignments as helpful scheduling input. Missing or conflicting data must warn rather than cancel a service, and no private Ministry data is written back without separate approval. | Approved file ownership/access, column schema, validation, refresh cadence, source audit, and conflict handling. |
+| fsspx.today | Future optional input | May provide public chapel service information if permission, reliability, and source terms are acceptable. Imported information is treated as untrusted input and must not overwrite approved local data silently. | Source/terms approval, adapter contract, caching, structural-change detection, validation, and manual correction path. |
+
+### Integration maintenance rules
+
+- CockroachDB is the authoritative operational datastore unless an approved
+  architecture change says otherwise. Klaviyo and other delivery systems are
+  downstream processors, not the authoritative assignment or consent record.
+- External websites and services integrate through documented APIs, feeds, imports,
+  webhooks, or delivery adapters. They do not query production tables directly.
+- Each integration must name a chapel owner, technical backup, data sent, data
+  received, authentication method, consent basis, retention/deletion behavior,
+  retry/failure behavior, and manual fallback before production approval.
+- Notification channels remain Pending until their complete delivery workflow is
+  configured, tested, monitored, and accepted. Code or database scaffolding alone
+  does not make a notification integration complete.
+- Adding a provider requires an updated `.env.example` with blank placeholders,
+  documented setup steps, and secrets stored only in the approved hosting secret
+  manager.
+
+## Ministry authentication and audit controls
+
+- Username-and-password sessions retain the permissions assigned to the account.
+- Active non-privileged members may request a single-use email sign-in link. The
+  response is deliberately identical for eligible, unknown, duplicated, and
+  privileged email addresses to prevent account discovery.
+- Owner and Super Admin accounts can never request or redeem email sign-in links.
+- Email-link sessions may use operational Ministry features, but changing account
+  details, family profiles, membership approvals, invitations, roles, serving
+  eligibility, or member access requires a fresh password-authenticated session.
+- `ministry_audit_log` is the authoritative “who changed what” record. It stores
+  the actor, active profile, action, entity, ministry, timestamp, before/after
+  JSON where supplied, metadata, and now the authentication method. These records
+  support investigation and a reviewed/manual reversal; they are not an automatic
+  one-click undo mechanism.
 
 ## Privacy and repository rules
 

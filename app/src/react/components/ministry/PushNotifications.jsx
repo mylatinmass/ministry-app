@@ -31,7 +31,7 @@ const PushNotifications = () => {
     }
 
     navigator.serviceWorker
-      .getRegistration("/ministry/")
+      .getRegistration("/")
       .then((registration) => registration?.pushManager.getSubscription())
       .then((subscription) => setStatus(subscription ? "enabled" : "disabled"))
       .catch(() => setStatus("disabled"))
@@ -71,8 +71,8 @@ const PushNotifications = () => {
       }
 
       const registration = await navigator.serviceWorker.register(
-        "/ministry/service-worker.js",
-        { scope: "/ministry/" },
+        "/service-worker.js",
+        { scope: "/" },
       )
       await navigator.serviceWorker.ready
 
@@ -106,7 +106,7 @@ const PushNotifications = () => {
     setMessage("")
     try {
       const registration =
-        await navigator.serviceWorker.getRegistration("/ministry/")
+        await navigator.serviceWorker.getRegistration("/")
       const subscription = await registration?.pushManager.getSubscription()
       const subscriptionId = window.localStorage.getItem(subscriptionStorageKey)
       const token = window.sessionStorage.getItem(MINISTRY_SESSION_KEY)

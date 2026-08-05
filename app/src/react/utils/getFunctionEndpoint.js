@@ -1,5 +1,5 @@
 const getFunctionEndpoint = (functionName) =>
-  `/ministry/api/${functionName
+  `/api/${functionName
     .toString()
     .split("/")
     .map((segment) => encodeURIComponent(segment))

@@ -16,6 +16,7 @@ import MinistryMembers from "./MinistryMembers"
 import MinistryProfile from "./MinistryProfile"
 import MinistryTemplates from "./MinistryTemplates"
 import MinistryAvailability from "./MinistryAvailability"
+import MinistrySupport from "./MinistrySupport"
 
 const formatEventDate = (value) =>
   new Intl.DateTimeFormat("en-US", {
@@ -329,6 +330,8 @@ const MinistryWorkspaceContent = ({
         onUserUpdate={onUserUpdate}
       />
     )
+  } else if (section.id === "support") {
+    content = <MinistrySupport ministryName={data.ministry.name} />
   } else {
     content = (
       <PlaceholderContent section={section} activeAction={activeAction} />

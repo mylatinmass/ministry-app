@@ -16,6 +16,7 @@ import {
   HandRaisedIcon,
   HomeIcon,
   ListBulletIcon,
+  LifebuoyIcon,
   NoSymbolIcon,
   PencilSquareIcon,
   PlusIcon,
@@ -34,6 +35,14 @@ const profileSection = {
   icon: UserCircleIcon,
   description: "Manage personal details and account-wide preferences.",
   actions: [action("profile-details", "Profile", UserCircleIcon)],
+}
+
+const supportSection = {
+  id: "support",
+  label: "Support",
+  icon: LifebuoyIcon,
+  description: "Contact the chapel support team and attach screenshots or supporting files.",
+  actions: [action("contact-support", "Contact Support", LifebuoyIcon)],
 }
 
 const ministrySections = [
@@ -198,4 +207,4 @@ const memberSections = [
   },
 ]
 
-export { memberSections, ministrySections, profileSection }
+export { memberSections, ministrySections, profileSection, supportSection }

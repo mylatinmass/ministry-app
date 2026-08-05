@@ -17,7 +17,7 @@ const escapeHtml = (value = "") =>
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;")
 
 const buildMembershipRequestUrl = (event, token, intent) => {
-  const url = new URL("/ministry/membership-request", getInvitationOrigin(event))
+  const url = new URL("/membership-request", getInvitationOrigin(event))
   const fragment = new URLSearchParams({ token, intent })
   url.hash = fragment.toString()
   return url.toString()

@@ -166,6 +166,11 @@ const handler = async (event) => {
     if (!context) return jsonResponse(401, { message: "Ministry access is inactive" })
 
     if (event.httpMethod === "PATCH") {
+      if (context.isEmailLinkSession) {
+        return jsonResponse(403, {
+          message: "Sign in with your username and password to change account details.",
+        })
+      }
       const body = parseBody(event)
       if (!body) return jsonResponse(400, { message: "Invalid request" })
       if (context.isManagedProfile) {

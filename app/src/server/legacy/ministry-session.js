@@ -52,6 +52,8 @@ const handler = async (event) => {
       actor: toPublicMinistryUser(context.actor),
       user: toPublicMinistryUser(context.user),
       isManagedProfile: context.isManagedProfile,
+      authMethod: context.authMethod,
+      restrictedSession: context.isEmailLinkSession,
     })
   } catch (error) {
     console.error("Ministries session validation failed:", error)

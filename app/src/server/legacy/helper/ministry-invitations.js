@@ -27,7 +27,7 @@ const getInvitationOrigin = (event = {}) => {
 }
 
 const buildInvitationUrl = (event, token, intent) => {
-  const url = new URL("/ministry/invite", getInvitationOrigin(event))
+  const url = new URL("/invite", getInvitationOrigin(event))
   const fragment = new URLSearchParams({ token })
   if (intent) fragment.set("intent", intent)
   url.hash = fragment.toString()

@@ -4,6 +4,7 @@ import { Helmet } from "react-helmet"
 import Layout from "../components/Layout"
 import Seo from "../components/Seo"
 import getFunctionEndpoint from "../utils/getFunctionEndpoint"
+import MinistryLogin, { MINISTRY_SESSION_KEY } from "../components/ministry/MinistryLogin"
 
 const MembershipRequestPage = ({ location }) => {
   const params = React.useMemo(
@@ -16,10 +17,11 @@ const MembershipRequestPage = ({ location }) => {
   const [status, setStatus] = React.useState("loading")
   const [message, setMessage] = React.useState("")
   const [isSubmitting, setIsSubmitting] = React.useState(false)
+  const [needsPassword, setNeedsPassword] = React.useState(false)
 
   React.useEffect(() => {
     if (typeof window !== "undefined" && window.location.hash) {
-      window.history.replaceState(null, "", "/ministry/membership-request")
+      window.history.replaceState(null, "", "/membership-request")
     }
     if (!token) {
       setStatus("error")
@@ -58,11 +60,17 @@ const MembershipRequestPage = ({ location }) => {
     try {
       const response = await fetch(getFunctionEndpoint("ministry-membership-request-response"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${window.sessionStorage.getItem(MINISTRY_SESSION_KEY) || ""}`,
+        },
         body: JSON.stringify({ action: intent, token }),
       })
       const result = await response.json()
-      if (!response.ok) throw new Error(result.message)
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) setNeedsPassword(true)
+        throw new Error(result.message)
+      }
       setRequest(result.request)
       setStatus("answered")
       setMessage(result.message)
@@ -90,13 +98,18 @@ const MembershipRequestPage = ({ location }) => {
           )}
           {status === "ready" && (
             <div className="mt-6">
-              <p className="text-sm text-gray-600">You are reviewing this as {request.reviewerName}. Only the first leader response will be recorded.</p>
-              <button type="button" onClick={answer} disabled={isSubmitting} className={`mt-5 w-full rounded-xl px-5 py-3 font-semibold text-white disabled:opacity-50 ${intent === "accept" ? "bg-[#896542]" : "bg-gray-700"}`}>{isSubmitting ? "Recording response..." : intent === "accept" ? "Confirm acceptance" : "Confirm decline"}</button>
+              <p className="text-sm text-gray-600">You are reviewing this as {request.reviewerName}. For security, membership decisions require username-and-password sign-in.</p>
+              {!needsPassword && <button type="button" onClick={answer} disabled={isSubmitting} className={`mt-5 w-full rounded-xl px-5 py-3 font-semibold text-white disabled:opacity-50 ${intent === "accept" ? "bg-[#896542]" : "bg-gray-700"}`}>{isSubmitting ? "Recording response..." : intent === "accept" ? "Confirm acceptance" : "Confirm decline"}</button>}
             </div>
           )}
           {(status === "error" || status === "answered") && <p className="mt-6 text-gray-700">{message}</p>}
-          {status === "answered" && <Link to="/ministry" className="mt-5 inline-block text-sm font-semibold text-[#896542]">Open ministries</Link>}
+          {status === "answered" && <Link to="/" className="mt-5 inline-block text-sm font-semibold text-[#896542]">Open ministries</Link>}
         </div>
+        {status === "ready" && needsPassword && (
+          <div className="mt-6 overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+            <MinistryLogin passwordOnly onLoginSuccess={() => setNeedsPassword(false)} />
+          </div>
+        )}
       </section>
     </Layout>
   )

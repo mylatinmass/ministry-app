@@ -69,7 +69,7 @@ const handler = async (event) => {
 
     return jsonResponse(200, {
       success: true,
-      token: createMinistryToken(user, jwtSecret),
+      token: createMinistryToken(user, jwtSecret, { authMethod: "password" }),
       user: toPublicMinistryUser(user),
     })
   } catch (error) {

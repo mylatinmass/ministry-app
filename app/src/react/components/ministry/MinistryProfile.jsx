@@ -262,7 +262,7 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
             <span className="text-gray-300">or</span>
             <button
               type="button"
-              onClick={() => leaveSession("/ministry")}
+              onClick={() => leaveSession("/")}
               className="text-[#896542] hover:underline"
             >
               Switch user
@@ -404,7 +404,7 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
             {profile.ministries.map((ministry) => (
               <Link
                 key={ministry.id}
-                to={`/ministry/${ministry.slug}`}
+                to={`/${ministry.slug}`}
                 className="rounded-xl border border-gray-100 p-4 transition hover:border-[#C1A387] hover:bg-[#fcfaf8]"
               >
                 <p className="font-semibold text-gray-900">{ministry.name}</p>

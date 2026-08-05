@@ -20,7 +20,7 @@ const MinistryProfileSeparatePage = ({ location }) => {
 
   React.useEffect(() => {
     if (typeof window !== "undefined" && window.location.hash) {
-      window.history.replaceState(null, "", "/ministry/profile-separate")
+      window.history.replaceState(null, "", "/profile-separate")
     }
     if (!token) {
       setStatus("error")
@@ -99,7 +99,7 @@ const MinistryProfileSeparatePage = ({ location }) => {
           {status === "loading" && <p className="mt-6 text-gray-500">Opening your activation...</p>}
           {status === "error" && <p className="mt-6 text-red-600">{message}</p>}
           {status === "accepted" && (
-            <div className="mt-6"><p className="text-green-700">{message}</p><Link to="/ministry" className="mt-5 inline-block rounded-xl bg-[#896542] px-5 py-3 font-semibold text-white">Open my ministries</Link></div>
+            <div className="mt-6"><p className="text-green-700">{message}</p><Link to="/" className="mt-5 inline-block rounded-xl bg-[#896542] px-5 py-3 font-semibold text-white">Open my ministries</Link></div>
           )}
           {status === "ready" && separation && (
             <form onSubmit={activate} className="mt-6 space-y-4">

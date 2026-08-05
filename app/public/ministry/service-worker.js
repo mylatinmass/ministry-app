@@ -2,7 +2,7 @@ self.addEventListener("push", (event) => {
   let notification = {
     title: "Upcoming ministry assignment",
     body: "Open the Ministry app to review your assignment.",
-    url: "/ministry/",
+    url: "/",
     tag: "ministry-reminder",
   }
 
@@ -17,8 +17,8 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     self.registration.showNotification(notification.title, {
       body: notification.body,
-      icon: "/ministry/icons/icon-192.png",
-      badge: "/ministry/icons/icon-192.png",
+      icon: "/icons/icon-192.png",
+      badge: "/icons/icon-192.png",
       tag: notification.tag,
       data: { url: notification.url },
     }),
@@ -28,15 +28,14 @@ self.addEventListener("push", (event) => {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close()
   const destination = new URL(
-    event.notification.data?.url || "/ministry/",
+    event.notification.data?.url || "/",
     self.location.origin,
   )
 
   if (
-    destination.origin !== self.location.origin ||
-    !destination.pathname.startsWith("/ministry/")
+    destination.origin !== self.location.origin
   ) {
-    destination.pathname = "/ministry/"
+    destination.pathname = "/"
     destination.search = ""
     destination.hash = ""
   }
@@ -45,7 +44,7 @@ self.addEventListener("notificationclick", (event) => {
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(
       (clients) => {
         const existing = clients.find(
-          (client) => new URL(client.url).pathname.startsWith("/ministry/"),
+          (client) => new URL(client.url).origin === self.location.origin,
         )
         if (existing) {
           existing.navigate(destination.href)

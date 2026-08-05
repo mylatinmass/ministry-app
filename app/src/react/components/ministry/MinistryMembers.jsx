@@ -141,7 +141,7 @@ const MinistryMembers = ({ data, activeAction }) => {
         if (data.user.globalRole === "regular") {
           window.sessionStorage.removeItem(MINISTRY_SESSION_KEY)
         }
-        window.location.assign("/ministry")
+        window.location.assign("/")
         return true
       }
       await loadMembers()

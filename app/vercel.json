@@ -2,23 +2,9 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "astro",
   "regions": ["iad1"],
-  "rewrites": [
-    {
-      "source": "/ministry/api/:path*",
-      "destination": "/api/:path*"
-    },
-    {
-      "source": "/ministry/_astro/:path*",
-      "destination": "/_astro/:path*"
-    },
-    {
-      "source": "/ministry/:slug",
-      "destination": "/:slug"
-    }
-  ],
   "headers": [
     {
-      "source": "/ministry/api/(.*)",
+      "source": "/api/(.*)",
       "headers": [
         {
           "key": "Cache-Control",
@@ -27,7 +13,7 @@
       ]
     },
     {
-      "source": "/ministry/service-worker.js",
+      "source": "/service-worker.js",
       "headers": [
         {
           "key": "Cache-Control",
@@ -35,12 +21,12 @@
         },
         {
           "key": "Service-Worker-Allowed",
-          "value": "/ministry/"
+          "value": "/"
         }
       ]
     },
     {
-      "source": "/ministry/manifest.webmanifest",
+      "source": "/manifest.webmanifest",
       "headers": [
         {
           "key": "Cache-Control",
@@ -49,7 +35,7 @@
       ]
     },
     {
-      "source": "/ministry/_astro/(.*)",
+      "source": "/_astro/(.*)",
       "headers": [
         {
           "key": "Cache-Control",

@@ -9,6 +9,7 @@ import {
   ChevronRightIcon,
   ClockIcon,
   HomeIcon,
+  LifebuoyIcon,
   Squares2X2Icon,
   UserCircleIcon,
   XMarkIcon,
@@ -21,6 +22,7 @@ import MinistryHomeCalendar from "./MinistryHomeCalendar"
 import MinistryOrdoReference from "./MinistryOrdoReference"
 import MinistryProfile from "./MinistryProfile"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
+import MinistrySupport from "./MinistrySupport"
 
 const accessLabels = {
   owner: "Global Owner",
@@ -65,6 +67,12 @@ const sections = [
     label: "My Profile",
     icon: UserCircleIcon,
     description: "Manage personal details and account-wide preferences.",
+  },
+  {
+    id: "support",
+    label: "Support",
+    icon: LifebuoyIcon,
+    description: "Contact the chapel support team and attach screenshots or supporting files.",
   },
 ]
 
@@ -122,7 +130,7 @@ const MinistryCards = ({ ministries, isManagedProfile, actor, onReturn }) => {
       {ministries.map((ministry) => (
         <Link
           key={ministry.id}
-          to={`/ministry/${ministry.slug}`}
+          to={`/${ministry.slug}`}
           className="flex min-h-56 flex-col rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:border-[#C1A387] hover:shadow-md"
         >
           <div className="mb-4 flex items-start justify-between gap-3">
@@ -249,7 +257,7 @@ const MinistryHomeWorkspace = ({ data }) => {
     window.history.replaceState(
       {},
       "",
-      id === "home" ? "/ministry" : `/ministry?section=${id}`,
+      id === "home" ? "/" : `/?section=${id}`,
     )
   }
 
@@ -271,7 +279,7 @@ const MinistryHomeWorkspace = ({ data }) => {
       "ministry_visible_profile_ids",
       JSON.stringify([profileId]),
     )
-    window.location.assign("/ministry")
+    window.location.assign("/")
   }
 
   const signOut = () => {
@@ -416,13 +424,15 @@ const MinistryHomeWorkspace = ({ data }) => {
         onReturn={returnToGuardian}
       />
     )
-  } else {
+  } else if (sectionId === "profile") {
     content = (
       <MinistryProfile
         initialUser={currentUser}
         onUserUpdate={setCurrentUser}
       />
     )
+  } else {
+    content = <MinistrySupport />
   }
 
   return (

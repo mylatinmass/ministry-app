@@ -40,6 +40,12 @@ const [
   ordoMigration,
   schedulingOrdo,
   ordoReference,
+  loginLinkMigration,
+  loginLinkRequest,
+  loginLinkResponse,
+  ministryLogin,
+  ministryLoginUi,
+  membershipReview,
 ] = await Promise.all([
   read("astro.config.mjs"),
   read("src/pages/api/[...path].ts"),
@@ -74,10 +80,16 @@ const [
   read("migrations/20260730_01_add_ordo_reference.sql"),
   read("src/server/scheduling/ordo.ts"),
   read("src/react/components/ministry/MinistryOrdoReference.jsx"),
+  read("migrations/20260805_01_add_ministry_login_links.sql"),
+  read("src/server/legacy/ministry-login-link.js"),
+  read("src/server/legacy/ministry-login-link-response.js"),
+  read("src/server/legacy/ministry-login.js"),
+  read("src/react/components/ministry/MinistryLogin.jsx"),
+  read("src/server/legacy/ministry-membership-request-response.js"),
 ])
 
-assert.match(astroConfig, /site:\s*"https:\/\/www\.mylatinmass\.com"/)
-assert.match(astroConfig, /base:\s*"\/ministry"/)
+assert.match(astroConfig, /site:\s*"https:\/\/ministry\.mylatinmass\.com"/)
+assert.match(astroConfig, /base:\s*"\/"/)
 
 const apiFiles = []
 const walk = async (directory) => {
@@ -100,8 +112,21 @@ assert.match(apiRoute, /scheduling\/availability/)
 assert.match(apiRoute, /scheduling\/ordo/)
 
 assert.match(authHelper, /activeProfileUserId/)
+assert.match(authHelper, /authMethod: options\.authMethod \|\| "password"/)
+assert.match(authHelper, /authMethod === "email_link"/)
 assert.match(ministryList, /const user = context\.user/)
 assert.match(ministryList, /user\.global_role/)
+
+assert.match(loginLinkMigration, /CREATE TABLE IF NOT EXISTS ministry_login_links/)
+assert.match(loginLinkMigration, /token_hash STRING NOT NULL UNIQUE/)
+assert.match(loginLinkRequest, /u\.global_role NOT IN \('owner', 'super_admin'\)/)
+assert.match(loginLinkRequest, /created_at > now\(\) - INTERVAL '60 seconds'/)
+assert.match(loginLinkResponse, /\["owner", "super_admin"\]\.includes/)
+assert.match(loginLinkResponse, /authMethod: "email_link"/)
+assert.match(ministryLogin, /authMethod: "password"/)
+assert.match(ministryLoginUi, /EMAIL ME A SIGN-IN LINK/)
+assert.match(ministryMembers, /context\.isEmailLinkSession/)
+assert.match(membershipReview, /identity\.authMethod !== "password"/)
 
 const leadValues = [
   ...profile.matchAll(/\[(15|30|45|60|120|180|240),\s*"/g),
@@ -244,9 +269,10 @@ assert.match(ordoReference, /The Ordo does not explicitly state the vestment col
 assert.match(schedulingEvents, /event\.ordo_reset_for_date_change/)
 
 const manifest = JSON.parse(manifestSource)
-assert.equal(manifest.start_url, "/ministry/")
-assert.equal(manifest.scope, "/ministry/")
-assert.match(serviceWorker, /destination\.pathname\.startsWith\("\/ministry\/"\)/)
+assert.equal(manifest.id, "/")
+assert.equal(manifest.start_url, "/")
+assert.equal(manifest.scope, "/")
+assert.match(serviceWorker, /destination\.origin !== self\.location\.origin/)
 assert.doesNotMatch(serviceWorker, /caches\.open/)
 
 const serverFiles = []

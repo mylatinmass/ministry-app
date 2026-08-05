@@ -41,7 +41,7 @@ const MinistryInvitePage = ({ location }) => {
 
   React.useEffect(() => {
     if (typeof window !== "undefined" && (window.location.hash || window.location.search)) {
-      window.history.replaceState(null, "", "/ministry/invite")
+      window.history.replaceState(null, "", "/invite")
     }
     if (!token) {
       setStatus("error")
@@ -170,7 +170,7 @@ const MinistryInvitePage = ({ location }) => {
               )}
               <p className="mt-4 text-lg font-semibold text-gray-900">{message}</p>
               {status === "accepted" && (
-                <Link to="/ministry" className="mt-6 inline-block rounded-xl bg-[#896542] px-6 py-3 font-semibold text-white">Open my ministries</Link>
+                <Link to="/" className="mt-6 inline-block rounded-xl bg-[#896542] px-6 py-3 font-semibold text-white">Open my ministries</Link>
               )}
             </div>
           )}

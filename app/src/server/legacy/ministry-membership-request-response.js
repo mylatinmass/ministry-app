@@ -1,6 +1,10 @@
 const { Client } = require("pg")
 const { createGatsbyHandler } = require("./helper/gatsby-function-adapter")
 const { hashInvitationToken } = require("./helper/ministry-invitations")
+const {
+  getMinistryIdentityContext,
+  getMinistryTokenPayload,
+} = require("./helper/ministry-auth")
 
 const jsonResponse = (statusCode, body) => ({
   statusCode,
@@ -69,7 +73,8 @@ const handler = async (event) => {
   const body = parseBody(event)
   if (!body?.token) return jsonResponse(400, { message: "Request token is required" })
   const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
-  if (!connectionString) return jsonResponse(500, { message: "Membership requests are not configured" })
+  const jwtSecret = process.env.JWT_SECRET_KEY
+  if (!connectionString || !jwtSecret) return jsonResponse(500, { message: "Membership requests are not configured" })
 
   const client = new Client({ connectionString, ssl: { rejectUnauthorized: false } })
   try {
@@ -81,6 +86,24 @@ const handler = async (event) => {
     }
     if (!["accept", "decline"].includes(body.action)) {
       return jsonResponse(400, { message: "Choose accept or decline" })
+    }
+    let payload
+    try {
+      payload = getMinistryTokenPayload(event, jwtSecret)
+    } catch (error) {
+      return jsonResponse(401, {
+        message: "Sign in with your username and password to answer this request.",
+      })
+    }
+    const identity = await getMinistryIdentityContext(client, payload)
+    if (
+      !identity ||
+      identity.authMethod !== "password" ||
+      identity.actor.id !== context.reviewer_user_id
+    ) {
+      return jsonResponse(403, {
+        message: "This review must be completed by the named leader using a username and password.",
+      })
     }
     if (new Date(context.expires_at).getTime() <= Date.now()) {
       return jsonResponse(410, { message: "This review link has expired" })
@@ -125,7 +148,7 @@ const handler = async (event) => {
           SET status = $1, reviewed_by = $2, reviewed_at = now(), updated_at = now()
           WHERE id = $3
         `,
-        [status, context.reviewer_user_id, request.id]
+        [status, identity.actor.id, request.id]
       )
       await client.query(
         `
@@ -134,7 +157,7 @@ const handler = async (event) => {
           ) VALUES ($1, $2, $3, 'ministry', $4)
         `,
         [
-          context.reviewer_user_id,
+          identity.actor.id,
           request.child_user_id,
           status === "approved" ? "membership.approved" : "membership.declined",
           request.ministry_id,

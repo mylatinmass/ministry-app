@@ -535,6 +535,12 @@ const handler = async (event) => {
     if (!context) return jsonResponse(401, { message: "Profile access expired" })
     if (event.httpMethod === "GET") return jsonResponse(200, await listProfiles(client, context))
 
+    if (context.isEmailLinkSession) {
+      return jsonResponse(403, {
+        message: "Sign in with your username and password to manage family profiles or membership requests.",
+      })
+    }
+
     const body = parseBody(event)
     if (!body) return jsonResponse(400, { message: "Invalid request" })
     if (event.httpMethod === "PATCH" && body.action === "switch_profile") {
@@ -552,7 +558,10 @@ const handler = async (event) => {
       await audit(client, context.actor.id, profileId, "profile.switched", "user", profileId)
       return jsonResponse(200, {
         success: true,
-        token: createMinistryToken(context.actor, jwtSecret, { activeProfileUserId: profileId }),
+        token: createMinistryToken(context.actor, jwtSecret, {
+          activeProfileUserId: profileId,
+          authMethod: context.authMethod,
+        }),
         activeProfile: toPublicMinistryUser(targetResult.rows[0]),
       })
     }

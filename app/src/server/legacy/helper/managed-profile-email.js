@@ -20,7 +20,7 @@ const getSiteOrigin = (event) => {
 }
 
 const buildSeparationUrl = (event, token) =>
-  `${getSiteOrigin(event)}/ministry/profile-separate#token=${encodeURIComponent(token)}`
+  `${getSiteOrigin(event)}/profile-separate#token=${encodeURIComponent(token)}`
 
 const sendProfileSeparationEmail = async ({ email, firstName, activationUrl }) => {
   assertLiveDeliveryAllowed()

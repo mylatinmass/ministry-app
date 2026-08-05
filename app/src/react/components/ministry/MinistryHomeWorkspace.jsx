@@ -12,6 +12,7 @@ import {
   LifebuoyIcon,
   Squares2X2Icon,
   UserCircleIcon,
+  UserGroupIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
@@ -21,6 +22,7 @@ import MinistryEventDetails from "./MinistryEventDetails"
 import MinistryHomeCalendar from "./MinistryHomeCalendar"
 import MinistryOrdoReference from "./MinistryOrdoReference"
 import MinistryProfile from "./MinistryProfile"
+import MinistryGlobalMembers from "./MinistryGlobalMembers"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import MinistrySupport from "./MinistrySupport"
 
@@ -63,6 +65,13 @@ const sections = [
     description: "Open the ministry workspaces available to this profile.",
   },
   {
+    id: "members",
+    label: "Members",
+    icon: UserGroupIcon,
+    description: "View and manage every member across all ministries.",
+    globalOnly: true,
+  },
+  {
     id: "profile",
     label: "My Profile",
     icon: UserCircleIcon,
@@ -72,7 +81,8 @@ const sections = [
     id: "support",
     label: "Support",
     icon: LifebuoyIcon,
-    description: "Contact the chapel support team and attach screenshots or supporting files.",
+    description:
+      "Contact the chapel support team and attach screenshots or supporting files.",
   },
 ]
 
@@ -168,12 +178,19 @@ const MinistryCards = ({ ministries, isManagedProfile, actor, onReturn }) => {
 }
 
 const MinistryHomeWorkspace = ({ data }) => {
+  const hasGlobalAccess = ["owner", "super_admin"].includes(
+    data.user.globalRole
+  )
+  const availableSections = React.useMemo(
+    () => sections.filter((section) => !section.globalOnly || hasGlobalAccess),
+    [hasGlobalAccess]
+  )
   const [sectionId, setSectionId] = React.useState(() => {
     if (typeof window === "undefined") return "home"
     const requestedSection = new URLSearchParams(window.location.search).get(
-      "section",
+      "section"
     )
-    return sections.some((section) => section.id === requestedSection)
+    return availableSections.some((section) => section.id === requestedSection)
       ? requestedSection
       : "home"
   })
@@ -183,10 +200,11 @@ const MinistryHomeWorkspace = ({ data }) => {
   const [profileMenuOpen, setProfileMenuOpen] = React.useState(false)
   const [familyData, setFamilyData] = React.useState(null)
   const activeSection =
-    sections.find((section) => section.id === sectionId) || sections[0]
+    availableSections.find((section) => section.id === sectionId) ||
+    availableSections[0]
   const myEvents = React.useMemo(
     () => data.calendarEvents.filter((event) => event.is_assigned),
-    [data.calendarEvents],
+    [data.calendarEvents]
   )
   const upcomingAssignments = React.useMemo(() => {
     const now = Date.now()
@@ -202,7 +220,7 @@ const MinistryHomeWorkspace = ({ data }) => {
       .sort(
         (first, second) =>
           new Date(first.start_time).getTime() -
-          new Date(second.start_time).getTime(),
+          new Date(second.start_time).getTime()
       )
   }, [myEvents])
   const actionRequiredEvents = React.useMemo(
@@ -210,11 +228,11 @@ const MinistryHomeWorkspace = ({ data }) => {
       upcomingAssignments.filter((event) =>
         event.visibleProfileAssignments?.some((assignment) =>
           ["pending", "assigned", "change_requested"].includes(
-            assignment.status,
-          ),
-        ),
+            assignment.status
+          )
+        )
       ),
-    [upcomingAssignments],
+    [upcomingAssignments]
   )
   const today = React.useMemo(() => new Date(), [])
   const todayLabel = React.useMemo(
@@ -226,7 +244,7 @@ const MinistryHomeWorkspace = ({ data }) => {
         day: "numeric",
         year: "numeric",
       }).format(today),
-    [today],
+    [today]
   )
 
   React.useEffect(() => {
@@ -254,11 +272,7 @@ const MinistryHomeWorkspace = ({ data }) => {
     setSectionId(id)
     setMobileMenuOpen(false)
     setProfileMenuOpen(false)
-    window.history.replaceState(
-      {},
-      "",
-      id === "home" ? "/" : `/?section=${id}`,
-    )
+    window.history.replaceState({}, "", id === "home" ? "/" : `/?section=${id}`)
   }
 
   const switchProfile = async (profileId) => {
@@ -277,7 +291,7 @@ const MinistryHomeWorkspace = ({ data }) => {
     window.sessionStorage.setItem(MINISTRY_SESSION_KEY, result.token)
     window.sessionStorage.setItem(
       "ministry_visible_profile_ids",
-      JSON.stringify([profileId]),
+      JSON.stringify([profileId])
     )
     window.location.assign("/")
   }
@@ -308,10 +322,7 @@ const MinistryHomeWorkspace = ({ data }) => {
               Schedule for {currentUser?.firstName || "this profile"}
             </p>
           </section>
-          <MinistryOrdoReference
-            compact
-            startTime={today.toISOString()}
-          />
+          <MinistryOrdoReference compact startTime={today.toISOString()} />
         </div>
         <DashboardBlock icon={CheckCircleIcon} title="Action Required">
           {actionRequiredEvents.length ? (
@@ -324,9 +335,7 @@ const MinistryHomeWorkspace = ({ data }) => {
                   className="flex w-full items-center gap-4 rounded-xl border border-amber-200 bg-amber-50/50 p-4 text-left transition hover:border-amber-300"
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-gray-900">
-                      {event.title}
-                    </p>
+                    <p className="font-semibold text-gray-900">{event.title}</p>
                     <p className="mt-1 text-sm text-gray-600">
                       {formatAssignmentDate(event.start_time)} ·{" "}
                       {event.coordinator_ministry_name}
@@ -335,8 +344,8 @@ const MinistryHomeWorkspace = ({ data }) => {
                       {event.visibleProfileAssignments
                         .filter((assignment) =>
                           ["pending", "assigned", "change_requested"].includes(
-                            assignment.status,
-                          ),
+                            assignment.status
+                          )
                         )
                         .map((assignment) => assignment.responsibilityName)
                         .join(" · ")}
@@ -424,6 +433,8 @@ const MinistryHomeWorkspace = ({ data }) => {
         onReturn={returnToGuardian}
       />
     )
+  } else if (sectionId === "members" && hasGlobalAccess) {
+    content = <MinistryGlobalMembers />
   } else if (sectionId === "profile") {
     content = (
       <MinistryProfile
@@ -449,7 +460,7 @@ const MinistryHomeWorkspace = ({ data }) => {
               </h1>
             </div>
             <nav aria-label="Ministry sections" className="space-y-1">
-              {sections.map((section) => {
+              {availableSections.map((section) => {
                 const Icon = section.icon
                 const active = section.id === activeSection.id
                 return (
@@ -608,7 +619,7 @@ const MinistryHomeWorkspace = ({ data }) => {
               className="flex-1 overflow-y-auto p-3"
               aria-label="Ministry sections"
             >
-              {sections.map((section) => {
+              {availableSections.map((section) => {
                 const Icon = section.icon
                 const active = section.id === activeSection.id
                 return (

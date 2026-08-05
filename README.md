@@ -90,6 +90,12 @@ configuration names only; secrets and production data must never be committed.
   response is deliberately identical for eligible, unknown, duplicated, and
   privileged email addresses to prevent account discovery.
 - Owner and Super Admin accounts can never request or redeem email sign-in links.
+- Password-authenticated Owners and Super Admins have a global **Members** menu.
+  It lists every active member account, including accounts not currently assigned
+  to a ministry, shows each person's
+  ministry memberships, and permits audited ministry additions, removals, Leader
+  or Member access changes, and ministry-level assignments. New people are added
+  through the existing private email invitation flow.
 - An unregistered person may submit a public access request with their name,
   email, optional phone number, and optional message. The form deliberately does
   not ask for a chapel or ministry and does not create an account or membership.

@@ -14,8 +14,10 @@ const loadLegacyHandlers = async () => {
     const { createRequire } = await import("node:module")
     const require = createRequire(import.meta.url)
     return {
-      "ministry-access-request":
-        require("./legacy/ministry-access-request.js").handler,
+      "ministry-access-request": require("./legacy/ministry-access-request.js")
+        .handler,
+      "ministry-global-members": require("./legacy/ministry-global-members.js")
+        .handler,
       "ministry-detail": require("./legacy/ministry-detail.js").handler,
       "ministry-invitation-response":
         require("./legacy/ministry-invitation-response.js").handler,
@@ -37,6 +39,7 @@ const loadLegacyHandlers = async () => {
 
   const [
     ministryAccessRequest,
+    ministryGlobalMembers,
     ministryDetail,
     ministryInvitationResponse,
     ministryList,
@@ -51,6 +54,7 @@ const loadLegacyHandlers = async () => {
     ministrySession,
   ] = await Promise.all([
     import("./legacy/ministry-access-request.js"),
+    import("./legacy/ministry-global-members.js"),
     import("./legacy/ministry-detail.js"),
     import("./legacy/ministry-invitation-response.js"),
     import("./legacy/ministry-list.js"),
@@ -67,18 +71,18 @@ const loadLegacyHandlers = async () => {
 
   return {
     "ministry-access-request": unwrap(ministryAccessRequest).handler,
+    "ministry-global-members": unwrap(ministryGlobalMembers).handler,
     "ministry-detail": unwrap(ministryDetail).handler,
-    "ministry-invitation-response":
-      unwrap(ministryInvitationResponse).handler,
+    "ministry-invitation-response": unwrap(ministryInvitationResponse).handler,
     "ministry-list": unwrap(ministryList).handler,
     "ministry-login": unwrap(ministryLogin).handler,
     "ministry-login-link": unwrap(ministryLoginLink).handler,
     "ministry-login-link-response": unwrap(ministryLoginLinkResponse).handler,
     "ministry-members": unwrap(ministryMembers).handler,
-    "ministry-membership-request-response":
-      unwrap(ministryMembershipRequestResponse).handler,
-    "ministry-profile-separation":
-      unwrap(ministryProfileSeparation).handler,
+    "ministry-membership-request-response": unwrap(
+      ministryMembershipRequestResponse
+    ).handler,
+    "ministry-profile-separation": unwrap(ministryProfileSeparation).handler,
     "ministry-profile": unwrap(ministryProfile).handler,
     "ministry-profiles": unwrap(ministryProfiles).handler,
     "ministry-session": unwrap(ministrySession).handler,

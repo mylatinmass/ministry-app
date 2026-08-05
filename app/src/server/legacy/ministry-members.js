@@ -63,7 +63,16 @@ const cleanText = (value, maximum = 1000) =>
 
 const writeLevelAudit = async (
   client,
-  { actor, user, action, entityType, entityId, ministryId, beforeData, afterData }
+  {
+    actor,
+    user,
+    action,
+    entityType,
+    entityId,
+    ministryId,
+    beforeData,
+    afterData,
+  }
 ) =>
   client.query(
     `
@@ -289,7 +298,13 @@ const listMembers = async (client, user, ministryId) => {
   })
 }
 
-const createInvitation = async (client, event, user, managedMinistries, body) => {
+const createInvitation = async (
+  client,
+  event,
+  user,
+  managedMinistries,
+  body
+) => {
   const email = normalizeEmail(body.email)
   const requestedIds = Array.from(
     new Set(
@@ -306,7 +321,9 @@ const createInvitation = async (client, event, user, managedMinistries, body) =>
     return jsonResponse(400, { message: "Select at least one ministry" })
   }
   if (requestedIds.some((id) => !canManageMinistry(managedMinistries, id))) {
-    return jsonResponse(403, { message: "You cannot invite to one or more selected ministries" })
+    return jsonResponse(403, {
+      message: "You cannot invite to one or more selected ministries",
+    })
   }
 
   const selectedMinistries = managedMinistries.filter((ministry) =>
@@ -350,7 +367,8 @@ const createInvitation = async (client, event, user, managedMinistries, body) =>
 
   if (!invitationMinistries.length) {
     return jsonResponse(409, {
-      message: "This person is already an active member of every selected ministry",
+      message:
+        "This person is already an active member of every selected ministry",
     })
   }
 
@@ -606,7 +624,8 @@ const updateMembership = async (
         )
         const levels = levelsResult.rows.map((level) => ({ ...level }))
         const currentIndex = levels.findIndex((level) => level.id === levelId)
-        const nextIndex = direction === "up" ? currentIndex + 1 : currentIndex - 1
+        const nextIndex =
+          direction === "up" ? currentIndex + 1 : currentIndex - 1
         if (currentIndex < 0 || nextIndex < 0 || nextIndex >= levels.length) {
           await client.query("ROLLBACK")
           return jsonResponse(409, {
@@ -732,7 +751,8 @@ const updateMembership = async (
   if (["approve_access_request", "decline_access_request"].includes(action)) {
     if (!isGlobalManager(user)) {
       return jsonResponse(403, {
-        message: "Only a global administrator can review unassigned access requests",
+        message:
+          "Only a global administrator can review unassigned access requests",
       })
     }
     if (!canManageMinistry(managedMinistries, ministryId)) {
@@ -762,9 +782,15 @@ const updateMembership = async (
         event,
         user,
         managedMinistries,
-        { email: accessRequest.email, ministryIds: [ministryId] }
+        {
+          email: accessRequest.email,
+          ministryIds: [ministryId],
+        }
       )
-      if (invitationResponse.statusCode < 200 || invitationResponse.statusCode >= 300) {
+      if (
+        invitationResponse.statusCode < 200 ||
+        invitationResponse.statusCode >= 300
+      ) {
         return invitationResponse
       }
     }
@@ -797,7 +823,10 @@ const updateMembership = async (
       entityId: requestId,
       ministryId,
       beforeData: accessRequest,
-      afterData: { status: nextStatus, assignedMinistryId: nextStatus === "approved" ? ministryId : null },
+      afterData: {
+        status: nextStatus,
+        assignedMinistryId: nextStatus === "approved" ? ministryId : null,
+      },
     })
     return jsonResponse(200, {
       success: true,
@@ -813,7 +842,8 @@ const updateMembership = async (
       return jsonResponse(403, { message: "You cannot manage this ministry" })
     }
     const requestId = body.requestId?.toString()
-    if (!requestId) return jsonResponse(400, { message: "Membership request is required" })
+    if (!requestId)
+      return jsonResponse(400, { message: "Membership request is required" })
     await client.query("BEGIN")
     try {
       const requestResult = await client.query(
@@ -848,7 +878,11 @@ const updateMembership = async (
           SET status = $1, reviewed_by = $2, reviewed_at = now(), updated_at = now()
           WHERE id = $3
         `,
-        [action === "approve_request" ? "approved" : "declined", actor.id, requestId]
+        [
+          action === "approve_request" ? "approved" : "declined",
+          actor.id,
+          requestId,
+        ]
       )
       await client.query(
         `
@@ -859,14 +893,19 @@ const updateMembership = async (
         [
           actor.id,
           request.child_user_id,
-          action === "approve_request" ? "membership.approved" : "membership.declined",
+          action === "approve_request"
+            ? "membership.approved"
+            : "membership.declined",
           ministryId,
         ]
       )
       await client.query("COMMIT")
       return jsonResponse(200, {
         success: true,
-        message: action === "approve_request" ? "Child membership approved" : "Membership request declined",
+        message:
+          action === "approve_request"
+            ? "Child membership approved"
+            : "Membership request declined",
       })
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {})
@@ -878,6 +917,91 @@ const updateMembership = async (
     return jsonResponse(400, { message: "Member is required" })
   }
 
+  if (action === "add_existing_member") {
+    if (!isGlobalManager(user)) {
+      return jsonResponse(403, {
+        message: "Only a global administrator can add an existing member",
+      })
+    }
+    if (!canManageMinistry(managedMinistries, ministryId)) {
+      return jsonResponse(403, { message: "You cannot manage this ministry" })
+    }
+
+    await client.query("BEGIN")
+    try {
+      const targetResult = await client.query(
+        `
+          SELECT id, first_name, last_name, email, status
+          FROM users
+          WHERE id = $1
+          FOR UPDATE
+        `,
+        [targetUserId]
+      )
+      const target = targetResult.rows[0]
+      if (!target || target.status !== "active") {
+        await client.query("ROLLBACK")
+        return jsonResponse(404, { message: "Active member not found" })
+      }
+
+      const existingResult = await client.query(
+        `
+          SELECT id, level, status, can_serve, highest_level_id
+          FROM ministry_members
+          WHERE ministry_id = $1 AND user_id = $2
+          FOR UPDATE
+        `,
+        [ministryId, targetUserId]
+      )
+      const existing = existingResult.rows[0] || null
+      if (existing?.status === "active") {
+        await client.query("ROLLBACK")
+        return jsonResponse(409, {
+          message: "This person is already an active member of that ministry",
+        })
+      }
+
+      const result = await client.query(
+        `
+          INSERT INTO ministry_members (
+            ministry_id, user_id, level, status, can_serve,
+            highest_level_id, joined_at, updated_at
+          )
+          VALUES ($1, $2, 'member', 'active', true, NULL, now(), now())
+          ON CONFLICT (ministry_id, user_id)
+          DO UPDATE SET
+            level = 'member',
+            status = 'active',
+            can_serve = true,
+            highest_level_id = NULL,
+            joined_at = now(),
+            updated_at = now()
+          RETURNING id, level, status, can_serve, highest_level_id
+        `,
+        [ministryId, targetUserId]
+      )
+      const membership = result.rows[0]
+      await writeLevelAudit(client, {
+        actor,
+        user,
+        action: "ministry_member.added",
+        entityType: "ministry_member",
+        entityId: membership.id,
+        ministryId,
+        beforeData: existing,
+        afterData: { ...membership, targetUserId },
+      })
+      await client.query("COMMIT")
+      return jsonResponse(200, {
+        success: true,
+        message: `${[target.first_name, target.last_name].filter(Boolean).join(" ") || target.email} added to the ministry`,
+      })
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {})
+      throw error
+    }
+  }
+
   const isLeaving = action === "leave" && targetUserId === user.id
   if (!isLeaving && !canManageMinistry(managedMinistries, ministryId)) {
     return jsonResponse(403, { message: "You cannot manage this ministry" })
@@ -885,23 +1009,56 @@ const updateMembership = async (
 
   if (action === "set_role") {
     const level = body.level === "admin" ? "admin" : "member"
-    const result = await client.query(
-      `
-        UPDATE ministry_members
-        SET level = $1, updated_at = now()
-        WHERE ministry_id = $2
-          AND user_id = $3
-          AND status = 'active'
-          AND level <> 'owner'
-        RETURNING id
-      `,
-      [level, ministryId, targetUserId]
-    )
-    if (!result.rowCount) return jsonResponse(404, { message: "Member not found" })
-    return jsonResponse(200, {
-      success: true,
-      message: level === "admin" ? "Member assigned as Leader" : "Member role updated",
-    })
+    await client.query("BEGIN")
+    try {
+      const existingResult = await client.query(
+        `
+          SELECT id, level, status
+          FROM ministry_members
+          WHERE ministry_id = $1
+            AND user_id = $2
+            AND status = 'active'
+            AND level <> 'owner'
+          FOR UPDATE
+        `,
+        [ministryId, targetUserId]
+      )
+      const existing = existingResult.rows[0]
+      if (!existing) {
+        await client.query("ROLLBACK")
+        return jsonResponse(404, { message: "Member not found" })
+      }
+      const result = await client.query(
+        `
+          UPDATE ministry_members
+          SET level = $1, updated_at = now()
+          WHERE id = $2
+          RETURNING id, level, status
+        `,
+        [level, existing.id]
+      )
+      await writeLevelAudit(client, {
+        actor,
+        user,
+        action: "ministry_member.role_changed",
+        entityType: "ministry_member",
+        entityId: existing.id,
+        ministryId,
+        beforeData: { ...existing, targetUserId },
+        afterData: { ...result.rows[0], targetUserId },
+      })
+      await client.query("COMMIT")
+      return jsonResponse(200, {
+        success: true,
+        message:
+          level === "admin"
+            ? "Member assigned as Leader"
+            : "Member role updated",
+      })
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {})
+      throw error
+    }
   }
 
   if (action === "set_ministry_level") {
@@ -996,33 +1153,65 @@ const updateMembership = async (
   }
 
   if (action === "remove" || isLeaving) {
-    const result = await client.query(
-      `
-        UPDATE ministry_members
-        SET status = 'inactive', updated_at = now()
-        WHERE ministry_id = $1
-          AND user_id = $2
-          AND status = 'active'
-          AND (level <> 'owner' OR $3 = true)
-        RETURNING id
-      `,
-      [ministryId, targetUserId, isLeaving]
-    )
-    if (!result.rowCount) return jsonResponse(404, { message: "Member not found" })
-    if (actor.id !== user.id && isLeaving) {
-      await client.query(
+    await client.query("BEGIN")
+    try {
+      const existingResult = await client.query(
         `
-          INSERT INTO managed_profile_audit (
-            actor_user_id, subject_user_id, action, entity_type, entity_id
-          ) VALUES ($1, $2, 'membership.left', 'ministry', $3)
+          SELECT id, level, status, can_serve, highest_level_id
+          FROM ministry_members
+          WHERE ministry_id = $1
+            AND user_id = $2
+            AND status = 'active'
+            AND (level <> 'owner' OR $3 = true)
+          FOR UPDATE
         `,
-        [actor.id, user.id, ministryId]
+        [ministryId, targetUserId, isLeaving]
       )
+      const existing = existingResult.rows[0]
+      if (!existing) {
+        await client.query("ROLLBACK")
+        return jsonResponse(404, { message: "Member not found" })
+      }
+      const result = await client.query(
+        `
+          UPDATE ministry_members
+          SET status = 'inactive', updated_at = now()
+          WHERE id = $1
+          RETURNING id, level, status, can_serve, highest_level_id
+        `,
+        [existing.id]
+      )
+      await writeLevelAudit(client, {
+        actor,
+        user,
+        action: isLeaving ? "ministry_member.left" : "ministry_member.removed",
+        entityType: "ministry_member",
+        entityId: existing.id,
+        ministryId,
+        beforeData: { ...existing, targetUserId },
+        afterData: { ...result.rows[0], targetUserId },
+      })
+      if (actor.id !== user.id && isLeaving) {
+        await client.query(
+          `
+            INSERT INTO managed_profile_audit (
+              actor_user_id, subject_user_id, action, entity_type, entity_id
+            ) VALUES ($1, $2, 'membership.left', 'ministry', $3)
+          `,
+          [actor.id, user.id, ministryId]
+        )
+      }
+      await client.query("COMMIT")
+      return jsonResponse(200, {
+        success: true,
+        message: isLeaving
+          ? "You left the ministry"
+          : "Member removed from ministry",
+      })
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {})
+      throw error
     }
-    return jsonResponse(200, {
-      success: true,
-      message: isLeaving ? "You left the ministry" : "Member removed from ministry",
-    })
   }
 
   return jsonResponse(400, { message: "Unknown membership action" })
@@ -1036,7 +1225,9 @@ const handler = async (event) => {
   const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
   const jwtSecret = process.env.JWT_SECRET_KEY
   if (!connectionString || !jwtSecret) {
-    return jsonResponse(500, { message: "Ministry membership is not configured" })
+    return jsonResponse(500, {
+      message: "Ministry membership is not configured",
+    })
   }
 
   let payload
@@ -1054,12 +1245,14 @@ const handler = async (event) => {
   try {
     await client.connect()
     const context = await getMinistryIdentityContext(client, payload)
-    if (!context) return jsonResponse(401, { message: "Ministry access is inactive" })
+    if (!context)
+      return jsonResponse(401, { message: "Ministry access is inactive" })
     const user = context.user
 
     if (event.httpMethod === "GET") {
       const ministryId = event.queryStringParameters?.ministryId?.toString()
-      if (!ministryId) return jsonResponse(400, { message: "Ministry is required" })
+      if (!ministryId)
+        return jsonResponse(400, { message: "Ministry is required" })
       return await listMembers(client, user, ministryId)
     }
 
@@ -1075,7 +1268,13 @@ const handler = async (event) => {
     const managedMinistries = await getManagedMinistries(client, user)
 
     if (event.httpMethod === "POST") {
-      return await createInvitation(client, event, user, managedMinistries, body)
+      return await createInvitation(
+        client,
+        event,
+        user,
+        managedMinistries,
+        body
+      )
     }
     return await updateMembership(
       client,

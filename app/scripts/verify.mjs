@@ -49,6 +49,9 @@ const [
   accessRequestMigration,
   accessRequestServer,
   accessRequestUi,
+  globalMembersServer,
+  globalMembersUi,
+  homeWorkspace,
 ] = await Promise.all([
   read("astro.config.mjs"),
   read("src/pages/api/[...path].ts"),
@@ -92,6 +95,9 @@ const [
   read("migrations/20260805_02_add_ministry_access_requests.sql"),
   read("src/server/legacy/ministry-access-request.js"),
   read("src/react/pages/AccessRequestApp.jsx"),
+  read("src/server/legacy/ministry-global-members.js"),
+  read("src/react/components/ministry/MinistryGlobalMembers.jsx"),
+  read("src/react/components/ministry/MinistryHomeWorkspace.jsx"),
 ])
 
 assert.match(astroConfig, /site:\s*"https:\/\/ministry\.mylatinmass\.com"/)
@@ -108,7 +114,7 @@ const walk = async (directory) => {
 await walk(path.join(root, "src/pages/api"))
 assert.deepEqual(
   apiFiles.map((file) => path.relative(root, file)),
-  ["src/pages/api/[...path].ts"],
+  ["src/pages/api/[...path].ts"]
 )
 assert.match(apiRoute, /push\/subscriptions/)
 assert.match(apiRoute, /reminders\/process/)
@@ -123,22 +129,47 @@ assert.match(authHelper, /authMethod === "email_link"/)
 assert.match(ministryList, /const user = context\.user/)
 assert.match(ministryList, /user\.global_role/)
 
-assert.match(loginLinkMigration, /CREATE TABLE IF NOT EXISTS ministry_login_links/)
+assert.match(
+  loginLinkMigration,
+  /CREATE TABLE IF NOT EXISTS ministry_login_links/
+)
 assert.match(loginLinkMigration, /token_hash STRING NOT NULL UNIQUE/)
-assert.match(loginLinkRequest, /u\.global_role NOT IN \('owner', 'super_admin'\)/)
+assert.match(
+  loginLinkRequest,
+  /u\.global_role NOT IN \('owner', 'super_admin'\)/
+)
 assert.match(loginLinkRequest, /created_at > now\(\) - INTERVAL '60 seconds'/)
 assert.match(loginLinkResponse, /\["owner", "super_admin"\]\.includes/)
 assert.match(loginLinkResponse, /authMethod: "email_link"/)
-assert.match(accessRequestMigration, /CREATE TABLE IF NOT EXISTS ministry_access_requests/)
+assert.match(
+  accessRequestMigration,
+  /CREATE TABLE IF NOT EXISTS ministry_access_requests/
+)
 assert.match(accessRequestMigration, /assigned_ministry_id UUID NULL/)
 assert.match(accessRequestServer, /firstName/)
 assert.doesNotMatch(accessRequestUi, /name="(?:chapel|ministry)"/)
-assert.match(ministryMembers, /Only a global administrator can review unassigned access requests/)
+assert.match(
+  ministryMembers,
+  /Only a global administrator can review unassigned access requests/
+)
 assert.match(ministryMembers, /approve_access_request/)
 assert.match(ministryLogin, /authMethod: "password"/)
 assert.match(ministryLoginUi, /EMAIL ME A SIGN-IN LINK/)
 assert.match(ministryMembers, /context\.isEmailLinkSession/)
 assert.match(membershipReview, /identity\.authMethod !== "password"/)
+assert.match(globalMembersServer, /\["owner", "super_admin"\]\.includes/)
+assert.match(globalMembersServer, /context\.authMethod !== "password"/)
+assert.match(globalMembersServer, /WHERE user_account\.status = 'active'/)
+assert.match(globalMembersServer, /LEFT JOIN ministry_members membership/)
+assert.match(globalMembersUi, /Search name, email, username, or ministry/)
+assert.match(globalMembersUi, /action: "add_existing_member"/)
+assert.match(globalMembersUi, /action: "set_role"/)
+assert.match(globalMembersUi, /action: "set_ministry_level"/)
+assert.match(homeWorkspace, /globalOnly: true/)
+assert.match(homeWorkspace, /<MinistryGlobalMembers \/>/)
+assert.match(ministryMembers, /ministry_member\.added/)
+assert.match(ministryMembers, /ministry_member\.role_changed/)
+assert.match(ministryMembers, /ministry_member\.removed/)
 
 const leadValues = [
   ...profile.matchAll(/\[(15|30|45|60|120|180|240),\s*"/g),
@@ -157,23 +188,23 @@ assert.match(schedulerAuth, /payload\.email === expectedEmail/)
 
 assert.match(
   multiMinistryMigration,
-  /CREATE TABLE IF NOT EXISTS template_ministries/,
+  /CREATE TABLE IF NOT EXISTS template_ministries/
 )
 assert.match(
   multiMinistryMigration,
-  /CREATE TABLE IF NOT EXISTS template_responsibilities/,
+  /CREATE TABLE IF NOT EXISTS template_responsibilities/
 )
 assert.match(
   multiMinistryMigration,
-  /CREATE TABLE IF NOT EXISTS event_ministries/,
+  /CREATE TABLE IF NOT EXISTS event_ministries/
 )
 assert.match(
   multiMinistryMigration,
-  /CREATE TABLE IF NOT EXISTS template_versions/,
+  /CREATE TABLE IF NOT EXISTS template_versions/
 )
 assert.match(
   multiMinistryMigration,
-  /CREATE TABLE IF NOT EXISTS ministry_audit_log/,
+  /CREATE TABLE IF NOT EXISTS ministry_audit_log/
 )
 assert.match(schedulingTemplates, /template_versions/)
 assert.match(schedulingTemplates, /writeSchedulingAudit/)
@@ -189,7 +220,7 @@ assert.match(schedulingEvents, /responsibility_assignment\.assigned/)
 assert.match(schedulingEvents, /source:\s*"event_override"/)
 assert.match(
   schedulingEvents,
-  /responsibility\.template_responsibility_id\s*&&/,
+  /responsibility\.template_responsibility_id\s*&&/
 )
 assert.match(workspaceContent, /MinistryTemplates/)
 assert.match(workspaceContent, /MinistryEvents/)
@@ -200,14 +231,17 @@ assert.match(eventDetails, /action:\s*"assign_member"/)
 assert.match(familyProfiles, /cancel_separation/)
 assert.match(familyProfiles, /separation\.cancelled/)
 assert.match(familyProfiles, /mp\.status IN \('active', 'separation_pending'\)/)
-assert.match(profileSeparation, /That email is now connected to another account/)
 assert.match(
-  availabilityMigration,
-  /CREATE TABLE IF NOT EXISTS availability_blocks/,
+  profileSeparation,
+  /That email is now connected to another account/
 )
 assert.match(
   availabilityMigration,
-  /CREATE TABLE IF NOT EXISTS assignment_change_requests/,
+  /CREATE TABLE IF NOT EXISTS availability_blocks/
+)
+assert.match(
+  availabilityMigration,
+  /CREATE TABLE IF NOT EXISTS assignment_change_requests/
 )
 assert.match(schedulingAvailability, /context\.user\.id/)
 assert.match(schedulingAvailability, /toStoredDateKey/)
@@ -215,7 +249,7 @@ assert.match(schedulingAvailability, /splitAroundAssignedDates/)
 assert.match(schedulingAvailability, /assignment\.change_requested/)
 assert.match(
   schedulingAvailability,
-  /notificationStatus:\s*"pending_implementation"/,
+  /notificationStatus:\s*"pending_implementation"/
 )
 assert.match(availabilityComponent, /UPDATING\.\.\." : "UPDATE/)
 assert.match(availabilityComponent, /Request change/)
@@ -229,7 +263,7 @@ assert.match(availabilityRoute, /AvailabilityApp/)
 assert.match(availabilityApp, /MinistryRouteGuard/)
 assert.match(
   ministryLevelsMigration,
-  /CREATE TABLE IF NOT EXISTS ministry_levels/,
+  /CREATE TABLE IF NOT EXISTS ministry_levels/
 )
 assert.match(ministryLevelsMigration, /highest_level_id/)
 assert.match(ministryLevelsMigration, /required_ministry_level_id/)
@@ -239,19 +273,25 @@ assert.match(ministryMembers, /move_ministry_level/)
 assert.match(ministryProfileServer, /highest_level_name/)
 assert.match(ministryMembersComponent, /Highest ministry level/)
 assert.match(schedulingTemplates, /requiredLevelId/)
-assert.match(schedulingEvents, /granted_level\.rank_order >= required_level\.rank_order/)
-assert.match(eventDetails, /Requires \$\{responsibility\.requiredLevelName\} or higher/)
+assert.match(
+  schedulingEvents,
+  /granted_level\.rank_order >= required_level\.rank_order/
+)
+assert.match(
+  eventDetails,
+  /Requires \$\{responsibility\.requiredLevelName\} or higher/
+)
 assert.match(ministryNavigation, /label:\s*"Calendar"/)
 assert.doesNotMatch(ministryNavigation, /label:\s*"My Calendar"/)
 assert.match(ministryDetail, /calendarEvents/)
 assert.match(
   ministryDetail,
-  /e\.status IN \('published', 'cancelled', 'completed'\)/,
+  /e\.status IN \('published', 'cancelled', 'completed'\)/
 )
 assert.match(ministryWorkspace, /data\.calendarEvents \|\| data\.events/)
 assert.doesNotMatch(
   ministryWorkspace,
-  /\.filter\(\(event\) =>\s*event\.profileAssignments/,
+  /\.filter\(\(event\) =>\s*event\.profileAssignments/
 )
 assert.match(workspaceContent, /showOnlyMyEvents/)
 assert.match(workspaceContent, /showOnlyMyEvents \? "All Events" : "My Events"/)
@@ -259,14 +299,8 @@ assert.match(weekCalendar, /toDateKey\(event\.start_time\) === selectedKey/)
 assert.match(eventDetails, /translate-x-full/)
 assert.match(schedulingEvents, /isPublicView:\s*publicView/)
 assert.match(schedulingEvents, /instructions:\s*publicView \? ""/)
-assert.match(
-  ordoMigration,
-  /CREATE TABLE IF NOT EXISTS ordo_days/,
-)
-assert.match(
-  ordoMigration,
-  /CREATE TABLE IF NOT EXISTS event_ordo_selections/,
-)
+assert.match(ordoMigration, /CREATE TABLE IF NOT EXISTS ordo_days/)
+assert.match(ordoMigration, /CREATE TABLE IF NOT EXISTS event_ordo_selections/)
 assert.match(ordoMigration, /selected_mass_option_snapshot JSONB/)
 assert.match(schedulingOrdo, /get-liturgical-days/)
 assert.match(schedulingOrdo, /classLabel/)
@@ -277,7 +311,10 @@ assert.match(schedulingOrdo, /event\.ordo_updated/)
 assert.match(ordoReference, /View 1962 Ordo/)
 assert.match(ordoReference, /Sacristy page and setup notes/)
 assert.match(ordoReference, /Selection required/)
-assert.match(ordoReference, /The Ordo does not explicitly state the vestment color/)
+assert.match(
+  ordoReference,
+  /The Ordo does not explicitly state the vestment color/
+)
 assert.match(schedulingEvents, /event\.ordo_reset_for_date_change/)
 
 const manifest = JSON.parse(manifestSource)
@@ -301,10 +338,10 @@ for (const file of serverFiles) {
   assert.doesNotMatch(
     source,
     /\b(?:CREATE|ALTER)\s+TABLE\b/i,
-    `Runtime schema DDL found in ${path.relative(root, file)}`,
+    `Runtime schema DDL found in ${path.relative(root, file)}`
   )
 }
 
 console.log(
-  "Verified Astro base path, one API dispatcher, active-profile authorization, multi-ministry templates and events, template versioning, ministry-level publication, reminder timing, Web Push scope, OIDC checks, durable deduplication, and migration-only schema changes.",
+  "Verified Astro base path, one API dispatcher, active-profile authorization, multi-ministry templates and events, template versioning, ministry-level publication, reminder timing, Web Push scope, OIDC checks, durable deduplication, and migration-only schema changes."
 )

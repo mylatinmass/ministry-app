@@ -10,6 +10,7 @@ import {
   ClockIcon,
   HomeIcon,
   LifebuoyIcon,
+  PlusIcon,
   Squares2X2Icon,
   UserCircleIcon,
   UserGroupIcon,
@@ -25,6 +26,8 @@ import MinistryProfile from "./MinistryProfile"
 import MinistryGlobalMembers from "./MinistryGlobalMembers"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import MinistrySupport from "./MinistrySupport"
+import MinistryEvents from "./MinistryEvents"
+import VolunteerEvents from "./VolunteerEvents"
 
 const accessLabels = {
   owner: "Global Owner",
@@ -48,9 +51,9 @@ const sections = [
   },
   {
     id: "events",
-    label: "My Events",
+    label: "Events",
     icon: CheckCircleIcon,
-    description: "Review the events and duties assigned to this profile.",
+    description: "Review your assigned events or create a new event.",
   },
   {
     id: "availability",
@@ -199,6 +202,18 @@ const MinistryHomeWorkspace = ({ data }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = React.useState(false)
   const [familyData, setFamilyData] = React.useState(null)
+  const [showCreateEvent, setShowCreateEvent] = React.useState(false)
+  const manageableMinistries = React.useMemo(
+    () =>
+      data.ministries.filter(
+        (ministry) =>
+          hasGlobalAccess || ["owner", "admin"].includes(ministry.accessLevel),
+      ),
+    [data.ministries, hasGlobalAccess],
+  )
+  const [createMinistryId, setCreateMinistryId] = React.useState(
+    () => manageableMinistries[0]?.id || "",
+  )
   const activeSection =
     availableSections.find((section) => section.id === sectionId) ||
     availableSections[0]
@@ -270,6 +285,7 @@ const MinistryHomeWorkspace = ({ data }) => {
 
   const selectSection = (id) => {
     setSectionId(id)
+    if (id === "events") setShowCreateEvent(false)
     setMobileMenuOpen(false)
     setProfileMenuOpen(false)
     window.history.replaceState({}, "", id === "home" ? "/" : `/?section=${id}`)
@@ -413,14 +429,72 @@ const MinistryHomeWorkspace = ({ data }) => {
       />
     )
   } else if (sectionId === "events") {
-    content = (
-      <MinistryEventAgenda
-        events={myEvents}
-        label="My Events"
-        emptyTitle="No assigned events"
-        emptyText="Events and duties assigned to this profile will appear here."
-        onEventSelect={setSelectedEvent}
-      />
+    const createMinistry = manageableMinistries.find(
+      (ministry) => ministry.id === createMinistryId,
+    )
+    content = showCreateEvent && hasGlobalAccess ? (
+      <VolunteerEvents creating onBack={() => setShowCreateEvent(false)} />
+    ) : showCreateEvent && createMinistry ? (
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <label className="min-w-64 text-sm font-semibold text-gray-700">
+            Create for ministry
+            <select
+              value={createMinistryId}
+              onChange={(event) => setCreateMinistryId(event.target.value)}
+              className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 font-normal"
+            >
+              {manageableMinistries.map((ministry) => (
+                <option key={ministry.id} value={ministry.id}>
+                  {ministry.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() => setShowCreateEvent(false)}
+            className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-600"
+          >
+            Back to events
+          </button>
+        </div>
+        <MinistryEvents
+          key={createMinistry.id}
+          data={{ ministry: createMinistry }}
+          activeAction={{ id: "add-event", label: "Create event" }}
+          onEventSelect={setSelectedEvent}
+        />
+      </div>
+    ) : (
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="century-font text-3xl text-gray-950">Events</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Events and duties assigned to this profile.
+            </p>
+          </div>
+          {(hasGlobalAccess || manageableMinistries.length > 0) && (
+            <button
+              type="button"
+              onClick={() => setShowCreateEvent(true)}
+              className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#6f4f34]"
+            >
+              <PlusIcon className="size-5" />
+              Create event
+            </button>
+          )}
+        </div>
+        {hasGlobalAccess && <VolunteerEvents />}
+        <MinistryEventAgenda
+          events={myEvents}
+          label="Your assigned events"
+          emptyTitle="No assigned events"
+          emptyText="Events and duties assigned to this profile will appear here."
+          onEventSelect={setSelectedEvent}
+        />
+      </div>
     )
   } else if (sectionId === "availability") {
     content = <MinistryAvailability />

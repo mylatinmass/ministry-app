@@ -4,6 +4,8 @@ import {
   CheckCircleIcon,
   DocumentDuplicateIcon,
   FunnelIcon,
+  ArrowDownTrayIcon,
+  PrinterIcon,
   UserGroupIcon,
 } from "@heroicons/react/24/outline"
 import MinistryMonthCalendar from "./MinistryMonthCalendar"
@@ -17,6 +19,7 @@ import MinistryProfile from "./MinistryProfile"
 import MinistryTemplates from "./MinistryTemplates"
 import MinistryAvailability from "./MinistryAvailability"
 import MinistrySupport from "./MinistrySupport"
+import MinistryReports from "./MinistryReports"
 
 const formatEventDate = (value) =>
   new Intl.DateTimeFormat("en-US", {
@@ -233,6 +236,32 @@ const MinistryWorkspaceContent = ({
   const [showOnlyMyEvents, setShowOnlyMyEvents] = React.useState(false)
   let content
 
+  const exportSchedule = (events) => {
+    const rows = [
+      ["Calendar", data.ministry.name],
+      ["Event", "Start", "End", "Location", "Status", "Responsibilities"],
+      ...events.map((event) => [
+        event.title,
+        event.start_time,
+        event.end_time,
+        event.location || "",
+        event.status,
+        event.responsibility_count || 0,
+      ]),
+    ]
+    const escape = (value) => {
+      const text = String(value ?? "")
+      return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
+    }
+    const csv = rows.map((row) => row.map(escape).join(",")).join("\n")
+    const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }))
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `${data.ministry.slug || "ministry"}-schedule.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
   if (section.id === "overview") {
     content = <OverviewContent data={data} onEventSelect={setSelectedEvent} />
   } else if (section.id === "schedule") {
@@ -277,7 +306,20 @@ const MinistryWorkspaceContent = ({
     }
     content = (
       <div className="flex h-full min-h-0 flex-col">
-        <div className="flex shrink-0 justify-end py-2">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 py-2 print:hidden">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#896542]">
+              {data.ministry.name} · Internal calendar
+            </p>
+            <p className="text-xs text-gray-500">Visible only to approved ministry members.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => window.print()} className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-600">
+            <PrinterIcon className="size-4" /> Print
+          </button>
+          <button type="button" onClick={() => exportSchedule(calendarEvents)} className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-600">
+            <ArrowDownTrayIcon className="size-4" /> Export
+          </button>
           <button
             type="button"
             aria-pressed={showOnlyMyEvents}
@@ -291,6 +333,11 @@ const MinistryWorkspaceContent = ({
             <FunnelIcon className="size-4" />
             {showOnlyMyEvents ? "All Events" : "My Events"}
           </button>
+          </div>
+        </div>
+        <div className="hidden pb-4 print:block">
+          <h1 className="century-font text-3xl">{data.ministry.name} Ministry Schedule</h1>
+          <p>Internal calendar for approved members</p>
         </div>
         <div className="min-h-0 flex-1">{calendar}</div>
       </div>
@@ -332,6 +379,8 @@ const MinistryWorkspaceContent = ({
     )
   } else if (section.id === "support") {
     content = <MinistrySupport ministryName={data.ministry.name} />
+  } else if (section.id === "reports") {
+    content = <MinistryReports ministry={data.ministry} activeAction={activeAction} />
   } else {
     content = (
       <PlaceholderContent section={section} activeAction={activeAction} />

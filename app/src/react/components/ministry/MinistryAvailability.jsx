@@ -96,6 +96,7 @@ const MinistryAvailability = () => {
   const [selectionStart, setSelectionStart] = React.useState("")
   const [selectionEnd, setSelectionEnd] = React.useState("")
   const [label, setLabel] = React.useState("")
+  const [scopeMinistryId, setScopeMinistryId] = React.useState("")
   const [isLoading, setIsLoading] = React.useState(true)
   const [isSaving, setIsSaving] = React.useState(false)
   const [message, setMessage] = React.useState("")
@@ -185,8 +186,9 @@ const MinistryAvailability = () => {
   const selectedAssignments = selection
     ? availability.assignments.filter(
         (assignment) =>
-          assignment.date >= selection.startDate &&
-          assignment.date <= selection.endDate,
+      assignment.date >= selection.startDate &&
+          assignment.date <= selection.endDate &&
+          (!scopeMinistryId || assignment.ministryId === scopeMinistryId),
       )
     : []
   const todayKey = toDateKey(new Date())
@@ -262,6 +264,7 @@ const MinistryAvailability = () => {
       startDate: selection.startDate,
       endDate: selection.endDate,
       label,
+      ministryId: scopeMinistryId,
       requireConflictFree: true,
     })
     if (result?.conflicts?.length) {
@@ -286,6 +289,20 @@ const MinistryAvailability = () => {
   const requestChange = async (assignment) => {
     await postAction({
       action: "request_change",
+      assignmentId: assignment.id,
+    })
+  }
+
+  const declineAssignment = async (assignment) => {
+    if (
+      !window.confirm(
+        `Decline ${assignment.responsibilityName} for ${assignment.eventTitle}?`,
+      )
+    ) {
+      return
+    }
+    await postAction({
+      action: "decline_assignment",
       assignmentId: assignment.id,
     })
   }
@@ -492,20 +509,38 @@ const MinistryAvailability = () => {
             </div>
           </div>
 
-          <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            <label className="text-sm font-semibold text-gray-700">
+              Applies to
+              <select
+                value={scopeMinistryId}
+                onChange={(event) => setScopeMinistryId(event.target.value)}
+                className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 font-normal outline-none focus:border-[#896542]"
+              >
+                <option value="">All ministries</option>
+                {(availability.ministries || []).map((ministry) => (
+                  <option key={ministry.id} value={ministry.id}>
+                    {ministry.name} only
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm font-semibold text-gray-700">
+              Label
             <input
               type="text"
               maxLength="250"
               value={label}
               onChange={(event) => setLabel(event.target.value)}
               placeholder="Label, such as Winter trip (optional)"
-              className="h-11 flex-1 rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-[#896542]"
+              className="mt-2 h-11 w-full rounded-xl border border-gray-200 px-3 text-sm font-normal outline-none focus:border-[#896542]"
             />
+            </label>
             <button
               type="button"
               disabled={isSaving}
               onClick={blockSelection}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50 sm:col-span-2"
             >
               <NoSymbolIcon className="size-5" />
               {isSaving ? "UPDATING..." : "UPDATE"}
@@ -534,19 +569,31 @@ const MinistryAvailability = () => {
                         {assignment.eventTitle} · {assignment.ministryName}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      disabled={
-                        isSaving ||
-                        assignment.changeRequestStatus === "pending"
-                      }
-                      onClick={() => requestChange(assignment)}
-                      className="rounded-lg border border-orange-200 px-3 py-2 text-sm font-semibold text-orange-700 disabled:bg-orange-50 disabled:opacity-70"
-                    >
-                      {assignment.changeRequestStatus === "pending"
-                        ? "Change requested"
-                        : "Request change"}
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      {["pending", "assigned"].includes(assignment.status) && (
+                        <button
+                          type="button"
+                          disabled={isSaving}
+                          onClick={() => declineAssignment(assignment)}
+                          className="rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-70"
+                        >
+                          Decline
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        disabled={
+                          isSaving ||
+                          assignment.changeRequestStatus === "pending"
+                        }
+                        onClick={() => requestChange(assignment)}
+                        className="rounded-lg border border-orange-200 px-3 py-2 text-sm font-semibold text-orange-700 disabled:bg-orange-50 disabled:opacity-70"
+                      >
+                        {assignment.changeRequestStatus === "pending"
+                          ? "Change requested"
+                          : "Request change"}
+                      </button>
+                    </div>
                   </article>
                 ))}
               </div>
@@ -578,6 +625,9 @@ const MinistryAvailability = () => {
                   {block.label && (
                     <p className="mt-1 text-sm text-gray-500">{block.label}</p>
                   )}
+                  <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-[#896542]">
+                    {block.ministryName || "All ministries"}
+                  </p>
                 </div>
                 <button
                   type="button"

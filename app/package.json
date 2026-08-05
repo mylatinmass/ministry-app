@@ -12,7 +12,8 @@
     "check": "astro check",
     "snapshot": "node scripts/snapshot-data.mjs",
     "migrate": "node scripts/migrate.mjs",
-    "verify": "node scripts/verify.mjs"
+    "verify": "node scripts/verify.mjs",
+    "smoke:new-features": "node --env-file-if-exists=.env.local scripts/smoke-new-features.mjs"
   },
   "dependencies": {
     "@astrojs/react": "6.0.1",

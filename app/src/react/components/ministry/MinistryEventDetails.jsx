@@ -5,6 +5,8 @@ import {
   CheckCircleIcon,
   ClockIcon,
   MapPinIcon,
+  ClipboardDocumentIcon,
+  LinkIcon,
   PencilSquareIcon,
   PlusIcon,
   TrashIcon,
@@ -38,6 +40,8 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
     React.useState({})
   const [savingAssignmentId, setSavingAssignmentId] =
     React.useState("")
+  const [signupCode, setSignupCode] = React.useState("")
+  const [isSavingSignup, setIsSavingSignup] = React.useState(false)
   const [isPresented, setIsPresented] = React.useState(false)
   const [message, setMessage] = React.useState("")
   const [errorMessage, setErrorMessage] = React.useState("")
@@ -68,6 +72,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
         throw new Error(result.message || "Unable to load event")
       }
       setDetails(result)
+      setSignupCode(result.signup_code || "")
     } catch (error) {
       setErrorMessage(error.message)
     } finally {
@@ -311,6 +316,121 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
     }
   }
 
+  const recordServiceOutcome = async (assignment, outcome) => {
+    if (!outcome) return
+    setSavingAssignmentId(assignment.id)
+    setMessage("")
+    setErrorMessage("")
+    try {
+      const note =
+        outcome === "substitute_served"
+          ? window.prompt("Who served as the informal substitute?", "") || ""
+          : ""
+      const response = await fetch(
+        getFunctionEndpoint("scheduling/events"),
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${window.sessionStorage.getItem(
+              MINISTRY_SESSION_KEY,
+            )}`,
+          },
+          body: JSON.stringify({
+            action: "record_service_outcome",
+            eventId: displayedEvent.id,
+            assignmentId: assignment.id,
+            outcome,
+            note,
+          }),
+        },
+      )
+      const result = await response.json()
+      if (!response.ok) {
+        throw new Error(result.message || "Unable to record service outcome")
+      }
+      setMessage(result.message)
+      await loadDetails()
+    } catch (error) {
+      setErrorMessage(error.message)
+    } finally {
+      setSavingAssignmentId("")
+    }
+  }
+
+  const recordAssignmentStatus = async (assignment, status) => {
+    if (!status) return
+    setSavingAssignmentId(assignment.id)
+    setMessage("")
+    setErrorMessage("")
+    try {
+      const response = await fetch(getFunctionEndpoint("scheduling/events"), {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${window.sessionStorage.getItem(
+            MINISTRY_SESSION_KEY,
+          )}`,
+        },
+        body: JSON.stringify({
+          action: "record_assignment_status",
+          eventId: displayedEvent.id,
+          assignmentId: assignment.id,
+          status,
+        }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.message || "Unable to update assignment")
+      setMessage(result.message)
+      await loadDetails()
+    } catch (error) {
+      setErrorMessage(error.message)
+    } finally {
+      setSavingAssignmentId("")
+    }
+  }
+
+  const configureVolunteerSignup = async (signupOpen) => {
+    setIsSavingSignup(true)
+    setMessage("")
+    setErrorMessage("")
+    try {
+      const response = await fetch(getFunctionEndpoint("scheduling/events"), {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${window.sessionStorage.getItem(
+            MINISTRY_SESSION_KEY,
+          )}`,
+        },
+        body: JSON.stringify({
+          action: "configure_volunteer_signup",
+          eventId: displayedEvent.id,
+          signupCode,
+          signupOpen,
+        }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.message || "Unable to save volunteer link")
+      setMessage(result.message)
+      await loadDetails()
+    } catch (error) {
+      setErrorMessage(error.message)
+    } finally {
+      setIsSavingSignup(false)
+    }
+  }
+
+  const volunteerUrl = signupCode
+    ? `${window.location.origin}/volunteer/${signupCode}`
+    : ""
+
+  const copyVolunteerUrl = async () => {
+    if (!volunteerUrl) return
+    await navigator.clipboard.writeText(volunteerUrl)
+    setMessage("Volunteer link copied")
+  }
+
   const groupedResponsibilities = (details?.responsibilities || []).reduce(
     (groups, responsibility) => {
       const key = responsibility.ministryId || "unassigned"
@@ -325,6 +445,27 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
     },
     {},
   )
+  const readiness = (details?.responsibilities || []).reduce(
+    (summary, responsibility) => {
+      if (responsibility.isRequired) {
+        summary.shortages += Math.max(
+          0,
+          responsibility.quantityNeeded - responsibility.assignedQuantity,
+        )
+      }
+      summary.backups += responsibility.availableMembers?.length || 0
+      if (!responsibility.templateResponsibilityId) summary.overrides += 1
+      for (const assignment of responsibility.assignments || []) {
+        summary.conflicts += assignment.conflictCount || 0
+        if (assignment.status === "change_requested") {
+          summary.changeRequests += 1
+        }
+      }
+      return summary
+    },
+    { shortages: 0, backups: 0, conflicts: 0, overrides: 0, changeRequests: 0 },
+  )
+  const eventHasStarted = start.getTime() <= Date.now()
 
   return (
     <div
@@ -398,6 +539,88 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
           />
         </div>
 
+        {details?.canManageEvent &&
+          ["volunteers", "both"].includes(displayedEvent.participation_type) && (
+            <section className="mt-8 rounded-2xl border border-[#d8c7b8] bg-[#fbf8f4] p-5">
+              <div className="flex items-start gap-3">
+                <span className="rounded-xl bg-white p-2 text-[#896542]">
+                  <LinkIcon className="size-5" />
+                </span>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#896542]">
+                    Public volunteers
+                  </p>
+                  <h2 className="mt-1 century-font text-2xl text-gray-950">
+                    Volunteer signup link
+                  </h2>
+                  <p className="mt-1 text-sm text-gray-600">
+                    Choose an available URL. Volunteers are recorded only for this event and do not become Ministry members.
+                  </p>
+                </div>
+              </div>
+              <label className="mt-5 block text-sm font-semibold text-gray-700">
+                Public URL
+                <div className="mt-2 flex rounded-xl border border-gray-200 bg-white focus-within:border-[#896542]">
+                  <span className="hidden items-center border-r border-gray-100 px-3 text-sm text-gray-400 sm:flex">
+                    {window.location.origin}/volunteer/
+                  </span>
+                  <input
+                    value={signupCode}
+                    onChange={(event) =>
+                      setSignupCode(
+                        event.target.value
+                          .toLowerCase()
+                          .replace(/[^a-z0-9-]/g, "-")
+                          .replace(/-+/g, "-"),
+                      )
+                    }
+                    minLength={4}
+                    maxLength={64}
+                    placeholder="parish-picnic-2026"
+                    className="h-11 min-w-0 flex-1 rounded-xl px-3 font-normal outline-none"
+                  />
+                </div>
+              </label>
+              {displayedEvent.signup_code && (
+                <p className="mt-3 break-all rounded-lg bg-white px-3 py-2 text-xs text-gray-600">
+                  {`${window.location.origin}/volunteer/${displayedEvent.signup_code}`}
+                </p>
+              )}
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={isSavingSignup || signupCode.length < 4}
+                  onClick={() => configureVolunteerSignup(false)}
+                  className="rounded-lg border border-[#d8c7b8] bg-white px-3 py-2 text-sm font-semibold text-[#6f4f34] disabled:opacity-50"
+                >
+                  Save closed
+                </button>
+                <button
+                  type="button"
+                  disabled={isSavingSignup || signupCode.length < 4}
+                  onClick={() => configureVolunteerSignup(!displayedEvent.signup_open)}
+                  className="rounded-lg bg-[#896542] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {displayedEvent.signup_open ? "Close signups" : "Save and open signups"}
+                </button>
+                {displayedEvent.signup_code && (
+                  <button
+                    type="button"
+                    onClick={copyVolunteerUrl}
+                    className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700"
+                  >
+                    <ClipboardDocumentIcon className="size-4" /> Copy link
+                  </button>
+                )}
+              </div>
+              {displayedEvent.status !== "published" && (
+                <p className="mt-3 text-xs font-semibold text-amber-700">
+                  Save the URL now, then publish the event before opening signups.
+                </p>
+              )}
+            </section>
+          )}
+
         <div className="mt-8 grid gap-3 sm:grid-cols-2">
           <div className="flex gap-3 rounded-2xl border border-gray-100 p-4">
             <CalendarDaysIcon className="size-6 shrink-0 text-[#896542]" />
@@ -448,6 +671,34 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
         </div>
 
         <section className="mt-10 border-t border-gray-100 pt-8">
+          {details?.canManageEvent && (
+            <div className="mb-7 rounded-2xl border border-[#d8c7b8] bg-[#fbf8f4] p-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#896542]">
+                Pre-publication review
+              </p>
+              <h2 className="mt-2 century-font text-2xl text-gray-950">
+                Schedule readiness
+              </h2>
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+                {[
+                  ["Shortages", readiness.shortages],
+                  ["Backup options", readiness.backups],
+                  ["Conflicts", readiness.conflicts],
+                  ["Overrides", readiness.overrides],
+                  ["Change requests", readiness.changeRequests],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-xl bg-white p-3 text-center">
+                    <p className="text-2xl font-semibold text-gray-900">{value}</p>
+                    <p className="mt-1 text-xs text-gray-500">{label}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-4 text-sm text-gray-600">
+                Review shortages, overlapping assignments, event-only overrides,
+                and the available backup pool before publishing.
+              </p>
+            </div>
+          )}
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#896542]">
             Participating ministries
           </p>
@@ -775,17 +1026,68 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                               </p>
                             )}
                             {responsibility.assignments?.length > 0 && (
-                              <div className="mt-3 flex flex-wrap gap-2">
+                              <div className="mt-3 space-y-2">
                                 {responsibility.assignments.map(
                                   (assignment) => (
-                                    <span
+                                    <div
                                       key={assignment.id}
-                                      className="rounded-full bg-[#f4ede6] px-2 py-1 text-xs text-[#6f4f34]"
+                                      className="flex flex-wrap items-center gap-2 rounded-xl bg-[#f4ede6] px-3 py-2 text-xs text-[#6f4f34]"
                                     >
-                                      {assignment.firstName}{" "}
-                                      {assignment.lastName} ·{" "}
-                                      {assignment.status.replaceAll("_", " ")}
-                                    </span>
+                                      <span className="font-semibold">
+                                        {assignment.firstName} {assignment.lastName}
+                                      </span>
+                                      <span>· {assignment.status.replaceAll("_", " ")}</span>
+                                      {assignment.isVolunteer && (
+                                        <span className="w-full text-[11px] text-gray-600">
+                                          Volunteer · {assignment.volunteerEmail} · {assignment.volunteerPhone}
+                                          {assignment.notifyEmail ? " · Email updates allowed" : ""}
+                                          {assignment.notifySms ? " · SMS updates allowed" : ""}
+                                        </span>
+                                      )}
+                                      {assignment.conflictCount > 0 && (
+                                        <span className="rounded-full bg-red-100 px-2 py-1 text-red-700">
+                                          Schedule conflict
+                                        </span>
+                                      )}
+                                      {assignment.serviceOutcome && (
+                                        <span className="rounded-full bg-white px-2 py-1">
+                                          {assignment.serviceOutcome.replaceAll("_", " ")}
+                                        </span>
+                                      )}
+                                      {canManage && !eventHasStarted && (
+                                        <select
+                                          aria-label={`Offline response for ${assignment.firstName} ${assignment.lastName}`}
+                                          value={["confirmed", "declined"].includes(assignment.status) ? assignment.status : ""}
+                                          disabled={savingAssignmentId === assignment.id}
+                                          onChange={(event) => recordAssignmentStatus(assignment, event.target.value)}
+                                          className="ml-auto h-8 rounded-lg border border-[#d8c7b8] bg-white px-2 text-xs"
+                                        >
+                                          <option value="">Record offline response</option>
+                                          <option value="confirmed">Confirmed</option>
+                                          <option value="declined">Declined</option>
+                                        </select>
+                                      )}
+                                      {canManage && eventHasStarted && (
+                                        <select
+                                          aria-label={`Service outcome for ${assignment.firstName} ${assignment.lastName}`}
+                                          value={assignment.serviceOutcome || ""}
+                                          disabled={savingAssignmentId === assignment.id}
+                                          onChange={(event) =>
+                                            recordServiceOutcome(
+                                              assignment,
+                                              event.target.value,
+                                            )
+                                          }
+                                          className="ml-auto h-8 rounded-lg border border-[#d8c7b8] bg-white px-2 text-xs"
+                                        >
+                                          <option value="">Record outcome</option>
+                                          <option value="served">Served</option>
+                                          <option value="no_show">No-show</option>
+                                          <option value="substitute_served">Substitute served</option>
+                                          <option value="excused">Excused</option>
+                                        </select>
+                                      )}
+                                    </div>
                                   ),
                                 )}
                               </div>
@@ -826,6 +1128,11 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                                           {member.highestLevelName
                                             ? ` · ${member.highestLevelName}`
                                             : ""}
+                                          {member.sameTimeReliability?.recorded >= 2
+                                            ? ` · ${member.sameTimeReliability.percent}% at ${member.sameTimeReliability.time}`
+                                            : member.reliability?.recorded >= 3
+                                              ? ` · ${member.reliability.percent}% reliable`
+                                              : ""}
                                         </option>
                                       ),
                                     )}

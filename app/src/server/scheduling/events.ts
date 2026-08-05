@@ -43,6 +43,23 @@ const ACTIVE_ASSIGNMENT_STATUSES = [
   "confirmed",
   "change_requested",
 ]
+const SERVICE_OUTCOMES = new Set([
+  "served",
+  "no_show",
+  "substitute_served",
+  "excused",
+])
+const LEADER_ASSIGNMENT_STATUSES = new Set(["confirmed", "declined"])
+const PARTICIPATION_TYPES = new Set(["members", "volunteers", "both"])
+const SIGNUP_CODE_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+const RESERVED_SIGNUP_CODES = new Set([
+  "api",
+  "admin",
+  "login",
+  "invite",
+  "volunteer",
+  "support",
+])
 const chapelDateFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
   year: "numeric",
@@ -52,6 +69,9 @@ const chapelDateFormatter = new Intl.DateTimeFormat("en-US", {
 
 const cleanText = (value: unknown, maximum = 5000) =>
   typeof value === "string" ? value.trim().slice(0, maximum) : ""
+
+const normalizeSignupCode = (value: unknown) =>
+  cleanText(value, 64).toLowerCase()
 
 const normalizeEventResponsibility = (body: any) => {
   const name = cleanText(body.name, 250)
@@ -282,6 +302,7 @@ const createEventFromStructure = async (
     status,
     recurrenceGroupId,
     recurrenceRule,
+    participationType,
     sourceEventId = null,
   }: any,
 ) => {
@@ -319,7 +340,9 @@ const createEventFromStructure = async (
       location || null,
       start,
       end,
-      structure.template.participation_type || "members",
+      PARTICIPATION_TYPES.has(participationType)
+        ? participationType
+        : structure.template.participation_type || "members",
       status,
       sourceEventId,
       recurrenceGroupId,
@@ -442,6 +465,8 @@ const loadEventList = async (
         event.start_time,
         event.end_time,
         event.participation_type,
+        event.signup_code,
+        event.signup_open,
         event.status,
         event.version,
         event.recurrence_group_id,
@@ -608,17 +633,36 @@ const loadEventDetails = async (
             assignment.user_id,
             assignment.status,
             assignment.quantity,
+            assignment.confirmed_at,
+            assignment.service_outcome,
+            assignment.outcome_recorded_at,
+            assignment.outcome_note,
+            assignment.volunteer_name,
+            assignment.volunteer_email,
+            assignment.volunteer_phone,
+            assignment.notify_email,
+            assignment.notify_sms,
             assignment.created_at,
-            member.first_name,
+            (
+              SELECT count(*)
+              FROM responsibility_assignments other_assignment
+              JOIN events other_event ON other_event.id = other_assignment.event_id
+              WHERE other_assignment.user_id = assignment.user_id
+                AND other_assignment.event_id <> assignment.event_id
+                AND other_assignment.status = ANY($4)
+                AND other_event.status NOT IN ('cancelled', 'archived')
+                AND other_event.start_time < $3
+                AND other_event.end_time > $2
+            ) AS conflict_count,
+            COALESCE(member.first_name, assignment.volunteer_name) AS first_name,
             member.last_name
           FROM responsibility_assignments assignment
-          JOIN users member ON member.id = assignment.user_id
+          LEFT JOIN users member ON member.id = assignment.user_id
           WHERE assignment.event_id = $1
-            AND assignment.user_id IS NOT NULL
             AND assignment.status NOT IN ('declined', 'cancelled')
-          ORDER BY lower(member.last_name), lower(member.first_name)
+          ORDER BY lower(COALESCE(member.last_name, '')), lower(COALESCE(member.first_name, assignment.volunteer_name))
         `,
-        [eventId],
+        [eventId, event.start_time, event.end_time, ACTIVE_ASSIGNMENT_STATUSES],
       )
   const candidateResult = manageableMinistryIds.length
     ? await client.query(
@@ -659,6 +703,10 @@ const loadEventDetails = async (
               FROM availability_blocks block
               WHERE block.user_id = member.id
                 AND block.status = 'active'
+                AND (
+                  block.ministry_id IS NULL
+                  OR block.ministry_id = COALESCE(responsibility.ministry_id, $2)
+                )
                 AND block.start_date <= $4::DATE
                 AND block.end_date >= $4::DATE
             )
@@ -705,10 +753,20 @@ const loadEventDetails = async (
     assignments.push({
       id: assignment.id,
       userId: assignment.user_id,
+      isVolunteer: !assignment.user_id,
       firstName: assignment.first_name,
-      lastName: assignment.last_name,
+      lastName: assignment.last_name || "",
+      volunteerEmail: assignment.volunteer_email || "",
+      volunteerPhone: assignment.volunteer_phone || "",
+      notifyEmail: Boolean(assignment.notify_email),
+      notifySms: Boolean(assignment.notify_sms),
       status: assignment.status,
       quantity: Number(assignment.quantity),
+      confirmedAt: assignment.confirmed_at,
+      serviceOutcome: assignment.service_outcome || "",
+      outcomeRecordedAt: assignment.outcome_recorded_at,
+      outcomeNote: assignment.outcome_note || "",
+      conflictCount: Number(assignment.conflict_count),
       createdAt: assignment.created_at,
     })
     assignmentsByResponsibility.set(
@@ -717,15 +775,84 @@ const loadEventDetails = async (
     )
   }
   const candidatesByResponsibility = new Map<string, any[]>()
+  const candidateIds = Array.from(
+    new Set(candidateResult.rows.map((candidate) => candidate.user_id)),
+  )
+  const reliabilityResult = candidateIds.length
+    ? await client.query(
+        `
+          SELECT
+            assignment.user_id,
+            assignment.service_outcome,
+            history_event.start_time
+          FROM responsibility_assignments assignment
+          JOIN events history_event ON history_event.id = assignment.event_id
+          JOIN event_responsibilities history_responsibility
+            ON history_responsibility.id = assignment.responsibility_id
+          WHERE assignment.user_id = ANY($1::UUID[])
+            AND assignment.service_outcome IS NOT NULL
+            AND history_event.start_time >= now() - INTERVAL '12 months'
+            AND COALESCE(history_responsibility.ministry_id, history_event.ministry_id)
+              = ANY($2::UUID[])
+        `,
+        [candidateIds, manageableMinistryIds],
+      )
+    : { rows: [] }
+  const reliabilityByUser = new Map<string, any[]>()
+  for (const row of reliabilityResult.rows) {
+    const history = reliabilityByUser.get(row.user_id) || []
+    history.push(row)
+    reliabilityByUser.set(row.user_id, history)
+  }
+  const eventTimeKey = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(event.start_time))
   for (const candidate of candidateResult.rows) {
     const candidates =
       candidatesByResponsibility.get(candidate.responsibility_id) || []
+    const history = reliabilityByUser.get(candidate.user_id) || []
+    const sameTimeHistory = history.filter(
+      (item) =>
+        new Intl.DateTimeFormat("en-US", {
+          timeZone: "America/New_York",
+          hour: "numeric",
+          minute: "2-digit",
+        }).format(new Date(item.start_time)) === eventTimeKey,
+    )
+    const summarizeReliability = (items: any[]) => {
+      const completed = items.filter((item) =>
+        ["served", "no_show"].includes(
+          item.service_outcome,
+        ),
+      )
+      const served = completed.filter((item) =>
+        item.service_outcome === "served",
+      ).length
+      const noShows = completed.filter(
+        (item) => item.service_outcome === "no_show",
+      ).length
+      return {
+        recorded: completed.length,
+        served,
+        noShows,
+        percent: completed.length
+          ? Math.round((served / completed.length) * 100)
+          : null,
+      }
+    }
     candidates.push({
       userId: candidate.user_id,
       firstName: candidate.first_name,
       lastName: candidate.last_name,
       highestLevelName: candidate.highest_level_name || "",
       highestLevelRank: Number(candidate.highest_level_rank) || null,
+      reliability: summarizeReliability(history),
+      sameTimeReliability: {
+        time: eventTimeKey,
+        ...summarizeReliability(sameTimeHistory),
+      },
     })
     candidatesByResponsibility.set(candidate.responsibility_id, candidates)
   }
@@ -796,6 +923,156 @@ const loadEventDetails = async (
   }
 }
 
+const recordServiceOutcome = async (
+  client: PoolClient,
+  context: any,
+  event: any,
+  body: any,
+) => {
+  const assignmentId = cleanText(body.assignmentId, 100)
+  const outcome = cleanText(body.outcome, 40)
+  const note = cleanText(body.note, 1000) || null
+  if (!SERVICE_OUTCOMES.has(outcome)) {
+    throw Object.assign(new Error("Choose a valid service outcome"), {
+      status: 400,
+    })
+  }
+  if (new Date(event.start_time).getTime() > Date.now()) {
+    throw Object.assign(
+      new Error("Service outcomes can be recorded after the event begins"),
+      { status: 409 },
+    )
+  }
+  const assignmentResult = await client.query(
+    `
+      SELECT
+        assignment.*,
+        COALESCE(responsibility.ministry_id, $3) AS ministry_id
+      FROM responsibility_assignments assignment
+      JOIN event_responsibilities responsibility
+        ON responsibility.id = assignment.responsibility_id
+      WHERE assignment.id = $1
+        AND assignment.event_id = $2
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [assignmentId, event.id, event.ministry_id],
+  )
+  const assignment = assignmentResult.rows[0]
+  if (!assignment) {
+    throw Object.assign(new Error("Assignment not found"), { status: 404 })
+  }
+  await requireMinistryAccess(
+    client,
+    context.user,
+    assignment.ministry_id,
+    true,
+  )
+  await client.query(
+    `
+      UPDATE responsibility_assignments
+      SET service_outcome = $2,
+          outcome_recorded_at = now(),
+          outcome_recorded_by = $3,
+          outcome_note = $4,
+          updated_at = now()
+      WHERE id = $1
+    `,
+    [assignment.id, outcome, context.actor.id, note],
+  )
+  await writeSchedulingAudit(client, context, {
+    action: "responsibility_assignment.outcome_recorded",
+    entityType: "responsibility_assignment",
+    entityId: assignment.id,
+    ministryId: assignment.ministry_id,
+    beforeData: {
+      status: assignment.status,
+      serviceOutcome: assignment.service_outcome,
+      outcomeNote: assignment.outcome_note,
+    },
+    afterData: {
+      status: assignment.status,
+      serviceOutcome: outcome,
+      outcomeNote: note,
+    },
+    metadata: { eventId: event.id },
+  })
+  return "Service outcome recorded"
+}
+
+const recordAssignmentStatus = async (
+  client: PoolClient,
+  context: any,
+  event: any,
+  body: any,
+) => {
+  const assignmentId = cleanText(body.assignmentId, 100)
+  const status = cleanText(body.status, 40)
+  if (!LEADER_ASSIGNMENT_STATUSES.has(status)) {
+    throw Object.assign(new Error("Choose confirmed or declined"), {
+      status: 400,
+    })
+  }
+  const assignmentResult = await client.query(
+    `
+      SELECT
+        assignment.*,
+        COALESCE(responsibility.ministry_id, $3) AS ministry_id
+      FROM responsibility_assignments assignment
+      JOIN event_responsibilities responsibility
+        ON responsibility.id = assignment.responsibility_id
+      WHERE assignment.id = $1
+        AND assignment.event_id = $2
+        AND assignment.status NOT IN ('cancelled', 'completed')
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [assignmentId, event.id, event.ministry_id],
+  )
+  const assignment = assignmentResult.rows[0]
+  if (!assignment) {
+    throw Object.assign(new Error("Active assignment not found"), { status: 404 })
+  }
+  await requireMinistryAccess(client, context.user, assignment.ministry_id, true)
+  await client.query(
+    `
+      UPDATE responsibility_assignments
+      SET status = $2,
+          confirmed_at = CASE WHEN $2 = 'confirmed' THEN now() ELSE NULL END,
+          updated_at = now()
+      WHERE id = $1
+    `,
+    [assignment.id, status],
+  )
+  await client.query(
+    `
+      UPDATE event_responsibilities responsibility
+      SET status = CASE
+            WHEN (
+              SELECT COALESCE(sum(quantity), 0)
+              FROM responsibility_assignments assignment
+              WHERE assignment.responsibility_id = responsibility.id
+                AND assignment.status NOT IN ('declined', 'cancelled')
+            ) >= responsibility.quantity_needed THEN 'filled'
+            ELSE 'open'
+          END,
+          updated_at = now()
+      WHERE responsibility.id = $1
+    `,
+    [assignment.responsibility_id],
+  )
+  await writeSchedulingAudit(client, context, {
+    action: `responsibility_assignment.${status}_offline`,
+    entityType: "responsibility_assignment",
+    entityId: assignment.id,
+    ministryId: assignment.ministry_id,
+    beforeData: { status: assignment.status, confirmedAt: assignment.confirmed_at },
+    afterData: { status, recordedFrom: "offline_conversation" },
+    metadata: { eventId: event.id },
+  })
+  return `Assignment marked ${status}`
+}
+
 const createEvents = async (
   client: PoolClient,
   context: any,
@@ -829,6 +1106,9 @@ const createEvents = async (
   const recurrenceGroupId =
     occurrenceStarts.length > 1 ? randomUUID() : null
   const status = body.status === "published" ? "published" : "draft"
+  const participationType = PARTICIPATION_TYPES.has(body.participationType)
+    ? body.participationType
+    : structure.template.participation_type || "members"
   const eventIds: string[] = []
 
   for (const occurrenceStart of occurrenceStarts) {
@@ -845,10 +1125,75 @@ const createEvents = async (
         recurrenceGroupId,
         recurrenceRule:
           occurrenceStarts.length > 1 ? body.recurrence : null,
+        participationType,
       }),
     )
   }
   return eventIds
+}
+
+const configureVolunteerSignup = async (
+  client: PoolClient,
+  context: any,
+  event: any,
+  body: any,
+) => {
+  await requireMinistryAccess(client, context.user, event.ministry_id, true)
+  if (!["volunteers", "both"].includes(event.participation_type)) {
+    throw Object.assign(
+      new Error("Set event participation to Volunteers or Members and volunteers first"),
+      { status: 409 },
+    )
+  }
+  const code = normalizeSignupCode(body.signupCode)
+  const signupOpen = body.signupOpen === true
+  if (
+    code.length < 4 ||
+    !SIGNUP_CODE_PATTERN.test(code) ||
+    RESERVED_SIGNUP_CODES.has(code)
+  ) {
+    throw Object.assign(
+      new Error("Choose 4–64 lowercase letters, numbers, or hyphens for the link"),
+      { status: 400 },
+    )
+  }
+  if (signupOpen && event.status !== "published") {
+    throw Object.assign(new Error("Publish the event before opening volunteer signups"), {
+      status: 409,
+    })
+  }
+  try {
+    await client.query(
+      `
+        UPDATE events
+        SET signup_code = $2,
+            signup_open = $3,
+            version = version + 1,
+            updated_at = now()
+        WHERE id = $1
+      `,
+      [event.id, code, signupOpen],
+    )
+  } catch (error: any) {
+    if (error?.code === "23505") {
+      throw Object.assign(new Error("That volunteer URL is already in use"), {
+        status: 409,
+      })
+    }
+    throw error
+  }
+  await writeSchedulingAudit(client, context, {
+    action: "event.volunteer_signup_configured",
+    entityType: "event",
+    entityId: event.id,
+    ministryId: event.ministry_id,
+    beforeData: {
+      signupCode: event.signup_code,
+      signupOpen: event.signup_open,
+    },
+    afterData: { signupCode: code, signupOpen },
+  })
+  return signupOpen ? "Volunteer signup link is open" : "Volunteer signup link saved and closed"
 }
 
 const cloneEvent = async (
@@ -1608,6 +1953,18 @@ const updateEvent = async (
     return assignMemberToResponsibility(client, context, event, body)
   }
 
+  if (body.action === "record_service_outcome") {
+    return recordServiceOutcome(client, context, event, body)
+  }
+
+  if (body.action === "record_assignment_status") {
+    return recordAssignmentStatus(client, context, event, body)
+  }
+
+  if (body.action === "configure_volunteer_signup") {
+    return configureVolunteerSignup(client, context, event, body)
+  }
+
   if (RESPONSIBILITY_ACTIONS.has(body.action)) {
     return mutateEventResponsibility(client, context, event, body)
   }
@@ -1942,6 +2299,9 @@ const updateEvent = async (
   }
 
   const title = cleanText(body.title, 250)
+  const participationType = PARTICIPATION_TYPES.has(body.participationType)
+    ? body.participationType
+    : event.participation_type
   const start = parseDate(body.startTime, "Start time")
   const end = parseDate(body.endTime, "End time")
   if (!title) {
@@ -1981,6 +2341,11 @@ const updateEvent = async (
           location = $4,
           start_time = $5,
           end_time = $6,
+          participation_type = $7,
+          signup_open = CASE
+            WHEN $7 IN ('volunteers', 'both') THEN signup_open
+            ELSE false
+          END,
           version = version + 1,
           updated_at = now()
       WHERE id = $1
@@ -1992,6 +2357,7 @@ const updateEvent = async (
       cleanText(body.location, 500) || null,
       start,
       end,
+      participationType,
     ],
   )
   await writeSchedulingAudit(client, context, {
@@ -2006,6 +2372,7 @@ const updateEvent = async (
       location: cleanText(body.location, 500),
       startTime: start,
       endTime: end,
+      participationType,
     },
   })
 }

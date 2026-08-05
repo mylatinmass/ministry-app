@@ -37,6 +37,7 @@ const initialForm = () => ({
   recurrenceFrequency: "none",
   recurrenceInterval: 1,
   recurrenceCount: 1,
+  participationType: "members",
 })
 
 const formatEventDate = (value) =>
@@ -119,6 +120,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       templateId,
       title: current.title || template?.name || "",
       description: current.description || template?.description || "",
+      participationType: template?.participationType || "members",
     }))
   }
 
@@ -133,6 +135,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       location: event.location || "",
       startTime: toInputValue(event.start_time),
       endTime: toInputValue(event.end_time),
+      participationType: event.participation_type || "members",
     })
 
   const prepareClone = (event) =>
@@ -145,6 +148,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       location: event.location || "",
       startTime: "",
       endTime: "",
+      participationType: event.participation_type || "members",
     })
 
   const saveEvent = async (event) => {
@@ -435,6 +439,23 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
           )}
 
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <label className="text-sm font-semibold text-gray-700 sm:col-span-2">
+              Who can participate
+              <select
+                value={form.participationType}
+                onChange={(event) =>
+                  updateField("participationType", event.target.value)
+                }
+                className="mt-2 h-12 w-full rounded-xl border border-gray-200 bg-white px-4 font-normal"
+              >
+                <option value="members">Ministry members only</option>
+                <option value="volunteers">Public volunteers only</option>
+                <option value="both">Members and public volunteers</option>
+              </select>
+              <span className="mt-2 block text-xs font-normal text-gray-500">
+                Volunteer events can receive signups through a public link after the event is published.
+              </span>
+            </label>
             <label className="text-sm font-semibold text-gray-700 sm:col-span-2">
               Event title
               <input

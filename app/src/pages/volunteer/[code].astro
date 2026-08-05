@@ -1,0 +1,11 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro"
+import VolunteerSignupApp from "../../react/pages/VolunteerSignupApp.jsx"
+
+export const prerender = false
+const { code = "" } = Astro.params
+---
+
+<AppLayout title="Volunteer Signup | My Latin Mass" referrer="no-referrer">
+  <VolunteerSignupApp code={code} client:only="react" />
+</AppLayout>

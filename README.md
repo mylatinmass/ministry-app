@@ -119,6 +119,46 @@ configuration names only; secrets and production data must never be committed.
   support investigation and a reviewed/manual reversal; they are not an automatic
   one-click undo mechanism.
 
+## Current scheduling, attendance, and reporting controls
+
+- Approved members receive a named internal ministry calendar. Current and
+  upcoming schedules can be printed or exported as CSV without exposing the
+  private calendar publicly.
+- Leaders receive a pre-publication review of required-position shortages,
+  overlapping assignments, available backup candidates, event-only overrides,
+  and pending change requests.
+- Assignment confirmation and actual service outcome are preserved separately.
+  After an event begins, an authorized leader can record Served, No-show,
+  Substitute served, or Excused. Every change records the actor and before/after
+  values in `ministry_audit_log`.
+- Candidate selection shows historical reliability when enough recorded outcomes
+  exist, including a separate comparison for the event's local start time. This
+  is decision support for a leader, not an automatic ban after one incident.
+- Members can decline an unconfirmed assignment without creating substitute
+  responsibility. Coverage immediately reopens and the decline remains audited.
+- An availability block can apply to every ministry or only one selected ministry.
+  Account-wide remains the default for backward compatibility.
+- The Reports workspace provides six-month participation and workload history,
+  time-of-day reliability patterns, upcoming coverage, ministry-level history,
+  printing, and CSV export. Reports require leader-level access to the ministry.
+- An event may be configured for Ministry members, public volunteers, or both.
+  For a published volunteer event, an authorized leader chooses an available
+  `/volunteer/<event-name>` URL, opens or closes that link, and may copy it for
+  distribution. The public page exposes only the event description, time,
+  location, available assignments, and remaining openings.
+- A standalone volunteer event does not require a coordinating ministry or an
+  event template. An authorized leader creates the event together with at least
+  one assignment, chooses its public URL, and opens signup. These records still
+  live exclusively in the Ministry App's `events`, `event_responsibilities`, and
+  `responsibility_assignments` tables; they do not use the public website's
+  captain-signup tables or Netlify functions.
+- A public volunteer supplies a name, email address, and telephone number for one
+  event assignment. The resulting `responsibility_assignments` record uses
+  `signup_source = 'public_link'`, never creates a user or Ministry membership,
+  and prevents the same email from claiming the same assignment twice. Optional
+  email and SMS choices are stored with separate consent timestamps; collecting
+  consent does not mean notification delivery is operational.
+
 ## Privacy and repository rules
 
 - This source repository may be public. Public source code is separate from private chapel and production data.

@@ -115,11 +115,20 @@ const loadAssignments = async (client: PoolClient, userId: string) => {
 const loadBlocks = async (client: PoolClient, userId: string) => {
   const result = await client.query(
     `
-      SELECT id, start_date, end_date, label, created_at, updated_at
-      FROM availability_blocks
-      WHERE user_id = $1
-        AND status = 'active'
-      ORDER BY start_date, end_date, created_at
+      SELECT
+        block.id,
+        block.start_date,
+        block.end_date,
+        block.label,
+        block.ministry_id,
+        ministry.name AS ministry_name,
+        block.created_at,
+        block.updated_at
+      FROM availability_blocks block
+      LEFT JOIN ministries ministry ON ministry.id = block.ministry_id
+      WHERE block.user_id = $1
+        AND block.status = 'active'
+      ORDER BY block.start_date, block.end_date, block.created_at
     `,
     [userId],
   )
@@ -128,6 +137,8 @@ const loadBlocks = async (client: PoolClient, userId: string) => {
     startDate: toStoredDateKey(row.start_date),
     endDate: toStoredDateKey(row.end_date),
     label: row.label || "",
+    ministryId: row.ministry_id || "",
+    ministryName: row.ministry_name || "All ministries",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }))
@@ -174,6 +185,28 @@ const createBlock = async (
   context: Awaited<ReturnType<typeof getIdentityContext>>,
   body: any,
 ) => {
+  const ministryId = cleanText(body.ministryId, 100) || null
+  let ministryName = "All ministries"
+  if (ministryId) {
+    const ministryResult = await client.query(
+      `
+        SELECT ministry.name
+        FROM ministry_members membership
+        JOIN ministries ministry ON ministry.id = membership.ministry_id
+        WHERE membership.user_id = $1
+          AND membership.ministry_id = $2
+          AND membership.status = 'active'
+        LIMIT 1
+      `,
+      [context.user.id, ministryId],
+    )
+    if (!ministryResult.rowCount) {
+      throw Object.assign(new Error("Choose one of your active ministries"), {
+        status: 403,
+      })
+    }
+    ministryName = ministryResult.rows[0].name
+  }
   const { dateKey: startDate, date: start } = parseDateKey(
     body.startDate,
     "Start date",
@@ -212,9 +245,13 @@ const createBlock = async (
         AND status = 'active'
         AND start_date <= $3::DATE
         AND end_date >= $2::DATE
+        AND (
+          (ministry_id IS NULL AND $4::UUID IS NULL)
+          OR ministry_id = $4::UUID
+        )
       FOR UPDATE
     `,
-    [context.user.id, startDate, endDate],
+    [context.user.id, startDate, endDate, ministryId],
   )
   let mergedStart = startDate
   let mergedEnd = endDate
@@ -227,7 +264,9 @@ const createBlock = async (
 
   const conflicts = assignments.filter(
     (assignment) =>
-      assignment.date >= mergedStart && assignment.date <= mergedEnd,
+      assignment.date >= mergedStart &&
+      assignment.date <= mergedEnd &&
+      (!ministryId || assignment.ministryId === ministryId),
   )
   if (body.requireConflictFree === true && conflicts.length) {
     return {
@@ -241,7 +280,7 @@ const createBlock = async (
     }
   }
   const assignedDates = new Set(
-    assignments.map((assignment) => assignment.date),
+    conflicts.map((assignment) => assignment.date),
   )
   const segments = splitAroundAssignedDates(
     new Date(`${mergedStart}T00:00:00.000Z`),
@@ -269,13 +308,14 @@ const createBlock = async (
     const result = await client.query(
       `
         INSERT INTO availability_blocks (
-          user_id, start_date, end_date, label, created_by
+          user_id, ministry_id, start_date, end_date, label, created_by
         )
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, start_date, end_date, label, created_at, updated_at
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, ministry_id, start_date, end_date, label, created_at, updated_at
       `,
       [
         context.user.id,
+        ministryId,
         segment.startDate,
         segment.endDate,
         label,
@@ -288,6 +328,8 @@ const createBlock = async (
       startDate: toStoredDateKey(block.start_date),
       endDate: toStoredDateKey(block.end_date),
       label: block.label || "",
+      ministryId: block.ministry_id || "",
+      ministryName,
       createdAt: block.created_at,
       updatedAt: block.updated_at,
     })
@@ -299,6 +341,7 @@ const createBlock = async (
         startDate: toStoredDateKey(block.start_date),
         endDate: toStoredDateKey(block.end_date),
         label: block.label,
+        ministryId: block.ministry_id,
       },
       metadata: {
         replacedBlockIds: overlapping.rows.map((item) => item.id),
@@ -326,7 +369,7 @@ const cancelBlock = async (
   const blockId = typeof body.blockId === "string" ? body.blockId : ""
   const blockResult = await client.query(
     `
-      SELECT id, start_date, end_date, label
+      SELECT id, ministry_id, start_date, end_date, label
       FROM availability_blocks
       WHERE id = $1
         AND user_id = $2
@@ -362,9 +405,77 @@ const cancelBlock = async (
       startDate: toStoredDateKey(block.start_date),
       endDate: toStoredDateKey(block.end_date),
       label: block.label,
+      ministryId: block.ministry_id,
     },
   })
   return { message: "Availability block removed" }
+}
+
+const declineAssignment = async (
+  client: PoolClient,
+  context: Awaited<ReturnType<typeof getIdentityContext>>,
+  body: any,
+) => {
+  const assignmentId = cleanText(body.assignmentId, 100)
+  const assignmentResult = await client.query(
+    `
+      SELECT
+        assignment.id,
+        assignment.status,
+        assignment.event_id,
+        assignment.responsibility_id,
+        COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id
+      FROM responsibility_assignments assignment
+      JOIN event_responsibilities responsibility
+        ON responsibility.id = assignment.responsibility_id
+      JOIN events event ON event.id = assignment.event_id
+      WHERE assignment.id = $1
+        AND assignment.user_id = $2
+        AND assignment.status IN ('pending', 'assigned')
+        AND event.status = 'published'
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [assignmentId, context.user.id],
+  )
+  const assignment = assignmentResult.rows[0]
+  if (!assignment) {
+    throw Object.assign(
+      new Error("Only an active, unconfirmed assignment can be declined"),
+      { status: 409 },
+    )
+  }
+  await client.query(
+    `UPDATE responsibility_assignments SET status = 'declined', updated_at = now() WHERE id = $1`,
+    [assignment.id],
+  )
+  await client.query(
+    `
+      UPDATE event_responsibilities responsibility
+      SET status = CASE
+            WHEN (
+              SELECT COALESCE(sum(quantity), 0)
+              FROM responsibility_assignments assignment
+              WHERE assignment.responsibility_id = responsibility.id
+                AND assignment.status NOT IN ('declined', 'cancelled')
+            ) >= responsibility.quantity_needed THEN 'filled'
+            ELSE 'open'
+          END,
+          updated_at = now()
+      WHERE responsibility.id = $1
+    `,
+    [assignment.responsibility_id],
+  )
+  await writeSchedulingAudit(client, context, {
+    action: "responsibility_assignment.declined",
+    entityType: "responsibility_assignment",
+    entityId: assignment.id,
+    ministryId: assignment.ministry_id,
+    beforeData: { status: assignment.status },
+    afterData: { status: "declined" },
+    metadata: { eventId: assignment.event_id },
+  })
+  return { message: "Assignment declined" }
 }
 
 const requestAssignmentChange = async (
@@ -465,9 +576,20 @@ export const handleAvailability = async (request: Request) => {
   try {
     const context = await getIdentityContext(client, request)
     if (request.method === "GET") {
-      const [blocks, assignments] = await Promise.all([
+      const [blocks, assignments, ministriesResult] = await Promise.all([
         loadBlocks(client, context.user.id),
         loadAssignments(client, context.user.id),
+        client.query(
+          `
+            SELECT ministry.id, ministry.name
+            FROM ministry_members membership
+            JOIN ministries ministry ON ministry.id = membership.ministry_id
+            WHERE membership.user_id = $1
+              AND membership.status = 'active'
+            ORDER BY lower(ministry.name)
+          `,
+          [context.user.id],
+        ),
       ])
       return json({
         user: {
@@ -477,6 +599,7 @@ export const handleAvailability = async (request: Request) => {
         },
         blocks,
         assignments,
+        ministries: ministriesResult.rows,
       })
     }
     if (request.method !== "POST") {
@@ -493,6 +616,8 @@ export const handleAvailability = async (request: Request) => {
         result = await cancelBlock(client, context, body)
       } else if (body.action === "request_change") {
         result = await requestAssignmentChange(client, context, body)
+      } else if (body.action === "decline_assignment") {
+        result = await declineAssignment(client, context, body)
       } else {
         throw Object.assign(new Error("Unknown availability action"), {
           status: 400,

@@ -349,6 +349,83 @@ assert.equal(manifest.scope, "/")
 assert.match(serviceWorker, /destination\.origin !== self\.location\.origin/)
 assert.doesNotMatch(serviceWorker, /caches\.open/)
 
+const [serviceOutcomeMigration, schedulingReports, reportsComponent] =
+  await Promise.all([
+    read("migrations/20260805_04_add_service_outcomes_and_scoped_availability.sql"),
+    read("src/server/scheduling/reports.ts"),
+    read("src/react/components/ministry/MinistryReports.jsx"),
+  ])
+assert.match(serviceOutcomeMigration, /service_outcome STRING NULL/)
+assert.match(serviceOutcomeMigration, /outcome_recorded_by UUID NULL/)
+assert.match(serviceOutcomeMigration, /ministry_id UUID NULL REFERENCES ministries/)
+assert.match(schedulingEvents, /record_service_outcome/)
+assert.match(schedulingEvents, /record_assignment_status/)
+assert.match(schedulingEvents, /sameTimeReliability/)
+assert.match(eventDetails, /Pre-publication review/)
+assert.match(eventDetails, /Record outcome/)
+assert.match(schedulingAvailability, /decline_assignment/)
+assert.match(schedulingAvailability, /block\.ministry_id/)
+assert.match(availabilityComponent, /All ministries/)
+assert.match(availabilityComponent, /Decline/)
+assert.match(apiRoute, /scheduling\/reports/)
+assert.match(schedulingReports, /INTERVAL '6 months'/)
+assert.match(schedulingReports, /levelHistory/)
+assert.match(reportsComponent, /Export CSV/)
+assert.match(reportsComponent, /Time patterns/)
+assert.match(workspaceContent, /Internal calendar/)
+assert.match(workspaceContent, /window\.print/)
+
+const [volunteerConsentMigration, schedulingVolunteers, volunteerSignupPage] =
+  await Promise.all([
+    read("migrations/20260805_05_add_volunteer_contact_consent.sql"),
+    read("src/server/scheduling/volunteers.ts"),
+    read("src/react/pages/VolunteerSignupApp.jsx"),
+  ])
+assert.match(volunteerConsentMigration, /volunteer_email_consent_at/)
+assert.match(volunteerConsentMigration, /volunteer_sms_consent_at/)
+assert.match(apiRoute, /volunteer-signup/)
+assert.match(schedulingEvents, /configure_volunteer_signup/)
+assert.match(schedulingEvents, /event\.volunteer_signup_configured/)
+assert.match(schedulingEvents, /That volunteer URL is already in use/)
+assert.match(schedulingVolunteers, /signup_source/)
+assert.match(schedulingVolunteers, /'public_link'/)
+assert.match(schedulingVolunteers, /volunteer_name/)
+assert.match(schedulingVolunteers, /volunteer_phone/)
+assert.match(schedulingVolunteers, /signup_open = true/)
+assert.match(volunteerSignupPage, /This does not create a Ministry account or membership/)
+assert.match(volunteerSignupPage, /emailConsent/)
+assert.match(volunteerSignupPage, /smsConsent/)
+assert.match(eventDetails, /Volunteer signup link/)
+assert.match(eventDetails, /Copy link/)
+assert.match(homeWorkspace, /label:\s*"Events"/)
+assert.doesNotMatch(homeWorkspace, /label:\s*"My Events"/)
+assert.match(homeWorkspace, /Create event/)
+assert.match(homeWorkspace, /<MinistryEvents/)
+assert.match(homeWorkspace, /events=\{myEvents\}/)
+
+const [
+  standaloneVolunteerMigration,
+  standaloneVolunteerEvents,
+  volunteerEventsComponent,
+] = await Promise.all([
+  read("migrations/20260805_06_allow_standalone_volunteer_events.sql"),
+  read("src/server/scheduling/volunteer-events.ts"),
+  read("src/react/components/ministry/VolunteerEvents.jsx"),
+])
+assert.match(standaloneVolunteerMigration, /ALTER COLUMN ministry_id DROP NOT NULL/)
+assert.match(standaloneVolunteerEvents, /event\.ministry_id IS NULL/)
+assert.match(standaloneVolunteerEvents, /Add at least one volunteer assignment/)
+assert.match(standaloneVolunteerEvents, /INSERT INTO event_responsibilities/)
+assert.match(standaloneVolunteerEvents, /volunteer_event\.created/)
+assert.match(apiRoute, /scheduling\/volunteer-events/)
+assert.match(schedulingVolunteers, /LEFT JOIN ministries coordinator/)
+assert.match(volunteerEventsComponent, /Create event and assignments/)
+assert.match(volunteerEventsComponent, /Add another assignment/)
+assert.match(volunteerEventsComponent, /A ministry is optional/)
+assert.match(volunteerSignupPage, /Choose an available assignment/)
+assert.doesNotMatch(volunteerSignupPage, /<select name="responsibilityId"/)
+assert.match(homeWorkspace, /<VolunteerEvents creating/)
+
 const serverFiles = []
 const collectServerFiles = async (directory) => {
   for (const entry of await fs.readdir(directory, { withFileTypes: true })) {

@@ -11,4 +11,9 @@ export default defineConfig({
     webAnalytics: { enabled: false },
   }),
   integrations: [react()],
+  vite: {
+    ssr: {
+      noExternal: ["jsonwebtoken"],
+    },
+  },
 })

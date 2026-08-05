@@ -106,6 +106,7 @@ const [
 
 assert.match(astroConfig, /site:\s*"https:\/\/ministry\.mylatinmass\.com"/)
 assert.match(astroConfig, /base:\s*"\/"/)
+assert.match(astroConfig, /noExternal:\s*\["jsonwebtoken"\]/)
 
 const apiFiles = []
 const walk = async (directory) => {

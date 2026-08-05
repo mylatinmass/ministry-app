@@ -11,6 +11,16 @@ import Seo from "../components/Seo"
 import { MINISTRY_SESSION_KEY } from "../components/ministry/MinistryLogin"
 import getFunctionEndpoint from "../utils/getFunctionEndpoint"
 
+const readApiResponse = async (response) => {
+  const contentType = response.headers.get("content-type") || ""
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new Error(
+      "The Ministry service is temporarily unavailable. Please try the invitation again."
+    )
+  }
+  return response.json()
+}
+
 const MinistryInvitePage = ({ location }) => {
   const params = React.useMemo(
     () =>
@@ -54,7 +64,7 @@ const MinistryInvitePage = ({ location }) => {
       body: JSON.stringify({ action: "inspect", token }),
     })
       .then(async (response) => {
-        const result = await response.json()
+        const result = await readApiResponse(response)
         if (!response.ok) throw new Error(result.message || "Unable to load invitation")
         return result
       })
@@ -100,7 +110,7 @@ const MinistryInvitePage = ({ location }) => {
           }),
         }
       )
-      const result = await response.json()
+      const result = await readApiResponse(response)
       if (!response.ok) throw new Error(result.message || "Unable to check username")
       setUsernameState({
         checking: false,
@@ -125,7 +135,7 @@ const MinistryInvitePage = ({ location }) => {
           body: JSON.stringify({ token, action: intent, ...form }),
         }
       )
-      const result = await response.json()
+      const result = await readApiResponse(response)
       if (!response.ok) throw new Error(result.message || "Unable to answer invitation")
       if (result.token) {
         window.sessionStorage.setItem(MINISTRY_SESSION_KEY, result.token)

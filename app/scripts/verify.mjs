@@ -46,6 +46,9 @@ const [
   ministryLogin,
   ministryLoginUi,
   membershipReview,
+  accessRequestMigration,
+  accessRequestServer,
+  accessRequestUi,
 ] = await Promise.all([
   read("astro.config.mjs"),
   read("src/pages/api/[...path].ts"),
@@ -86,6 +89,9 @@ const [
   read("src/server/legacy/ministry-login.js"),
   read("src/react/components/ministry/MinistryLogin.jsx"),
   read("src/server/legacy/ministry-membership-request-response.js"),
+  read("migrations/20260805_02_add_ministry_access_requests.sql"),
+  read("src/server/legacy/ministry-access-request.js"),
+  read("src/react/pages/AccessRequestApp.jsx"),
 ])
 
 assert.match(astroConfig, /site:\s*"https:\/\/ministry\.mylatinmass\.com"/)
@@ -123,6 +129,12 @@ assert.match(loginLinkRequest, /u\.global_role NOT IN \('owner', 'super_admin'\)
 assert.match(loginLinkRequest, /created_at > now\(\) - INTERVAL '60 seconds'/)
 assert.match(loginLinkResponse, /\["owner", "super_admin"\]\.includes/)
 assert.match(loginLinkResponse, /authMethod: "email_link"/)
+assert.match(accessRequestMigration, /CREATE TABLE IF NOT EXISTS ministry_access_requests/)
+assert.match(accessRequestMigration, /assigned_ministry_id UUID NULL/)
+assert.match(accessRequestServer, /firstName/)
+assert.doesNotMatch(accessRequestUi, /name="(?:chapel|ministry)"/)
+assert.match(ministryMembers, /Only a global administrator can review unassigned access requests/)
+assert.match(ministryMembers, /approve_access_request/)
 assert.match(ministryLogin, /authMethod: "password"/)
 assert.match(ministryLoginUi, /EMAIL ME A SIGN-IN LINK/)
 assert.match(ministryMembers, /context\.isEmailLinkSession/)

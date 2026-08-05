@@ -14,6 +14,8 @@ const loadLegacyHandlers = async () => {
     const { createRequire } = await import("node:module")
     const require = createRequire(import.meta.url)
     return {
+      "ministry-access-request":
+        require("./legacy/ministry-access-request.js").handler,
       "ministry-detail": require("./legacy/ministry-detail.js").handler,
       "ministry-invitation-response":
         require("./legacy/ministry-invitation-response.js").handler,
@@ -34,6 +36,7 @@ const loadLegacyHandlers = async () => {
   }
 
   const [
+    ministryAccessRequest,
     ministryDetail,
     ministryInvitationResponse,
     ministryList,
@@ -47,6 +50,7 @@ const loadLegacyHandlers = async () => {
     ministryProfiles,
     ministrySession,
   ] = await Promise.all([
+    import("./legacy/ministry-access-request.js"),
     import("./legacy/ministry-detail.js"),
     import("./legacy/ministry-invitation-response.js"),
     import("./legacy/ministry-list.js"),
@@ -62,6 +66,7 @@ const loadLegacyHandlers = async () => {
   ])
 
   return {
+    "ministry-access-request": unwrap(ministryAccessRequest).handler,
     "ministry-detail": unwrap(ministryDetail).handler,
     "ministry-invitation-response":
       unwrap(ministryInvitationResponse).handler,

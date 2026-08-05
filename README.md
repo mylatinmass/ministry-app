@@ -90,6 +90,11 @@ configuration names only; secrets and production data must never be committed.
   response is deliberately identical for eligible, unknown, duplicated, and
   privileged email addresses to prevent account discovery.
 - Owner and Super Admin accounts can never request or redeem email sign-in links.
+- An unregistered person may submit a public access request with their name,
+  email, optional phone number, and optional message. The form deliberately does
+  not ask for a chapel or ministry and does not create an account or membership.
+  Only a password-authenticated Owner or Super Admin can review the neutral queue,
+  assign the request to a ministry, and send the standard private invitation.
 - Email-link sessions may use operational Ministry features, but changing account
   details, family profiles, membership approvals, invitations, roles, serving
   eligibility, or member access requires a fresh password-authenticated session.

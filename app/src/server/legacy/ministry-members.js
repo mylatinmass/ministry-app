@@ -134,7 +134,13 @@ const listMembers = async (client, user, ministryId) => {
     })
   }
 
-  const [membersResult, invitationsResult, requestsResult, levelsResult] = await Promise.all([
+  const [
+    membersResult,
+    invitationsResult,
+    requestsResult,
+    levelsResult,
+    accessRequestsResult,
+  ] = await Promise.all([
     client.query(
       `
         SELECT
@@ -215,6 +221,16 @@ const listMembers = async (client, user, ministryId) => {
       `,
       [ministryId]
     ),
+    isGlobalManager(user)
+      ? client.query(
+          `
+            SELECT id, first_name, last_name, email, phone, message, created_at
+            FROM ministry_access_requests
+            WHERE status = 'pending'
+            ORDER BY created_at
+          `
+        )
+      : Promise.resolve({ rows: [] }),
   ])
 
   return jsonResponse(200, {
@@ -260,6 +276,15 @@ const listMembers = async (client, user, ministryId) => {
         .filter(Boolean)
         .join(" "),
       requestedAt: request.requested_at,
+    })),
+    accessRequests: accessRequestsResult.rows.map((request) => ({
+      id: request.id,
+      firstName: request.first_name,
+      lastName: request.last_name,
+      email: request.email,
+      phone: request.phone || "",
+      message: request.message || "",
+      requestedAt: request.created_at,
     })),
   })
 }
@@ -428,6 +453,7 @@ const createInvitation = async (client, event, user, managedMinistries, body) =>
 
 const updateMembership = async (
   client,
+  event,
   user,
   actor,
   managedMinistries,
@@ -703,6 +729,85 @@ const updateMembership = async (
     }
   }
 
+  if (["approve_access_request", "decline_access_request"].includes(action)) {
+    if (!isGlobalManager(user)) {
+      return jsonResponse(403, {
+        message: "Only a global administrator can review unassigned access requests",
+      })
+    }
+    if (!canManageMinistry(managedMinistries, ministryId)) {
+      return jsonResponse(403, { message: "You cannot manage this ministry" })
+    }
+    const requestId = body.requestId?.toString()
+    if (!requestId) {
+      return jsonResponse(400, { message: "Access request is required" })
+    }
+    const requestResult = await client.query(
+      `
+        SELECT id, first_name, last_name, email, phone, message, status, created_at
+        FROM ministry_access_requests
+        WHERE id = $1 AND status = 'pending'
+        LIMIT 1
+      `,
+      [requestId]
+    )
+    const accessRequest = requestResult.rows[0]
+    if (!accessRequest) {
+      return jsonResponse(404, { message: "Access request not found" })
+    }
+
+    if (action === "approve_access_request") {
+      const invitationResponse = await createInvitation(
+        client,
+        event,
+        user,
+        managedMinistries,
+        { email: accessRequest.email, ministryIds: [ministryId] }
+      )
+      if (invitationResponse.statusCode < 200 || invitationResponse.statusCode >= 300) {
+        return invitationResponse
+      }
+    }
+
+    const nextStatus =
+      action === "approve_access_request" ? "approved" : "declined"
+    const updateResult = await client.query(
+      `
+        UPDATE ministry_access_requests
+        SET status = $2,
+            reviewed_by = $3,
+            assigned_ministry_id = CASE WHEN $2 = 'approved' THEN $4 ELSE NULL END,
+            reviewed_at = now(),
+            updated_at = now()
+        WHERE id = $1 AND status = 'pending'
+        RETURNING id
+      `,
+      [requestId, nextStatus, actor.id, ministryId]
+    )
+    if (!updateResult.rowCount) {
+      return jsonResponse(409, {
+        message: "This access request was already reviewed",
+      })
+    }
+    await writeLevelAudit(client, {
+      actor,
+      user,
+      action: `ministry_access_request.${nextStatus}`,
+      entityType: "ministry_access_request",
+      entityId: requestId,
+      ministryId,
+      beforeData: accessRequest,
+      afterData: { status: nextStatus, assignedMinistryId: nextStatus === "approved" ? ministryId : null },
+    })
+    return jsonResponse(200, {
+      success: true,
+      message:
+        nextStatus === "approved"
+          ? "Access request approved and invitation emailed"
+          : "Access request declined",
+    })
+  }
+
   if (["approve_request", "decline_request"].includes(action)) {
     if (!canManageMinistry(managedMinistries, ministryId)) {
       return jsonResponse(403, { message: "You cannot manage this ministry" })
@@ -974,6 +1079,7 @@ const handler = async (event) => {
     }
     return await updateMembership(
       client,
+      event,
       user,
       context.actor,
       managedMinistries,

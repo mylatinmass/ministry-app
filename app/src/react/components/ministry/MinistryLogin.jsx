@@ -1,4 +1,5 @@
 import * as React from "react"
+import { Link } from "../../compat/gatsby"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 
 const MINISTRY_SESSION_KEY = "ministry_jwt"
@@ -123,16 +124,15 @@ const MinistryLogin = ({ onLoginSuccess, passwordOnly = false }) => {
           </>
         )}
         <div role="alert" className="min-h-5 text-center text-sm leading-tight text-red-600">{errorMessage}</div>
-        <p className="text-center text-sm text-gray-500">
-          To request ministry access, email{" "}
-          <a
-            className="text-[#896542] underline"
-            href="mailto:mylatinmass@gmail.com"
-          >
-            mylatinmass@gmail.com
-          </a>
-          .
-        </p>
+        {!passwordOnly && (
+          <p className="text-center text-sm text-gray-500">
+            Not registered?{" "}
+            <Link className="font-semibold text-[#896542] underline" to="/access-request">
+              Request access
+            </Link>
+            .
+          </p>
+        )}
       </div>
     </div>
   )

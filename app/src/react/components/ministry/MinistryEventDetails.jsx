@@ -41,6 +41,9 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
   const [savingAssignmentId, setSavingAssignmentId] =
     React.useState("")
   const [signupCode, setSignupCode] = React.useState("")
+  const [generalVolunteerUnlimited, setGeneralVolunteerUnlimited] =
+    React.useState(true)
+  const [generalVolunteerLimit, setGeneralVolunteerLimit] = React.useState(10)
   const [isSavingSignup, setIsSavingSignup] = React.useState(false)
   const [isPresented, setIsPresented] = React.useState(false)
   const [message, setMessage] = React.useState("")
@@ -73,6 +76,19 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
       }
       setDetails(result)
       setSignupCode(result.signup_code || "")
+      const generalVolunteer = result.responsibilities?.find(
+        (responsibility) =>
+          responsibility.isPublicAssignment &&
+          responsibility.name.toLowerCase() === "general volunteer",
+      )
+      setGeneralVolunteerUnlimited(
+        generalVolunteer?.unlimitedCapacity ?? true,
+      )
+      setGeneralVolunteerLimit(
+        generalVolunteer?.unlimitedCapacity
+          ? 10
+          : generalVolunteer?.quantityNeeded || 10,
+      )
     } catch (error) {
       setErrorMessage(error.message)
     } finally {
@@ -408,6 +424,8 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
           eventId: displayedEvent.id,
           signupCode,
           signupOpen,
+          generalVolunteerUnlimited,
+          generalVolunteerLimit: Number(generalVolunteerLimit),
         }),
       })
       const result = await response.json()
@@ -424,6 +442,12 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
   const volunteerUrl = signupCode
     ? `${window.location.origin}/volunteer/${signupCode}`
     : ""
+  const parsedGeneralVolunteerLimit = Number(generalVolunteerLimit)
+  const generalVolunteerCapacityValid =
+    generalVolunteerUnlimited ||
+    (Number.isInteger(parsedGeneralVolunteerLimit) &&
+      parsedGeneralVolunteerLimit >= 1 &&
+      parsedGeneralVolunteerLimit <= 10000)
 
   const copyVolunteerUrl = async () => {
     if (!volunteerUrl) return
@@ -448,10 +472,12 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
   const readiness = (details?.responsibilities || []).reduce(
     (summary, responsibility) => {
       if (responsibility.isRequired) {
-        summary.shortages += Math.max(
-          0,
-          responsibility.quantityNeeded - responsibility.assignedQuantity,
-        )
+        if (!responsibility.unlimitedCapacity) {
+          summary.shortages += Math.max(
+            0,
+            responsibility.quantityNeeded - responsibility.assignedQuantity,
+          )
+        }
       }
       summary.backups += responsibility.availableMembers?.length || 0
       if (!responsibility.templateResponsibilityId) summary.overrides += 1
@@ -581,6 +607,17 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                   />
                 </div>
               </label>
+              <fieldset className="mt-5 rounded-xl border border-[#e8ddd3] bg-white p-4">
+                <legend className="px-2 text-sm font-semibold text-gray-700">General Volunteer spots</legend>
+                <p className="text-sm text-gray-500">Volunteers choose this when their specific task will be assigned by email or during the event.</p>
+                <div className="mt-3 flex flex-wrap gap-4">
+                  <label className="flex items-center gap-2 text-sm font-semibold text-gray-700"><input type="radio" name="eventGeneralVolunteerCapacity" checked={generalVolunteerUnlimited} onChange={() => setGeneralVolunteerUnlimited(true)} className="size-4 accent-[#896542]" />Unlimited</label>
+                  <label className="flex items-center gap-2 text-sm font-semibold text-gray-700"><input type="radio" name="eventGeneralVolunteerCapacity" checked={!generalVolunteerUnlimited} onChange={() => setGeneralVolunteerUnlimited(false)} className="size-4 accent-[#896542]" />Custom limit</label>
+                </div>
+                {!generalVolunteerUnlimited && (
+                  <label className="mt-3 block max-w-48 text-sm font-semibold text-gray-700">Number of spots<input type="number" min="1" max="10000" required value={generalVolunteerLimit} onChange={(event) => setGeneralVolunteerLimit(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-gray-200 px-3 font-normal" /></label>
+                )}
+              </fieldset>
               {displayedEvent.signup_code && (
                 <p className="mt-3 break-all rounded-lg bg-white px-3 py-2 text-xs text-gray-600">
                   {`${window.location.origin}/volunteer/${displayedEvent.signup_code}`}
@@ -589,7 +626,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
                   type="button"
-                  disabled={isSavingSignup || signupCode.length < 4}
+                  disabled={isSavingSignup || signupCode.length < 4 || !generalVolunteerCapacityValid}
                   onClick={() => configureVolunteerSignup(false)}
                   className="rounded-lg border border-[#d8c7b8] bg-white px-3 py-2 text-sm font-semibold text-[#6f4f34] disabled:opacity-50"
                 >
@@ -597,7 +634,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                 </button>
                 <button
                   type="button"
-                  disabled={isSavingSignup || signupCode.length < 4}
+                  disabled={isSavingSignup || signupCode.length < 4 || !generalVolunteerCapacityValid}
                   onClick={() => configureVolunteerSignup(!displayedEvent.signup_open)}
                   className="rounded-lg bg-[#896542] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
                 >
@@ -770,11 +807,16 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                 Responsibilities
               </p>
               <h2 className="mt-2 century-font text-2xl text-gray-950">
-                {details?.responsibilities?.length ||
-                  displayedEvent.responsibility_count ||
-                  0}{" "}
+                {details
+                  ? details.responsibilities?.length || 0
+                  : displayedEvent.responsibility_count || 0}{" "}
                 responsibilities
               </h2>
+              {details?.assignmentVisibilityRestricted && (
+                <p className="mt-2 max-w-xl text-sm text-gray-500">
+                  Ministry assignments are visible only when the active profile belongs to that ministry.
+                </p>
+              )}
             </div>
             {eventCanChange && !responsibilityForm && (
               <button
@@ -983,16 +1025,20 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                   </h3>
                   <div className="mt-3 space-y-2">
                     {group.items.map((responsibility) => {
-                      const canManage = manageableMinistries.some(
-                        (ministry) =>
-                          ministry.ministryId ===
-                          responsibility.ministryId,
-                      )
-                      const openSlots = Math.max(
-                        0,
-                        responsibility.quantityNeeded -
-                          responsibility.assignedQuantity,
-                      )
+                      const canManage = responsibility.isPublicAssignment
+                        ? details.canManageEvent
+                        : manageableMinistries.some(
+                            (ministry) =>
+                              ministry.ministryId ===
+                              responsibility.ministryId,
+                          )
+                      const openSlots = responsibility.unlimitedCapacity
+                        ? Number.MAX_SAFE_INTEGER
+                        : Math.max(
+                            0,
+                            responsibility.quantityNeeded -
+                              responsibility.assignedQuantity,
+                          )
                       return (
                         <article
                           key={responsibility.id}
@@ -1015,7 +1061,9 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                                 " ",
                               )}{" "}
                               · {responsibility.assignedQuantity}/
-                              {responsibility.quantityNeeded} assigned
+                              {responsibility.unlimitedCapacity
+                                ? "Unlimited"
+                                : responsibility.quantityNeeded} assigned
                               {responsibility.requiredLevelName
                                 ? ` · Requires ${responsibility.requiredLevelName} or higher`
                                 : ""}
@@ -1037,7 +1085,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                                         {assignment.firstName} {assignment.lastName}
                                       </span>
                                       <span>· {assignment.status.replaceAll("_", " ")}</span>
-                                      {assignment.isVolunteer && (
+                                      {assignment.isVolunteer && canManage && (
                                         <span className="w-full text-[11px] text-gray-600">
                                           Volunteer · {assignment.volunteerEmail} · {assignment.volunteerPhone}
                                           {assignment.notifyEmail ? " · Email updates allowed" : ""}

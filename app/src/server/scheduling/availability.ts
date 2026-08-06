@@ -453,6 +453,7 @@ const declineAssignment = async (
     `
       UPDATE event_responsibilities responsibility
       SET status = CASE
+            WHEN responsibility.unlimited_capacity THEN 'open'
             WHEN (
               SELECT COALESCE(sum(quantity), 0)
               FROM responsibility_assignments assignment

@@ -10,7 +10,7 @@ const {
   sendMinistryLoginLinkEmail,
 } = require("./helper/ministry-login-links")
 
-const genericMessage = "If that email belongs to an eligible active member, a sign-in link has been sent."
+const genericMessage = "If that email belongs to an eligible active account, a sign-in link has been sent."
 const jsonResponse = (statusCode, body) => ({
   statusCode,
   headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
@@ -42,11 +42,11 @@ const handler = async (event) => {
        WHERE lower(u.email) = $1
          AND u.status = 'active'
          AND u.global_role NOT IN ('owner', 'super_admin')
-         AND EXISTS (
+         AND (u.is_volunteer_profile = true OR EXISTS (
            SELECT 1 FROM ministry_members mm
            JOIN ministries m ON m.id = mm.ministry_id
            WHERE mm.user_id = u.id AND mm.status = 'active' AND m.status = 'active'
-         )
+         ))
        LIMIT 2`,
       [email]
     )

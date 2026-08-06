@@ -47,7 +47,7 @@ const sections = [
     id: "calendar",
     label: "Calendar",
     icon: CalendarDaysIcon,
-    description: "See every published ministry event.",
+    description: "See public events and events visible to this profile.",
   },
   {
     id: "events",
@@ -472,7 +472,7 @@ const MinistryHomeWorkspace = ({ data }) => {
           <div>
             <h2 className="century-font text-3xl text-gray-950">Events</h2>
             <p className="mt-1 text-sm text-gray-500">
-              Events and duties assigned to this profile.
+              Public events, ministry events visible to this profile, and assigned duties.
             </p>
           </div>
           {(hasGlobalAccess || manageableMinistries.length > 0) && (
@@ -488,10 +488,10 @@ const MinistryHomeWorkspace = ({ data }) => {
         </div>
         {hasGlobalAccess && <VolunteerEvents />}
         <MinistryEventAgenda
-          events={myEvents}
-          label="Your assigned events"
-          emptyTitle="No assigned events"
-          emptyText="Events and duties assigned to this profile will appear here."
+          events={data.calendarEvents}
+          label="Available events"
+          emptyTitle="No available events"
+          emptyText="Public events and events for this profile's ministries will appear here."
           onEventSelect={setSelectedEvent}
         />
       </div>

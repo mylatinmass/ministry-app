@@ -57,7 +57,7 @@ configuration names only; secrets and production data must never be committed.
 | Astro application API | Current | Stable boundary used by the standalone web client. Other websites must use an approved API or feed rather than read application tables directly. Private endpoints require Ministry authentication and return only role-authorized data. | Routes under `https://ministry.mylatinmass.com/api/`; request/response contract must be documented before third-party use. |
 | Vercel | Current deployment target | Hosts the standalone Astro Ministry application at `ministry.mylatinmass.com`, including its API routes, static assets, PWA manifest, and Ministry-only service worker. The project is connected to `mylatinmass/ministry-app`; pushes to `main` create production deployments. A Netlify scheduled function triggers the private Vercel deploy hook daily at 04:50 UTC, ten minutes before the public site's 05:00 UTC rebuild. | Chapel-owned `ministry-app` Vercel project; production branch `main`; root directory `app`; subdomain DNS; environment variables; monitoring; rollback ownership; private `VERCEL_DEPLOY_HOOK_URL` stored only in Netlify environment variables. |
 | 1962ordo.today | Current read-only reference | Supplies public liturgical reference data. The application normalizes and caches it; the source never receives ministry rosters, assignments, contact data, or private notes. | Outbound HTTPS; cache/refresh behavior in the Ordo service; source-failure monitoring and terms review remain required. |
-| MyLatinMass/public websites | Current link boundary; future data integration | The Netlify-hosted public website redirects its legacy `/ministry` URLs to the standalone Vercel app and may later consume an explicitly public, privacy-filtered calendar feed. Public sites must not receive volunteer names, staffing details, private notes, eligibility, family data, or private events. | `ministry.mylatinmass.com` link/redirect contract now; approved public API/feed contract, origin policy, cache policy, webmaster coordination, and publication-permission rules before data sharing. |
+| MyLatinMass/public websites | Current schedule input and link boundary | Each Ministry App build reads the same public Mass Schedule feed used by MyLatinMass and idempotently creates or refreshes Mass events in CockroachDB. Only rows whose descriptions contain Mass are imported; Confession, Rosary, Holy Hour, Adoration, Benediction, and similar rows remain public schedule context and do not become Ministry App events. The public website still must not receive volunteer names, staffing details, private notes, eligibility, family data, or private events. | `MASS_SCHEDULE_URL`, location/time-zone settings, ministry slug mappings, `COCKROACHDB_CONNECTION_STRING`, and migration `20260806_04_add_mass_schedule_sync.sql`. |
 | Klaviyo | Future preferred communications platform | Intended provider for permission-based email and SMS, including assignment messages, reminders, schedule changes, cancellations, volunteer opportunities, and chapel subscriptions. CockroachDB remains the operational source of truth; Klaviyo receives only the minimum approved profile, consent, subscription, and event data needed for delivery. | Klaviyo account ownership; private API key/credential; list and segment design; event schema; consent and unsubscribe mapping; sender/domain authentication; webhook handling; retry, deduplication, delivery-status, retention, and deletion rules. |
 | SMTP/Nodemailer | Transitional, limited | Existing account invitation, one-time member sign-in, managed-profile review, and authenticated Support contact flows can send transactional email. Sign-in links are single-use, expire after 15 minutes, are unavailable to Owner/Super Admin accounts, and create restricted sessions that cannot change account or member access. The Support recipient list stays server-side and may contain the webmaster and other designated people; it falls back to `GMAIL_USER` until a dedicated list is configured. This is not the completed Ministry notification system and should be replaced or deliberately retained when Klaviyo is integrated. | `GMAIL_USER`, `GMAIL_PASS`, comma-separated `SUPPORT_RECIPIENTS`, `SITE_URL`, `MINISTRY_LOGIN_LINK_TTL_MINUTES`, delivery-safety controls, and an approved migration plan to Klaviyo. |
 | Browser push | Designed, not operationally accepted | The codebase contains a subscription and reminder-delivery foundation, but notifications are still considered Pending until production configuration, scheduling, consent, delivery testing, and stakeholder acceptance are complete. | VAPID keys, `VAPID_SUBJECT`, scheduler identity, delivery monitoring, retry policy, and user-facing consent. |
@@ -82,6 +82,49 @@ configuration names only; secrets and production data must never be committed.
 - Adding a provider requires an updated `.env.example` with blank placeholders,
   documented setup steps, and secrets stored only in the approved hosting secret
   manager.
+
+## Automatic Mass Schedule base calendar
+
+`npm run build` runs the Mass Schedule synchronizer before Astro builds. When the
+database connection is available, the synchronizer reads `MASS_SCHEDULE_URL`,
+keeps only Mass rows, and stores them as published Ministry App events. The source
+date and local time form a stable import key, so another build refreshes the same
+event instead of creating a duplicate. If a source time changes and it is the only
+unmatched Mass of that type on the date, the importer remaps the existing event.
+
+The synchronizer creates and maintains two source-managed templates:
+
+- **Low Mass:** Sacristans — Sacristan; Altar Servers — Acolyte 1 and Acolyte 2;
+  Ushers — one required Usher.
+- **High Mass:** Sacristans — Sacristan; Altar Servers — Acolyte 1, Acolyte 2,
+  Master of Ceremonies, Thurifer, Boat Bearer, Cross Bearer, and Torchbearers
+  1–4; Ushers — one required Usher.
+
+Sacristan, server, and usher responsibilities therefore remain owned and visible
+through their respective ministries even though they belong to the same Mass
+event. Confession and Rosary entries are deliberately ignored; the following Mass
+is the event. Authorized users may continue to create any other chapel event
+manually.
+
+Imported source values refresh only fields that still equal the last imported
+value. If an administrator has changed an event title, time, or location, a later
+build preserves that local override while retaining the newest source value for
+comparison. Existing assignments are never deleted automatically. A source change
+from Low to High Mass (or the reverse) replaces the generated responsibilities
+only when none of those responsibilities has active assignments; otherwise the
+change is reported for manual review.
+
+Apply migrations before enabling the production build sync:
+
+```sh
+npm run migrate
+npm run sync:mass-schedule
+```
+
+Builds continue with the last successfully imported schedule when the public feed
+is temporarily unavailable. Set `MASS_SCHEDULE_SYNC_REQUIRED=true` only if a
+deployment should fail instead. Running `npm run sync:mass-schedule` manually is
+always strict and returns an error when the feed or database is unavailable.
 
 ## Ministry authentication and audit controls
 
@@ -124,6 +167,15 @@ configuration names only; secrets and production data must never be committed.
 - Approved members receive a named internal ministry calendar. Current and
   upcoming schedules can be printed or exported as CSV without exposing the
   private calendar publicly.
+- Signed-in profiles can open every published event and see its general details.
+  Standalone public volunteer assignments, including the name covering each
+  assignment, are visible to every signed-in profile. Ministry-specific
+  assignments and assignee names are visible only when the active profile
+  belongs to that responsibility's ministry. Contact details, consent choices,
+  conflict indicators, and management controls remain visible only to an
+  authorized manager. An Owner or Super Admin can see every ministry assignment
+  only while their own global profile is active; switching to a managed child
+  profile applies the child's memberships instead.
 - Leaders receive a pre-publication review of required-position shortages,
   overlapping assignments, available backup candidates, event-only overrides,
   and pending change requests.
@@ -147,17 +199,30 @@ configuration names only; secrets and production data must never be committed.
   distribution. The public page exposes only the event description, time,
   location, available assignments, and remaining openings.
 - A standalone volunteer event does not require a coordinating ministry or an
-  event template. An authorized leader creates the event together with at least
-  one assignment, chooses its public URL, and opens signup. These records still
+  event template. Every event that accepts public volunteers includes a public
+  `General Volunteer` assignment for people whose exact task will be given by
+  email or during the event. Its capacity defaults to unlimited, while the event
+  creator may set a custom limit from 1 to 10,000 spots. Additional specific
+  assignments are optional. An authorized leader chooses the public URL and
+  opens signup. These records still
   live exclusively in the Ministry App's `events`, `event_responsibilities`, and
   `responsibility_assignments` tables; they do not use the public website's
   captain-signup tables or Netlify functions.
 - A public volunteer supplies a name, email address, and telephone number for one
-  event assignment. The resulting `responsibility_assignments` record uses
-  `signup_source = 'public_link'`, never creates a user or Ministry membership,
-  and prevents the same email from claiming the same assignment twice. Optional
-  email and SMS choices are stored with separate consent timestamps; collecting
-  consent does not mean notification delivery is operational.
+  event assignment. The signup creates or connects a normal user profile and the
+  assignment uses `signup_source = 'public_link'`; it never creates a Ministry
+  membership. A new volunteer receives a one-time password-only account
+  invitation because their contact details were already collected. Their profile
+  can manage reminder timing and assignments even when it has zero ministries.
+  The same email cannot claim the same assignment twice. Optional email and SMS
+  choices are stored with separate consent timestamps; collecting consent does
+  not mean notification delivery is operational.
+- Each user also has a separate randomized `public_profile_id`. An addressed
+  volunteer-event email may append `?profile=<public_profile_id>` to its public
+  event URL so the contact form is prefilled. The volunteer page is no-index,
+  no-referrer, and no-store; this identifier is not an authentication credential
+  and cannot authorize account changes. Every public form also offers the normal
+  password or one-time-email-link sign-in path.
 
 ## Privacy and repository rules
 

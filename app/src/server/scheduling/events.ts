@@ -289,6 +289,46 @@ const loadTemplateStructure = async (
   return { template, blocks, responsibilities }
 }
 
+const ensureDefaultGeneralVolunteer = async (
+  client: PoolClient,
+  eventId: string,
+) => {
+  const existing = await client.query(
+    `
+      UPDATE event_responsibilities
+      SET is_public_assignment = true,
+          unlimited_capacity = CASE
+            WHEN is_public_assignment THEN unlimited_capacity
+            ELSE true
+          END,
+          status = CASE WHEN is_public_assignment THEN status ELSE 'open' END,
+          updated_at = now()
+      WHERE event_id = $1
+        AND lower(btrim(name)) = 'general volunteer'
+        AND status <> 'cancelled'
+      RETURNING id
+    `,
+    [eventId],
+  )
+  if (existing.rowCount) return
+  await client.query(
+    `
+      INSERT INTO event_responsibilities (
+        event_id, ministry_id, name, description, responsibility_type,
+        quantity_needed, approval_required, is_required,
+        relative_start_minutes, sort_order, status,
+        is_public_assignment, unlimited_capacity
+      )
+      VALUES (
+        $1, NULL, 'General Volunteer',
+        'Sign up to help. Your specific task will be assigned by email or during the event.',
+        'task', 1, false, true, 0, -100, 'open', true, true
+      )
+    `,
+    [eventId],
+  )
+}
+
 const createEventFromStructure = async (
   client: PoolClient,
   context: any,
@@ -306,6 +346,9 @@ const createEventFromStructure = async (
     sourceEventId = null,
   }: any,
 ) => {
+  const resolvedParticipationType = PARTICIPATION_TYPES.has(participationType)
+    ? participationType
+    : structure.template.participation_type || "members"
   const eventResult = await client.query(
     `
       INSERT INTO events (
@@ -340,9 +383,7 @@ const createEventFromStructure = async (
       location || null,
       start,
       end,
-      PARTICIPATION_TYPES.has(participationType)
-        ? participationType
-        : structure.template.participation_type || "members",
+      resolvedParticipationType,
       status,
       sourceEventId,
       recurrenceGroupId,
@@ -418,6 +459,10 @@ const createEventFromStructure = async (
     )
   }
 
+  if (["volunteers", "both"].includes(resolvedParticipationType)) {
+    await ensureDefaultGeneralVolunteer(client, eventId)
+  }
+
   await writeSchedulingAudit(client, context, {
     action: "event.created",
     entityType: "event",
@@ -455,7 +500,7 @@ const loadEventList = async (
       SELECT DISTINCT
         event.id,
         event.ministry_id AS coordinator_ministry_id,
-        coordinator.name AS coordinator_ministry_name,
+        COALESCE(coordinator.name, 'Volunteer Event') AS coordinator_ministry_name,
         event.template_id,
         template.name AS template_name,
         event.template_version,
@@ -479,7 +524,7 @@ const loadEventList = async (
             AND responsibility.status <> 'cancelled'
         ) AS responsibility_count
       FROM events event
-      JOIN ministries coordinator ON coordinator.id = event.ministry_id
+      LEFT JOIN ministries coordinator ON coordinator.id = event.ministry_id
       LEFT JOIN templates template ON template.id = event.template_id
       LEFT JOIN event_ministries event_ministry
         ON event_ministry.event_id = event.id
@@ -513,10 +558,10 @@ const loadEventDetails = async (
     `
       SELECT
         event.*,
-        coordinator.name AS coordinator_ministry_name,
+        COALESCE(coordinator.name, 'Volunteer Event') AS coordinator_ministry_name,
         template.name AS template_name
       FROM events event
-      JOIN ministries coordinator ON coordinator.id = event.ministry_id
+      LEFT JOIN ministries coordinator ON coordinator.id = event.ministry_id
       LEFT JOIN templates template ON template.id = event.template_id
       WHERE event.id = $1
       LIMIT 1
@@ -548,11 +593,17 @@ const loadEventDetails = async (
       getMinistryAccess(client, context.user, participant.ministry_id),
     ),
   )
-  const canViewAny = accessChecks.some((access) => access.canView)
+  const coordinatorAccess = event.ministry_id
+    ? await getMinistryAccess(client, context.user, event.ministry_id)
+    : { canView: false, canManage: false }
+  const isPublicEvent = event.ministry_id === null
+  const canViewAny =
+    coordinatorAccess.canView || accessChecks.some((access) => access.canView)
   const canManageAny = accessChecks.some((access) => access.canManage)
-  const canManageEvent = (
-    await getMinistryAccess(client, context.user, event.ministry_id)
-  ).canManage
+  const canManageEvent = isPublicEvent
+    ? ["owner", "super_admin"].includes(context.user.global_role) ||
+      event.created_by === context.user.id
+    : coordinatorAccess.canManage
   const publicView = !canViewAny && !canManageEvent
   if (
     publicView &&
@@ -583,6 +634,8 @@ const loadEventDetails = async (
         responsibility.description,
         responsibility.responsibility_type,
         responsibility.quantity_needed,
+        responsibility.is_public_assignment,
+        responsibility.unlimited_capacity,
         responsibility.approval_required,
         responsibility.is_required,
         responsibility.required_ministry_level_id,
@@ -611,21 +664,46 @@ const loadEventDetails = async (
     `,
     [eventId],
   )
-  const manageableMinistryIds = publicView
-    ? []
-    : participantResult.rows
+  const responsibilityMinistryIds = Array.from(new Set(
+    responsibilityResult.rows
+      .map((responsibility) =>
+        responsibility.is_public_assignment
+          ? null
+          : responsibility.ministry_id || event.ministry_id,
+      )
+      .filter(Boolean),
+  ))
+  const responsibilityAccessChecks = await Promise.all(
+    responsibilityMinistryIds.map((ministryId) =>
+      getMinistryAccess(client, context.user, ministryId),
+    ),
+  )
+  const responsibilityAccessByMinistry = new Map(
+    responsibilityMinistryIds.map((ministryId, index) => [
+      ministryId,
+      responsibilityAccessChecks[index],
+    ]),
+  )
+  const visibleResponsibilities = responsibilityResult.rows.filter(
+    (responsibility) => {
+      const ministryId = responsibility.is_public_assignment
+        ? null
+        : responsibility.ministry_id || event.ministry_id
+      return !ministryId || responsibilityAccessByMinistry.get(ministryId)?.canView
+    },
+  )
+  const manageableMinistryIds = participantResult.rows
         .filter((_, index) => accessChecks[index].canManage)
         .map((participant) => participant.ministry_id)
   if (
     canManageEvent &&
+    event.ministry_id &&
     !manageableMinistryIds.includes(event.ministry_id)
   ) {
     manageableMinistryIds.push(event.ministry_id)
   }
 
-  const assignmentResult = publicView
-    ? { rows: [] }
-    : await client.query(
+  const assignmentResult = await client.query(
         `
           SELECT
             assignment.id,
@@ -640,6 +718,7 @@ const loadEventDetails = async (
             assignment.volunteer_name,
             assignment.volunteer_email,
             assignment.volunteer_phone,
+            assignment.signup_source,
             assignment.notify_email,
             assignment.notify_sms,
             assignment.created_at,
@@ -655,7 +734,8 @@ const loadEventDetails = async (
                 AND other_event.end_time > $2
             ) AS conflict_count,
             COALESCE(member.first_name, assignment.volunteer_name) AS first_name,
-            member.last_name
+            member.last_name,
+            COALESCE(member.is_volunteer_profile, false) AS is_volunteer_profile
           FROM responsibility_assignments assignment
           LEFT JOIN users member ON member.id = assignment.user_id
           WHERE assignment.event_id = $1
@@ -747,26 +827,55 @@ const loadEventDetails = async (
     : { rows: [] }
 
   const assignmentsByResponsibility = new Map<string, any[]>()
+  const responsibilityById = new Map(
+    responsibilityResult.rows.map((responsibility) => [
+      responsibility.id,
+      responsibility,
+    ]),
+  )
   for (const assignment of assignmentResult.rows) {
+    const responsibility = responsibilityById.get(
+      assignment.responsibility_id,
+    )
+    const responsibilityMinistryId =
+      responsibility?.is_public_assignment
+        ? null
+        : responsibility?.ministry_id || event.ministry_id
+    const canSeePrivateAssignmentDetails = responsibilityMinistryId
+      ? Boolean(
+          responsibilityAccessByMinistry.get(responsibilityMinistryId)
+            ?.canManage,
+        )
+      : canManageEvent
     const assignments =
       assignmentsByResponsibility.get(assignment.responsibility_id) || []
     assignments.push({
       id: assignment.id,
       userId: assignment.user_id,
-      isVolunteer: !assignment.user_id,
+      isVolunteer:
+        assignment.signup_source === "public_link" ||
+        Boolean(assignment.is_volunteer_profile),
       firstName: assignment.first_name,
       lastName: assignment.last_name || "",
-      volunteerEmail: assignment.volunteer_email || "",
-      volunteerPhone: assignment.volunteer_phone || "",
-      notifyEmail: Boolean(assignment.notify_email),
-      notifySms: Boolean(assignment.notify_sms),
+      volunteerEmail: canSeePrivateAssignmentDetails
+        ? assignment.volunteer_email || ""
+        : "",
+      volunteerPhone: canSeePrivateAssignmentDetails
+        ? assignment.volunteer_phone || ""
+        : "",
+      notifyEmail:
+        canSeePrivateAssignmentDetails && Boolean(assignment.notify_email),
+      notifySms:
+        canSeePrivateAssignmentDetails && Boolean(assignment.notify_sms),
       status: assignment.status,
       quantity: Number(assignment.quantity),
       confirmedAt: assignment.confirmed_at,
       serviceOutcome: assignment.service_outcome || "",
       outcomeRecordedAt: assignment.outcome_recorded_at,
       outcomeNote: assignment.outcome_note || "",
-      conflictCount: Number(assignment.conflict_count),
+      conflictCount: canSeePrivateAssignmentDetails
+        ? Number(assignment.conflict_count)
+        : 0,
       createdAt: assignment.created_at,
     })
     assignmentsByResponsibility.set(
@@ -879,12 +988,14 @@ const loadEventDetails = async (
       ministryName: participant.ministry_name,
       isRequired: participant.is_required,
       scheduleStatus: participant.schedule_status,
-      instructions: publicView ? "" : participant.instructions || "",
+      instructions: accessChecks[index].canView
+        ? participant.instructions || ""
+        : "",
       reviewedAt: participant.reviewed_at,
       publishedAt: participant.published_at,
       canManage: accessChecks[index].canManage,
     })),
-    responsibilities: responsibilityResult.rows.map((responsibility) => ({
+    responsibilities: visibleResponsibilities.map((responsibility) => ({
       id: responsibility.id,
       ministryId: responsibility.ministry_id,
       templateResponsibilityId: responsibility.template_responsibility_id,
@@ -893,6 +1004,8 @@ const loadEventDetails = async (
       description: responsibility.description || "",
       responsibilityType: responsibility.responsibility_type,
       quantityNeeded: Number(responsibility.quantity_needed),
+      isPublicAssignment: Boolean(responsibility.is_public_assignment),
+      unlimitedCapacity: Boolean(responsibility.unlimited_capacity),
       assignedQuantity: Number(responsibility.assigned_quantity),
       approvalRequired: responsibility.approval_required,
       isRequired: responsibility.is_required,
@@ -903,7 +1016,7 @@ const loadEventDetails = async (
         Number(responsibility.required_level_rank) || null,
       requiredQualification: responsibility.required_qualification || "",
       relativeStartMinutes: Number(responsibility.relative_start_minutes),
-      instructions: publicView ? "" : responsibility.instructions || "",
+      instructions: responsibility.instructions || "",
       status: responsibility.status,
       sortOrder: Number(responsibility.sort_order),
       assignments:
@@ -920,6 +1033,8 @@ const loadEventDetails = async (
     })),
     canManageEvent: publicView ? false : canManageEvent,
     isPublicView: publicView,
+    assignmentVisibilityRestricted:
+      visibleResponsibilities.length < responsibilityResult.rows.length,
   }
 }
 
@@ -1048,6 +1163,7 @@ const recordAssignmentStatus = async (
     `
       UPDATE event_responsibilities responsibility
       SET status = CASE
+            WHEN responsibility.unlimited_capacity THEN 'open'
             WHEN (
               SELECT COALESCE(sum(quantity), 0)
               FROM responsibility_assignments assignment
@@ -1147,6 +1263,25 @@ const configureVolunteerSignup = async (
   }
   const code = normalizeSignupCode(body.signupCode)
   const signupOpen = body.signupOpen === true
+  const generalVolunteerUnlimited = body.generalVolunteerUnlimited !== false
+  const parsedGeneralVolunteerLimit = Number.parseInt(
+    body.generalVolunteerLimit,
+    10,
+  )
+  if (
+    !generalVolunteerUnlimited &&
+    (!Number.isInteger(parsedGeneralVolunteerLimit) ||
+      parsedGeneralVolunteerLimit < 1 ||
+      parsedGeneralVolunteerLimit > 10000)
+  ) {
+    throw Object.assign(
+      new Error("General Volunteer spots must be between 1 and 10,000"),
+      { status: 400 },
+    )
+  }
+  const generalVolunteerLimit = generalVolunteerUnlimited
+    ? 1
+    : parsedGeneralVolunteerLimit
   if (
     code.length < 4 ||
     !SIGNUP_CODE_PATTERN.test(code) ||
@@ -1161,6 +1296,63 @@ const configureVolunteerSignup = async (
     throw Object.assign(new Error("Publish the event before opening volunteer signups"), {
       status: 409,
     })
+  }
+  const existingGeneralVolunteer = await client.query(
+    `
+      SELECT id
+      FROM event_responsibilities
+      WHERE event_id = $1
+        AND lower(btrim(name)) = 'general volunteer'
+        AND status <> 'cancelled'
+      ORDER BY created_at
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [event.id],
+  )
+  if (existingGeneralVolunteer.rowCount) {
+    await client.query(
+      `
+        UPDATE event_responsibilities responsibility
+        SET quantity_needed = $2,
+            unlimited_capacity = $3,
+            is_public_assignment = true,
+            status = CASE
+              WHEN $3 THEN 'open'
+              WHEN (
+                SELECT COALESCE(sum(quantity), 0)
+                FROM responsibility_assignments assignment
+                WHERE assignment.responsibility_id = responsibility.id
+                  AND assignment.status NOT IN ('declined', 'cancelled')
+              ) >= $2 THEN 'filled'
+              ELSE 'open'
+            END,
+            updated_at = now()
+        WHERE id = $1
+      `,
+      [
+        existingGeneralVolunteer.rows[0].id,
+        generalVolunteerLimit,
+        generalVolunteerUnlimited,
+      ],
+    )
+  } else {
+    await client.query(
+      `
+        INSERT INTO event_responsibilities (
+          event_id, ministry_id, name, description, responsibility_type,
+          quantity_needed, approval_required, is_required,
+          relative_start_minutes, sort_order, status,
+          is_public_assignment, unlimited_capacity
+        )
+        VALUES (
+          $1, NULL, 'General Volunteer',
+          'Sign up to help. Your specific task will be assigned by email or during the event.',
+          'task', $2, false, true, 0, -100, 'open', true, $3
+        )
+      `,
+      [event.id, generalVolunteerLimit, generalVolunteerUnlimited],
+    )
   }
   try {
     await client.query(
@@ -1191,7 +1383,14 @@ const configureVolunteerSignup = async (
       signupCode: event.signup_code,
       signupOpen: event.signup_open,
     },
-    afterData: { signupCode: code, signupOpen },
+    afterData: {
+      signupCode: code,
+      signupOpen,
+      generalVolunteerUnlimited,
+      generalVolunteerLimit: generalVolunteerUnlimited
+        ? null
+        : generalVolunteerLimit,
+    },
   })
   return signupOpen ? "Volunteer signup link is open" : "Volunteer signup link saved and closed"
 }
@@ -1626,6 +1825,7 @@ const assignMemberToResponsibility = async (
     `
       UPDATE event_responsibilities responsibility
       SET status = CASE
+            WHEN responsibility.unlimited_capacity THEN 'open'
             WHEN (
               SELECT COALESCE(sum(quantity), 0)
               FROM responsibility_assignments assignment
@@ -2181,6 +2381,9 @@ const updateEvent = async (
         structure.template.participation_type,
       ],
     )
+    if (["volunteers", "both"].includes(structure.template.participation_type)) {
+      await ensureDefaultGeneralVolunteer(client, eventId)
+    }
     await writeSchedulingAudit(client, context, {
       action: "event.template_replaced",
       entityType: "event",
@@ -2360,6 +2563,9 @@ const updateEvent = async (
       participationType,
     ],
   )
+  if (["volunteers", "both"].includes(participationType)) {
+    await ensureDefaultGeneralVolunteer(client, eventId)
+  }
   await writeSchedulingAudit(client, context, {
     action: "event.updated",
     entityType: "event",

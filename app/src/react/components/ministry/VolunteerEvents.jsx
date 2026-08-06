@@ -21,7 +21,9 @@ const initialForm = () => ({
   startTime: "",
   endTime: "",
   signupCode: "",
-  assignments: [emptyAssignment()],
+  generalVolunteerUnlimited: true,
+  generalVolunteerLimit: 10,
+  assignments: [],
 })
 
 const headers = () => ({
@@ -172,17 +174,29 @@ const VolunteerEvents = ({ creating = false, onBack }) => {
         </div>
 
         <fieldset className="space-y-4 rounded-2xl border border-[#e8ddd3] bg-[#fbf8f4] p-4 sm:p-5">
-          <legend className="px-2 text-lg font-semibold text-[#6f4f34]">Volunteer assignments</legend>
+          <legend className="px-2 text-lg font-semibold text-[#6f4f34]">General Volunteer</legend>
+          <p className="text-sm text-gray-600">This assignment is always available. The volunteer’s specific task can be assigned by email or during the event.</p>
+          <div className="flex flex-wrap gap-4">
+            <label className="flex items-center gap-2 text-sm font-semibold text-gray-700"><input type="radio" name="generalVolunteerCapacity" checked={form.generalVolunteerUnlimited} onChange={() => setForm((current) => ({ ...current, generalVolunteerUnlimited: true }))} className="size-4 accent-[#896542]" />Unlimited spots</label>
+            <label className="flex items-center gap-2 text-sm font-semibold text-gray-700"><input type="radio" name="generalVolunteerCapacity" checked={!form.generalVolunteerUnlimited} onChange={() => setForm((current) => ({ ...current, generalVolunteerUnlimited: false }))} className="size-4 accent-[#896542]" />Limit the number of spots</label>
+          </div>
+          {!form.generalVolunteerUnlimited && (
+            <label className="block max-w-48 text-sm font-semibold text-gray-700">Number of spots<input required type="number" min="1" max="10000" value={form.generalVolunteerLimit} onChange={(event) => setForm((current) => ({ ...current, generalVolunteerLimit: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 font-normal" /></label>
+          )}
+        </fieldset>
+
+        <fieldset className="space-y-4 rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
+          <legend className="px-2 text-lg font-semibold text-gray-800">Specific assignments <span className="text-sm font-normal text-gray-400">(optional)</span></legend>
           {form.assignments.map((assignment, index) => (
             <div key={index} className="grid gap-3 rounded-xl border border-gray-200 bg-white p-4 sm:grid-cols-[1fr_8rem_auto]">
               <label className="text-sm font-semibold text-gray-700">Assignment name<input required maxLength={250} placeholder="Setup tables" value={assignment.name} onChange={(event) => updateAssignment(index, "name", event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-gray-200 px-3 font-normal" /></label>
               <label className="text-sm font-semibold text-gray-700">Openings<input required type="number" min="1" max="100" value={assignment.quantityNeeded} onChange={(event) => updateAssignment(index, "quantityNeeded", event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-gray-200 px-3 font-normal" /></label>
-              <button type="button" aria-label={`Remove assignment ${index + 1}`} disabled={form.assignments.length === 1} onClick={() => setForm((current) => ({ ...current, assignments: current.assignments.filter((_, assignmentIndex) => assignmentIndex !== index) }))} className="self-end rounded-xl border border-gray-200 p-2.5 text-gray-500 disabled:opacity-30"><TrashIcon className="size-5" /></button>
+              <button type="button" aria-label={`Remove assignment ${index + 1}`} onClick={() => setForm((current) => ({ ...current, assignments: current.assignments.filter((_, assignmentIndex) => assignmentIndex !== index) }))} className="self-end rounded-xl border border-gray-200 p-2.5 text-gray-500"><TrashIcon className="size-5" /></button>
               <label className="text-sm font-semibold text-gray-700 sm:col-span-2">What the volunteer will do <span className="font-normal text-gray-400">(optional)</span><input maxLength={1000} value={assignment.description} onChange={(event) => updateAssignment(index, "description", event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-gray-200 px-3 font-normal" /></label>
               <label className="flex items-center gap-2 self-end text-sm text-gray-600 sm:col-span-1"><input type="checkbox" checked={assignment.approvalRequired} onChange={(event) => updateAssignment(index, "approvalRequired", event.target.checked)} className="size-4 accent-[#896542]" />Require approval</label>
             </div>
           ))}
-          <button type="button" onClick={() => setForm((current) => ({ ...current, assignments: [...current.assignments, emptyAssignment()] }))} className="inline-flex items-center gap-2 rounded-xl border border-[#d8c7b8] bg-white px-4 py-2 text-sm font-semibold text-[#6f4f34]"><PlusIcon className="size-4" />Add another assignment</button>
+          <button type="button" onClick={() => setForm((current) => ({ ...current, assignments: [...current.assignments, emptyAssignment()] }))} className="inline-flex items-center gap-2 rounded-xl border border-[#d8c7b8] bg-white px-4 py-2 text-sm font-semibold text-[#6f4f34]"><PlusIcon className="size-4" />Add a specific assignment</button>
         </fieldset>
 
         {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
@@ -207,7 +221,7 @@ const VolunteerEvents = ({ creating = false, onBack }) => {
             <article key={event.id} className="flex flex-wrap items-center gap-4 py-4">
               <div className="min-w-64 flex-1">
                 <p className="font-semibold text-gray-900">{event.title}</p>
-                <p className="mt-1 text-sm text-gray-500">{formatDate(event.start_time)} · {event.assignment_count} {event.assignment_count === 1 ? "assignment" : "assignments"} · {event.filled_count}/{event.opening_count} filled</p>
+                <p className="mt-1 text-sm text-gray-500">{formatDate(event.start_time)} · {event.assignment_count} {event.assignment_count === 1 ? "assignment" : "assignments"} · {event.has_unlimited_capacity ? `${event.filled_count} signed up · Unlimited General Volunteer spots` : `${event.filled_count}/${event.opening_count} filled`}</p>
                 <p className="mt-1 text-xs text-[#896542]">/volunteer/{event.signup_code}</p>
               </div>
               <button type="button" onClick={() => copyLink(event.signup_code)} className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-600"><ClipboardDocumentIcon className="size-4" />Copy link</button>

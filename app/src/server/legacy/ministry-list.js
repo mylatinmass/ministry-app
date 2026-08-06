@@ -139,7 +139,7 @@ const handler = async (event) => {
           SELECT
             e.id,
             e.ministry_id AS coordinator_ministry_id,
-            coordinator.name AS coordinator_ministry_name,
+            COALESCE(coordinator.name, 'Volunteer Event') AS coordinator_ministry_name,
             e.title,
             e.description,
             e.location,
@@ -154,7 +154,7 @@ const handler = async (event) => {
                 AND er.status <> 'cancelled'
             ) AS responsibility_count
           FROM events e
-          JOIN ministries coordinator ON coordinator.id = e.ministry_id
+          LEFT JOIN ministries coordinator ON coordinator.id = e.ministry_id
           WHERE e.status IN ('published', 'cancelled', 'completed')
           ORDER BY e.start_time
         `

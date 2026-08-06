@@ -33,6 +33,7 @@ const loadLegacyHandlers = async (): Promise<Record<string, LegacyHandler>> => {
       "ministry-profile": freshHandler("./legacy/ministry-profile.js"),
       "ministry-profiles": freshHandler("./legacy/ministry-profiles.js"),
       "ministry-session": freshHandler("./legacy/ministry-session.js"),
+      "volunteer-account-invitation": freshHandler("./legacy/volunteer-account-invitation.js"),
     }
   }
 
@@ -51,6 +52,7 @@ const loadLegacyHandlers = async (): Promise<Record<string, LegacyHandler>> => {
     ministryProfile,
     ministryProfiles,
     ministrySession,
+    volunteerAccountInvitation,
   ] = await Promise.all([
     import("./legacy/ministry-access-request.js"),
     import("./legacy/ministry-global-members.js"),
@@ -66,6 +68,7 @@ const loadLegacyHandlers = async (): Promise<Record<string, LegacyHandler>> => {
     import("./legacy/ministry-profile.js"),
     import("./legacy/ministry-profiles.js"),
     import("./legacy/ministry-session.js"),
+    import("./legacy/volunteer-account-invitation.js"),
   ])
 
   return {
@@ -85,6 +88,7 @@ const loadLegacyHandlers = async (): Promise<Record<string, LegacyHandler>> => {
     "ministry-profile": unwrap(ministryProfile).handler,
     "ministry-profiles": unwrap(ministryProfiles).handler,
     "ministry-session": unwrap(ministrySession).handler,
+    "volunteer-account-invitation": unwrap(volunteerAccountInvitation).handler,
   }
 }
 

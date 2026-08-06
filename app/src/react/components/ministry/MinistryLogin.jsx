@@ -70,11 +70,11 @@ const MinistryLogin = ({ onLoginSuccess, passwordOnly = false }) => {
           Ministries Login
         </h1>
         <p className="text-center text-sm text-gray-500">
-          Enter your ministry username and password.
+          Enter your username or email and password.
         </p>
         <form onSubmit={handleSubmit} className="flex w-full flex-col gap-4">
         <label className="w-full">
-          <span className="mb-1 block text-sm text-gray-600">Username</span>
+          <span className="mb-1 block text-sm text-gray-600">Username or email</span>
           <input
             type="text"
             autoComplete="username"
@@ -110,7 +110,7 @@ const MinistryLogin = ({ onLoginSuccess, passwordOnly = false }) => {
             </div>
             <form onSubmit={handleLinkRequest} className="flex w-full flex-col gap-4">
               <p className="text-center text-sm text-gray-500">
-                Active members may receive a private, one-time sign-in link. Super Admin and Owner accounts must use a password.
+                Members and registered volunteers may receive a private, one-time sign-in link. Super Admin and Owner accounts must use a password.
               </p>
               <label className="w-full">
                 <span className="mb-1 block text-sm text-gray-600">Email</span>

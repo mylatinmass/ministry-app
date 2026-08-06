@@ -7,7 +7,8 @@ const normalizeUsername = (username = "") =>
 
 const hasMinistryAccess = (user) =>
   ["owner", "super_admin"].includes(user.global_role) ||
-  Boolean(user.has_active_membership)
+  Boolean(user.has_active_membership) ||
+  Boolean(user.is_volunteer_profile)
 
 const getMinistryUserById = async (client, userId) => {
   const result = await client.query(
@@ -20,6 +21,7 @@ const getMinistryUserById = async (client, userId) => {
         u.username,
         u.global_role,
         u.status,
+        u.is_volunteer_profile,
         EXISTS (
           SELECT 1
           FROM ministry_members mm
@@ -49,6 +51,7 @@ const getMinistryUserByUsername = async (client, username) => {
         u.password_hash,
         u.global_role,
         u.status,
+        u.is_volunteer_profile,
         EXISTS (
           SELECT 1
           FROM ministry_members mm
@@ -58,7 +61,8 @@ const getMinistryUserByUsername = async (client, username) => {
             AND m.status = 'active'
         ) AS has_active_membership
       FROM users u
-      WHERE lower(u.username) = $1
+      WHERE lower(u.username) = $1 OR lower(btrim(u.email)) = $1
+      ORDER BY CASE WHEN lower(u.username) = $1 THEN 0 ELSE 1 END, u.created_at
       LIMIT 1
     `,
     [normalizeUsername(username)]

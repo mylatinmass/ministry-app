@@ -8,10 +8,14 @@
   },
   "scripts": {
     "dev": "node --env-file-if-exists=.env.local ./node_modules/astro/bin/astro.mjs dev",
+    "prebuild": "node --env-file-if-exists=.env.local scripts/sync-mass-schedule.mjs --build",
     "build": "astro build",
     "check": "astro check",
     "snapshot": "node scripts/snapshot-data.mjs",
-    "migrate": "node scripts/migrate.mjs",
+    "migrate": "node --env-file-if-exists=.env.local scripts/migrate.mjs",
+    "sync:mass-schedule": "node --env-file-if-exists=.env.local scripts/sync-mass-schedule.mjs --required",
+    "check:mass-schedule-sync": "node --env-file-if-exists=.env.local scripts/check-mass-schedule-sync.mjs",
+    "test:mass-schedule": "node scripts/test-mass-schedule.mjs",
     "verify": "node scripts/verify.mjs",
     "smoke:new-features": "node --env-file-if-exists=.env.local scripts/smoke-new-features.mjs"
   },

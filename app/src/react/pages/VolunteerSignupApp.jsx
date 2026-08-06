@@ -1,6 +1,7 @@
 import * as React from "react"
 import Layout from "../components/Layout"
 import Seo from "../components/Seo"
+import { Link } from "../compat/gatsby"
 import getFunctionEndpoint from "../utils/getFunctionEndpoint"
 
 const initialForm = {
@@ -30,6 +31,7 @@ const VolunteerSignupApp = ({ code }) => {
   const [form, setForm] = React.useState(initialForm)
   const [status, setStatus] = React.useState("loading")
   const [feedback, setFeedback] = React.useState("")
+  const [accountResult, setAccountResult] = React.useState(null)
 
   React.useEffect(() => {
     let active = true
@@ -37,11 +39,16 @@ const VolunteerSignupApp = ({ code }) => {
       try {
         const url = new URL(getFunctionEndpoint("volunteer-signup"), window.location.origin)
         url.searchParams.set("code", code)
+        const profile = new URLSearchParams(window.location.search).get("profile")
+        if (profile) url.searchParams.set("profile", profile)
         const response = await fetch(url)
         const result = await response.json()
         if (!response.ok) throw new Error(result.message || "Volunteer signup unavailable")
         if (!active) return
         setEvent(result)
+        if (result.prefill) {
+          setForm((current) => ({ ...current, ...result.prefill }))
+        }
         setStatus("ready")
       } catch (error) {
         if (!active) return
@@ -76,6 +83,7 @@ const VolunteerSignupApp = ({ code }) => {
       const result = await response.json()
       if (!response.ok) throw new Error(result.message || "Unable to sign up")
       setFeedback(result.message)
+      setAccountResult(result)
       setStatus("success")
     } catch (error) {
       setFeedback(error.message)
@@ -112,7 +120,13 @@ const VolunteerSignupApp = ({ code }) => {
               <div className="p-8 text-center sm:p-10">
                 <div className="rounded-xl border border-green-200 bg-green-50 p-5 text-green-800">
                   <p role="status" className="font-semibold">{feedback}</p>
-                  <p className="mt-2 text-sm">Keep this page for your records. Any future messages will follow the contact permissions you selected.</p>
+                  <p className="mt-2 text-sm">
+                    {accountResult?.accountInvitationSent
+                      ? "Check your email to add a password. Your profile will let you manage reminders without joining a ministry."
+                      : accountResult?.accountAlreadyActive
+                        ? "This assignment is connected to your existing profile, where you can manage reminders."
+                        : "Your volunteer profile was saved. Contact the event organizer if your account invitation does not arrive."}
+                  </p>
                 </div>
               </div>
             ) : event.responsibilities.length ? (
@@ -132,7 +146,7 @@ const VolunteerSignupApp = ({ code }) => {
                         >
                           <span className="block font-semibold text-gray-900">{responsibility.name}</span>
                           {responsibility.description && <span className="mt-1 block text-sm leading-relaxed text-gray-500">{responsibility.description}</span>}
-                          <span className="mt-3 block text-sm font-semibold text-[#896542]">{responsibility.availableSlots} {responsibility.availableSlots === 1 ? "opening" : "openings"}</span>
+                          <span className="mt-3 block text-sm font-semibold text-[#896542]">{responsibility.unlimitedCapacity ? "Unlimited openings" : `${responsibility.availableSlots} ${responsibility.availableSlots === 1 ? "opening" : "openings"}`}</span>
                         </button>
                       )
                     })}
@@ -141,6 +155,10 @@ const VolunteerSignupApp = ({ code }) => {
 
                 {selectedAssignment && (
                   <form onSubmit={submit} className="mt-8 space-y-5 border-t border-gray-100 pt-7">
+                    <div className="flex flex-col gap-2 rounded-xl border border-[#e6ddd4] bg-[#faf8f5] p-4 text-sm text-gray-600 sm:flex-row sm:items-center sm:justify-between">
+                      <span>Already have a volunteer or ministry account?</span>
+                      <Link to="/" className="font-semibold text-[#6f4f34] underline">Sign in with password or one-time link</Link>
+                    </div>
                     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[#fbf8f4] p-4">
                       <div><p className="text-xs font-semibold uppercase tracking-wider text-[#896542]">Your assignment</p><p className="mt-1 font-semibold text-gray-900">{selectedAssignment.name}</p></div>
                       <button type="button" onClick={() => setForm((current) => ({ ...current, responsibilityId: "" }))} className="text-sm font-semibold text-[#6f4f34] underline">Choose a different assignment</button>
@@ -156,7 +174,7 @@ const VolunteerSignupApp = ({ code }) => {
                   <label className="flex gap-3 text-sm text-gray-600"><input name="emailConsent" type="checkbox" checked={form.emailConsent} onChange={updateField} className="mt-0.5 size-4 accent-[#896542]" /><span>Email me information and changes about this volunteer assignment.</span></label>
                   <label className="mt-3 flex gap-3 text-sm text-gray-600"><input name="smsConsent" type="checkbox" checked={form.smsConsent} onChange={updateField} className="mt-0.5 size-4 accent-[#896542]" /><span>Text me information and changes about this volunteer assignment when SMS is available.</span></label>
                 </fieldset>
-                <label className="flex gap-3 text-sm text-gray-600"><input name="termsAccepted" type="checkbox" checked={form.termsAccepted} onChange={updateField} required className="mt-0.5 size-4 accent-[#896542]" /><span>I agree to submit my contact information for this event. This does not create a Ministry account or membership.</span></label>
+                <label className="flex gap-3 text-sm text-gray-600"><input name="termsAccepted" type="checkbox" checked={form.termsAccepted} onChange={updateField} required className="mt-0.5 size-4 accent-[#896542]" /><span>I agree to submit my contact information for this event and create or connect a volunteer profile. This does not add me to a ministry.</span></label>
                 <label className="absolute -left-[10000px]" aria-hidden="true">Website<input name="website" value={form.website} onChange={updateField} tabIndex={-1} autoComplete="off" /></label>
                 <button type="submit" disabled={status === "submitting"} className="w-full rounded-xl bg-[#896542] px-5 py-3 font-semibold text-white disabled:opacity-60">{status === "submitting" ? "Submitting..." : "Sign up to volunteer"}</button>
                 {status === "error-submit" && <p role="alert" className="text-center text-sm text-red-700">{feedback}</p>}

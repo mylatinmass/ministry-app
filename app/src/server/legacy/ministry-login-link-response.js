@@ -24,6 +24,7 @@ const handler = async (event) => {
     const result = await client.query(
       `SELECT link.id, link.expires_at, link.consumed_at, link.revoked_at,
               u.id AS user_id, u.first_name, u.last_name, u.username, u.global_role, u.status,
+              u.is_volunteer_profile,
               EXISTS (
                 SELECT 1 FROM ministry_members mm JOIN ministries m ON m.id = mm.ministry_id
                 WHERE mm.user_id = u.id AND mm.status = 'active' AND m.status = 'active'
@@ -37,7 +38,7 @@ const handler = async (event) => {
       await client.query("ROLLBACK")
       return jsonResponse(410, { message: "This sign-in link is invalid, expired, or already used" })
     }
-    const user = { id: row.user_id, first_name: row.first_name, last_name: row.last_name, username: row.username, global_role: row.global_role, status: row.status, has_active_membership: row.has_active_membership }
+    const user = { id: row.user_id, first_name: row.first_name, last_name: row.last_name, username: row.username, global_role: row.global_role, status: row.status, has_active_membership: row.has_active_membership, is_volunteer_profile: row.is_volunteer_profile }
     if (user.status !== "active" || !hasMinistryAccess(user) || ["owner", "super_admin"].includes(user.global_role)) {
       await client.query("ROLLBACK")
       return jsonResponse(403, { message: "This account must sign in with a username and password" })

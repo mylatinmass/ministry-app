@@ -65,11 +65,7 @@ const parseDate = (value: unknown, field: string) => {
 }
 
 const normalizeAssignments = (value: unknown) => {
-  if (!Array.isArray(value)) {
-    throw Object.assign(new Error("Add at least one volunteer assignment"), {
-      status: 400,
-    })
-  }
+  if (!Array.isArray(value)) return []
   const assignments = value.map((item: any, index) => {
     const name = cleanText(item?.name, 250)
     const description = cleanText(item?.description, 1000) || null
@@ -98,12 +94,19 @@ const normalizeAssignments = (value: unknown) => {
       sortOrder: index,
     }
   })
-  if (!assignments.length) {
-    throw Object.assign(new Error("Add at least one volunteer assignment"), {
-      status: 400,
-    })
-  }
   return assignments
+}
+
+const normalizeGeneralVolunteerCapacity = (body: any) => {
+  const unlimited = body.generalVolunteerUnlimited !== false
+  const limit = Number.parseInt(body.generalVolunteerLimit, 10)
+  if (!unlimited && (!Number.isInteger(limit) || limit < 1 || limit > 10000)) {
+    throw Object.assign(
+      new Error("General Volunteer spots must be between 1 and 10,000"),
+      { status: 400 },
+    )
+  }
+  return { unlimited, limit: unlimited ? 1 : limit }
 }
 
 const assertCodeAvailable = async (
@@ -149,7 +152,11 @@ const loadEvents = async (client: PoolClient, context: any) => {
         event.status,
         event.created_by,
         count(DISTINCT responsibility.id)::INT AS assignment_count,
-        COALESCE(sum(responsibility.quantity_needed), 0)::INT AS opening_count,
+        COALESCE(sum(
+          CASE WHEN responsibility.unlimited_capacity THEN 0
+          ELSE responsibility.quantity_needed END
+        ), 0)::INT AS opening_count,
+        COALESCE(bool_or(responsibility.unlimited_capacity), false) AS has_unlimited_capacity,
         COALESCE(sum(coverage.filled), 0)::INT AS filled_count
       FROM events event
       LEFT JOIN event_responsibilities responsibility
@@ -190,6 +197,7 @@ const createEvent = async (
   const start = parseDate(body.startTime, "Start time")
   const end = parseDate(body.endTime, "End time")
   const assignments = normalizeAssignments(body.assignments)
+  const generalVolunteer = normalizeGeneralVolunteerCapacity(body)
   if (!title) {
     throw Object.assign(new Error("Event title is required"), { status: 400 })
   }
@@ -227,6 +235,23 @@ const createEvent = async (
   )
   const eventId = eventResult.rows[0].id
 
+  await client.query(
+    `
+      INSERT INTO event_responsibilities (
+        event_id, ministry_id, name, description, responsibility_type,
+        quantity_needed, approval_required, is_required,
+        relative_start_minutes, sort_order, status,
+        is_public_assignment, unlimited_capacity
+      )
+      VALUES (
+        $1, NULL, 'General Volunteer',
+        'Sign up to help. Your specific task will be assigned by email or during the event.',
+        'task', $2, false, true, 0, -100, 'open', true, $3
+      )
+    `,
+    [eventId, generalVolunteer.limit, generalVolunteer.unlimited],
+  )
+
   for (const assignment of assignments) {
     await client.query(
       `
@@ -241,9 +266,11 @@ const createEvent = async (
           is_required,
           relative_start_minutes,
           sort_order,
-          status
+          status,
+          is_public_assignment,
+          unlimited_capacity
         )
-        VALUES ($1, NULL, $2, $3, 'position', $4, $5, true, 0, $6, 'open')
+        VALUES ($1, NULL, $2, $3, 'position', $4, $5, true, 0, $6, 'open', true, false)
       `,
       [
         eventId,
@@ -265,7 +292,11 @@ const createEvent = async (
       startTime: start,
       endTime: end,
       signupCode: code,
-      assignmentCount: assignments.length,
+      assignmentCount: assignments.length + 1,
+      generalVolunteerUnlimited: generalVolunteer.unlimited,
+      generalVolunteerLimit: generalVolunteer.unlimited
+        ? null
+        : generalVolunteer.limit,
       standalone: true,
     },
   })

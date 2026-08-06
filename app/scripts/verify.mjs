@@ -104,6 +104,20 @@ const [
   read("src/server/legacy/ministry-invitation-response.js"),
 ])
 
+const [
+  massScheduleMigration,
+  massScheduleSync,
+  massScheduleLibrary,
+  packageJson,
+  environmentExample,
+] = await Promise.all([
+  read("migrations/20260806_04_add_mass_schedule_sync.sql"),
+  read("scripts/sync-mass-schedule.mjs"),
+  read("scripts/lib/mass-schedule-sync.mjs"),
+  read("package.json"),
+  read(".env.example"),
+])
+
 assert.match(astroConfig, /site:\s*"https:\/\/ministry\.mylatinmass\.com"/)
 assert.match(astroConfig, /base:\s*"\/"/)
 assert.match(astroConfig, /noExternal:\s*\[/)
@@ -130,6 +144,21 @@ assert.match(apiRoute, /scheduling\/templates/)
 assert.match(apiRoute, /scheduling\/events/)
 assert.match(apiRoute, /scheduling\/availability/)
 assert.match(apiRoute, /scheduling\/ordo/)
+
+assert.match(packageJson, /"prebuild":\s*"[^"]*sync-mass-schedule\.mjs --build"/)
+assert.match(packageJson, /"sync:mass-schedule"/)
+assert.match(massScheduleMigration, /schedule_source_key STRING NULL/)
+assert.match(massScheduleMigration, /events_schedule_source_key_key/)
+assert.match(massScheduleMigration, /system_managed BOOL NOT NULL DEFAULT false/)
+assert.match(massScheduleLibrary, /classifyMassDescription/)
+assert.match(massScheduleLibrary, /Confession and Rosary entries|Confessions \| Rosary|\\bmass\\b/)
+assert.match(massScheduleLibrary, /"Sacristan"/)
+assert.match(massScheduleLibrary, /"Master of Ceremonies"/)
+assert.match(massScheduleLibrary, /"Torchbearer 4"/)
+assert.match(massScheduleLibrary, /"Usher"/)
+assert.match(massScheduleSync, /MASS_SCHEDULE_SYNC_REQUIRED/)
+assert.match(environmentExample, /MASS_SCHEDULE_URL=/)
+assert.match(environmentExample, /MASS_SCHEDULE_USHERS_MINISTRY_SLUG=ushers/)
 
 assert.match(authHelper, /activeProfileUserId/)
 assert.match(authHelper, /authMethod: options\.authMethod \|\| "password"/)
@@ -323,7 +352,7 @@ assert.match(workspaceContent, /showOnlyMyEvents \? "All Events" : "My Events"/)
 assert.match(weekCalendar, /toDateKey\(event\.start_time\) === selectedKey/)
 assert.match(eventDetails, /translate-x-full/)
 assert.match(schedulingEvents, /isPublicView:\s*publicView/)
-assert.match(schedulingEvents, /instructions:\s*publicView \? ""/)
+assert.match(schedulingEvents, /instructions:\s*accessChecks\[index\]\.canView/)
 assert.match(ordoMigration, /CREATE TABLE IF NOT EXISTS ordo_days/)
 assert.match(ordoMigration, /CREATE TABLE IF NOT EXISTS event_ordo_selections/)
 assert.match(ordoMigration, /selected_mass_option_snapshot JSONB/)
@@ -392,7 +421,8 @@ assert.match(schedulingVolunteers, /'public_link'/)
 assert.match(schedulingVolunteers, /volunteer_name/)
 assert.match(schedulingVolunteers, /volunteer_phone/)
 assert.match(schedulingVolunteers, /signup_open = true/)
-assert.match(volunteerSignupPage, /This does not create a Ministry account or membership/)
+assert.match(volunteerSignupPage, /create or connect a volunteer profile/)
+assert.match(volunteerSignupPage, /This does not add me to a ministry/)
 assert.match(volunteerSignupPage, /emailConsent/)
 assert.match(volunteerSignupPage, /smsConsent/)
 assert.match(eventDetails, /Volunteer signup link/)
@@ -401,30 +431,81 @@ assert.match(homeWorkspace, /label:\s*"Events"/)
 assert.doesNotMatch(homeWorkspace, /label:\s*"My Events"/)
 assert.match(homeWorkspace, /Create event/)
 assert.match(homeWorkspace, /<MinistryEvents/)
-assert.match(homeWorkspace, /events=\{myEvents\}/)
+assert.match(homeWorkspace, /events=\{data\.calendarEvents\}/)
+assert.match(homeWorkspace, /Public events, ministry events visible to this profile/)
+assert.match(ministryList, /WHERE e\.status IN \('published', 'cancelled', 'completed'\)/)
+assert.doesNotMatch(ministryList, /membership\.user_id = \$1/)
+assert.match(schedulingEvents, /visibleResponsibilities/)
+assert.match(schedulingEvents, /responsibilityAccessByMinistry/)
+assert.match(schedulingEvents, /assignmentVisibilityRestricted/)
+assert.match(schedulingEvents, /const assignmentResult = await client\.query/)
+assert.match(schedulingEvents, /canSeePrivateAssignmentDetails/)
+assert.match(eventDetails, /assignment\.isVolunteer && canManage/)
 
 const [
   standaloneVolunteerMigration,
+  generalVolunteerMigration,
+  generalVolunteerBackfill,
   standaloneVolunteerEvents,
   volunteerEventsComponent,
 ] = await Promise.all([
   read("migrations/20260805_06_allow_standalone_volunteer_events.sql"),
+  read("migrations/20260806_02_add_general_volunteer_capacity.sql"),
+  read("migrations/20260806_03_backfill_general_volunteer.sql"),
   read("src/server/scheduling/volunteer-events.ts"),
   read("src/react/components/ministry/VolunteerEvents.jsx"),
 ])
 assert.match(standaloneVolunteerMigration, /ALTER COLUMN ministry_id DROP NOT NULL/)
+assert.match(generalVolunteerMigration, /is_public_assignment BOOL NOT NULL DEFAULT false/)
+assert.match(generalVolunteerMigration, /unlimited_capacity BOOL NOT NULL DEFAULT false/)
+assert.match(generalVolunteerBackfill, /'General Volunteer'/)
 assert.match(standaloneVolunteerEvents, /event\.ministry_id IS NULL/)
-assert.match(standaloneVolunteerEvents, /Add at least one volunteer assignment/)
+assert.match(standaloneVolunteerEvents, /normalizeGeneralVolunteerCapacity/)
+assert.match(standaloneVolunteerEvents, /generalVolunteerUnlimited/)
 assert.match(standaloneVolunteerEvents, /INSERT INTO event_responsibilities/)
 assert.match(standaloneVolunteerEvents, /volunteer_event\.created/)
 assert.match(apiRoute, /scheduling\/volunteer-events/)
 assert.match(schedulingVolunteers, /LEFT JOIN ministries coordinator/)
 assert.match(volunteerEventsComponent, /Create event and assignments/)
-assert.match(volunteerEventsComponent, /Add another assignment/)
+assert.match(volunteerEventsComponent, /Unlimited spots/)
+assert.match(volunteerEventsComponent, /Add a specific assignment/)
 assert.match(volunteerEventsComponent, /A ministry is optional/)
 assert.match(volunteerSignupPage, /Choose an available assignment/)
+assert.match(volunteerSignupPage, /Unlimited openings/)
 assert.doesNotMatch(volunteerSignupPage, /<select name="responsibilityId"/)
 assert.match(homeWorkspace, /<VolunteerEvents creating/)
+assert.match(schedulingVolunteers, /is_public_assignment = true/)
+assert.match(schedulingVolunteers, /responsibility\.unlimited_capacity/)
+assert.match(schedulingEvents, /generalVolunteerUnlimited/)
+assert.match(eventDetails, /General Volunteer spots/)
+
+const [
+  volunteerAccountMigration,
+  volunteerAccountInvitation,
+  volunteerAccountPage,
+  authWithVolunteers,
+  loginLinkWithVolunteers,
+] = await Promise.all([
+  read("migrations/20260806_01_add_volunteer_accounts.sql"),
+  read("src/server/legacy/volunteer-account-invitation.js"),
+  read("src/react/pages/VolunteerAccountApp.jsx"),
+  read("src/server/legacy/helper/ministry-auth.js"),
+  read("src/server/legacy/ministry-login-link.js"),
+])
+assert.match(volunteerAccountMigration, /public_profile_id UUID NOT NULL DEFAULT gen_random_uuid/)
+assert.match(volunteerAccountMigration, /is_volunteer_profile BOOL NOT NULL DEFAULT false/)
+assert.match(volunteerAccountMigration, /CREATE TABLE IF NOT EXISTS volunteer_account_invitations/)
+assert.match(schedulingVolunteers, /INSERT INTO users/)
+assert.match(schedulingVolunteers, /user\.id/)
+assert.match(schedulingVolunteers, /public_profile_id/)
+assert.match(schedulingVolunteers, /accountInvitationSent/)
+assert.match(volunteerSignupPage, /searchParams\.set\("profile"/)
+assert.match(volunteerSignupPage, /Sign in with password or one-time link/)
+assert.match(volunteerAccountInvitation, /Password must be at least 8 characters/)
+assert.match(volunteerAccountInvitation, /createMinistryToken/)
+assert.match(volunteerAccountPage, /We already collected your profile information/)
+assert.match(authWithVolunteers, /is_volunteer_profile/)
+assert.match(loginLinkWithVolunteers, /u\.is_volunteer_profile = true/)
 
 const serverFiles = []
 const collectServerFiles = async (directory) => {

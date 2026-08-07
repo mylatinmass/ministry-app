@@ -225,8 +225,11 @@ always strict and returns an error when the feed or database is unavailable.
   password or one-time-email-link sign-in path.
 - Each independent account chooses one or more reminder channels in its profile:
   Email, Telegram, SMS, and browser Push. Email and Push delivery honor those
-  choices now. Telegram and SMS choices are retained for their provider/account
-  connection work; selecting them does not claim that delivery is configured.
+  choices now. Telegram delivers to connected accounts. When a scheduled
+  reminder becomes due for an SMS-enabled account, the production processor
+  submits a deduplicated `Ministry Assignment Reminder Due` event to Klaviyo;
+  the corresponding transactional SMS flow and explicit SMS consent are still
+  required before a text message can be sent.
   Managed children inherit the guardian account's delivery channels while their
   assignments and history remain attached to the child's profile.
 - An enabled device can receive a production-only, rate-limited test Push from

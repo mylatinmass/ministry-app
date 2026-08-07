@@ -5,6 +5,7 @@ import { getPool } from "../database"
 import { json } from "../request"
 import { verifySchedulerRequest } from "./scheduler-auth"
 import { sendTelegramMessage } from "./telegram"
+import { sendKlaviyoReminderDue } from "./klaviyo"
 
 const ASSIGNMENT_STATUSES = [
   "pending",
@@ -198,6 +199,7 @@ const loadReminderContext = async (reminderId: string) => {
         event.title,
         ministry.slug AS ministry_slug,
         recipient.email AS recipient_email,
+        COALESCE(NULLIF(recipient.phone, ''), recipient.telephone) AS recipient_phone,
         recipient.notification_email_enabled,
         recipient.notification_telegram_enabled,
         recipient.notification_sms_enabled,
@@ -499,14 +501,27 @@ const deliverReminder = async (reminder: any) => {
   }
 
   if (context.notification_sms_enabled) {
-    await recordDelivery(
-      context.id,
-      null,
-      "sms",
-      "skipped",
-      null,
-      "sms_provider_not_configured",
-    )
+    try {
+      const result = await sendKlaviyoReminderDue(context)
+      delivered = true
+      await recordDelivery(
+        context.id,
+        null,
+        "sms",
+        "sent",
+        result.status,
+        "klaviyo_event_accepted",
+      )
+    } catch (error: any) {
+      await recordDelivery(
+        context.id,
+        null,
+        "sms",
+        error?.code === "klaviyo_not_configured" ? "skipped" : "failed",
+        Number(error?.status || 0) || null,
+        error?.code || error?.message,
+      )
+    }
   }
 
   if (delivered) {

@@ -188,6 +188,11 @@ assert.match(profile, /notificationChannelOptions/)
 assert.match(ministryProfileServer, /profile\.notification_preferences_updated/)
 assert.match(reminders, /notification_telegram_enabled/)
 assert.match(reminders, /notification_sms_enabled/)
+assert.match(reminders, /sendKlaviyoReminderDue/)
+const klaviyo = await read("src/server/notifications/klaviyo.ts")
+assert.match(klaviyo, /Ministry Assignment Reminder Due/)
+assert.match(klaviyo, /unique_id: context\.id/)
+assert.match(klaviyo, /Klaviyo-API-Key/)
 assert.match(pushNotificationsComponent, /Send test notification/)
 
 const telegramMigration = await read(

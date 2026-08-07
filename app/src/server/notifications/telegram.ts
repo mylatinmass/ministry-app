@@ -185,6 +185,14 @@ export const handleTelegramConnection = async (request: Request) => {
       `,
       [identity.actor.id],
     )
+    await pool.query(
+      `
+        UPDATE users
+        SET notification_telegram_enabled = false, updated_at = now()
+        WHERE id = $1
+      `,
+      [identity.actor.id],
+    )
     await audit(identity, "notification.telegram_disconnected")
     return json({ message: "Telegram disconnected" })
   }

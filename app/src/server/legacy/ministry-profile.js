@@ -53,7 +53,13 @@ const loadProfile = async (client, context) => {
           contact.notification_email_enabled,
           contact.notification_telegram_enabled,
           contact.notification_sms_enabled,
-          contact.notification_push_enabled
+          contact.notification_push_enabled,
+          EXISTS (
+            SELECT 1
+            FROM telegram_connections telegram_connection
+            WHERE telegram_connection.account_user_id = contact.id
+              AND telegram_connection.status = 'active'
+          ) AS telegram_connected
         FROM users profile
         JOIN users contact ON contact.id = $2
         WHERE profile.id = $1
@@ -102,10 +108,13 @@ const loadProfile = async (client, context) => {
     notificationLeadMinutes: Number(profile.notification_lead_minutes || 60),
     notificationChannels: {
       email: Boolean(profile.notification_email_enabled),
-      telegram: Boolean(profile.notification_telegram_enabled),
+      telegram: Boolean(
+        profile.notification_telegram_enabled && profile.telegram_connected
+      ),
       sms: Boolean(profile.notification_sms_enabled),
       push: Boolean(profile.notification_push_enabled),
     },
+    telegramConnected: Boolean(profile.telegram_connected),
     ministries: ministriesResult.rows.map((ministry) => ({
       id: ministry.id,
       slug: ministry.slug,
@@ -222,6 +231,24 @@ const handler = async (event) => {
       }
       const fields = validateProfile(body)
       if (fields.error) return jsonResponse(400, { message: fields.error })
+
+      if (fields.notificationChannels.telegram) {
+        const telegramConnection = await client.query(
+          `
+            SELECT 1
+            FROM telegram_connections
+            WHERE account_user_id = $1
+              AND status = 'active'
+            LIMIT 1
+          `,
+          [context.actor.id]
+        )
+        if (!telegramConnection.rowCount) {
+          return jsonResponse(400, {
+            message: "Connect Telegram before selecting it as a notification method",
+          })
+        }
+      }
 
       const duplicateUsername = await client.query(
         `SELECT 1 FROM users WHERE lower(username) = $1 AND id <> $2 LIMIT 1`,

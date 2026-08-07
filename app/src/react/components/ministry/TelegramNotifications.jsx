@@ -17,11 +17,12 @@ const request = async (path, options = {}) => {
   return result
 }
 
-const TelegramNotifications = ({ globalRole }) => {
+const TelegramNotifications = ({ globalRole, onConnectionChange }) => {
   const [data, setData] = React.useState(null)
   const [setup, setSetup] = React.useState(null)
   const [status, setStatus] = React.useState("loading")
   const [message, setMessage] = React.useState("")
+  const [awaitingConnection, setAwaitingConnection] = React.useState(false)
   const isGlobalAdmin = ["owner", "super_admin"].includes(globalRole)
 
   const load = React.useCallback(async () => {
@@ -35,11 +36,14 @@ const TelegramNotifications = ({ globalRole }) => {
       setData(connection)
       setSetup(integration)
       setStatus("ready")
+      const isConnected = connection.connection?.status === "active"
+      onConnectionChange?.(isConnected)
+      if (isConnected) setAwaitingConnection(false)
     } catch (error) {
       setStatus("error")
       setMessage(error.message)
     }
-  }, [isGlobalAdmin])
+  }, [isGlobalAdmin, onConnectionChange])
 
   React.useEffect(() => {
     load()
@@ -47,6 +51,16 @@ const TelegramNotifications = ({ globalRole }) => {
     window.addEventListener("focus", refresh)
     return () => window.removeEventListener("focus", refresh)
   }, [load])
+
+  React.useEffect(() => {
+    if (!awaitingConnection) return undefined
+    const refreshTimer = window.setInterval(load, 2500)
+    const stopTimer = window.setTimeout(() => setAwaitingConnection(false), 60000)
+    return () => {
+      window.clearInterval(refreshTimer)
+      window.clearTimeout(stopTimer)
+    }
+  }, [awaitingConnection, load])
 
   const connect = async () => {
     setStatus("working")
@@ -56,6 +70,7 @@ const TelegramNotifications = ({ globalRole }) => {
         method: "POST",
         body: JSON.stringify({ action: "create_link" }),
       })
+      setAwaitingConnection(true)
       window.open(result.url, "_blank", "noopener,noreferrer")
       setMessage("Press Start in Telegram, then return to this page.")
     } catch (error) {
@@ -126,7 +141,7 @@ const TelegramNotifications = ({ globalRole }) => {
       <button
         type="button"
         onClick={connected ? disconnect : connect}
-        disabled={status === "working"}
+        disabled={status === "working" || awaitingConnection}
         className={`mt-2 inline-flex min-w-44 items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-wait disabled:opacity-60 ${
           connected
             ? "border border-[#d8c7b8] bg-white text-[#6f4f34] hover:bg-[#f7f3ef]"
@@ -135,6 +150,8 @@ const TelegramNotifications = ({ globalRole }) => {
       >
         {status === "working"
           ? "UPDATING..."
+          : awaitingConnection
+            ? "Waiting for Telegram..."
           : connected
             ? "Disconnect Telegram"
             : "Connect Telegram"}

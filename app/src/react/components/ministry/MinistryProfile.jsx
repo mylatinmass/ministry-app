@@ -24,7 +24,7 @@ const reminderOptions = [
 
 const notificationChannelOptions = [
   ["email", "Email", "Send notifications to the email address on this account."],
-  ["telegram", "Telegram", "Telegram account connection will be completed during delivery setup."],
+  ["telegram", "Telegram", "Send notifications to your connected Telegram account."],
   ["sms", "SMS", "Send text messages to the telephone number on this account."],
   ["push", "Push notifications", "Send browser notifications to devices you enable below."],
 ]
@@ -71,6 +71,21 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
   const [childForm, setChildForm] = React.useState({ firstName: "", lastName: "" })
   const [requestMinistryId, setRequestMinistryId] = React.useState("")
   const [separationEmail, setSeparationEmail] = React.useState("")
+
+  const handleTelegramConnectionChange = React.useCallback((connected) => {
+    const updateTelegramState = (current) =>
+      current
+        ? {
+            ...current,
+            telegramConnected: connected,
+            notificationChannels: connected
+              ? current.notificationChannels
+              : { ...current.notificationChannels, telegram: false },
+          }
+        : current
+    setProfile(updateTelegramState)
+    setDraft(updateTelegramState)
+  }, [])
 
   const loadFamily = React.useCallback(async () => {
     const token = window.sessionStorage.getItem(MINISTRY_SESSION_KEY)
@@ -406,6 +421,9 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
               </p>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 {notificationChannelOptions.map(([key, label, description]) => {
+                  if (key === "telegram" && !profile.telegramConnected) {
+                    return null
+                  }
                   const selected = Boolean(draft.notificationChannels?.[key])
                   const unavailable =
                     (key === "email" && !draft.email) ||
@@ -423,7 +441,7 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
                         disabled={
                           !isEditing ||
                           profile.isManagedProfile ||
-                          (unavailable && !selected)
+                          unavailable
                         }
                         className="mt-0.5 size-4 accent-[#896542] disabled:opacity-50"
                       />
@@ -452,7 +470,10 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
             {!profile.isManagedProfile && (
               <>
                 <PushNotifications />
-                <TelegramNotifications globalRole={profile.globalRole} />
+                <TelegramNotifications
+                  globalRole={profile.globalRole}
+                  onConnectionChange={handleTelegramConnectionChange}
+                />
               </>
             )}
           </div>

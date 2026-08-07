@@ -96,6 +96,24 @@ const TelegramNotifications = ({ globalRole, onConnectionChange }) => {
     }
   }
 
+  const sendTest = async () => {
+    setStatus("working")
+    setMessage("")
+    try {
+      const result = await request("telegram/connection", {
+        method: "POST",
+        body: JSON.stringify({ action: "test" }),
+      })
+      await load()
+      setMessage(result.message)
+    } catch (error) {
+      setMessage(error.message)
+      await load()
+    } finally {
+      setStatus("ready")
+    }
+  }
+
   const configureWebhook = async () => {
     const replacing = Boolean(setup?.webhook?.url && !setup?.webhook?.active)
     if (
@@ -138,24 +156,36 @@ const TelegramNotifications = ({ globalRole, onConnectionChange }) => {
           ? `Connected${data.connection.username ? ` to @${data.connection.username}` : ""}.`
           : `Connect your account to @${data.botUsername}.`}
       </p>
-      <button
-        type="button"
-        onClick={connected ? disconnect : connect}
-        disabled={status === "working" || awaitingConnection}
-        className={`mt-2 inline-flex min-w-44 items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-wait disabled:opacity-60 ${
-          connected
-            ? "border border-[#d8c7b8] bg-white text-[#6f4f34] hover:bg-[#f7f3ef]"
-            : "bg-[#896542] text-white hover:bg-[#6f4f34]"
-        }`}
-      >
-        {status === "working"
-          ? "UPDATING..."
-          : awaitingConnection
-            ? "Waiting for Telegram..."
-          : connected
-            ? "Disconnect Telegram"
-            : "Connect Telegram"}
-      </button>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={connected ? disconnect : connect}
+          disabled={status === "working" || awaitingConnection}
+          className={`inline-flex min-w-44 items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-wait disabled:opacity-60 ${
+            connected
+              ? "border border-[#d8c7b8] bg-white text-[#6f4f34] hover:bg-[#f7f3ef]"
+              : "bg-[#896542] text-white hover:bg-[#6f4f34]"
+          }`}
+        >
+          {status === "working"
+            ? "UPDATING..."
+            : awaitingConnection
+              ? "Waiting for Telegram..."
+              : connected
+                ? "Disconnect Telegram"
+                : "Connect Telegram"}
+        </button>
+        {connected && (
+          <button
+            type="button"
+            onClick={sendTest}
+            disabled={status === "working"}
+            className="inline-flex min-w-44 items-center justify-center rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#6f4f34] disabled:cursor-wait disabled:opacity-60"
+          >
+            Send test DM
+          </button>
+        )}
+      </div>
 
       {isGlobalAdmin && setup && !setup.error && (
         <div className="mt-4 rounded-xl border border-gray-100 p-4">

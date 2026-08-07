@@ -197,6 +197,53 @@ export const handleTelegramConnection = async (request: Request) => {
     return json({ message: "Telegram disconnected" })
   }
 
+  if (body.action === "test") {
+    if (!configured) return json({ message: "Telegram is not configured" }, 503)
+    const connectionResult = await pool.query(
+      `
+        SELECT chat_id
+        FROM telegram_connections
+        WHERE account_user_id = $1
+          AND status = 'active'
+        LIMIT 1
+      `,
+      [identity.actor.id],
+    )
+    const connection = connectionResult.rows[0]
+    if (!connection) {
+      return json({ message: "Connect Telegram before sending a test" }, 400)
+    }
+
+    try {
+      await sendTelegramMessage(
+        connection.chat_id,
+        "Test notification from My Latin Mass Ministry. Telegram DMs are connected and working.",
+      )
+      await pool.query(
+        `
+          UPDATE telegram_connections
+          SET last_success_at = now(), last_error = NULL, updated_at = now()
+          WHERE account_user_id = $1
+        `,
+        [identity.actor.id],
+      )
+      await audit(identity, "notification.telegram_test_sent")
+      return json({ message: "Test Telegram DM sent" })
+    } catch (error: any) {
+      if (Number(error?.status) === 403) {
+        await pool.query(
+          `
+            UPDATE telegram_connections
+            SET status = 'blocked', last_error = $2, updated_at = now()
+            WHERE account_user_id = $1
+          `,
+          [identity.actor.id, error?.message || "Telegram delivery failed"],
+        )
+      }
+      return json({ message: error?.message || "Unable to send Telegram DM" }, 502)
+    }
+  }
+
   return json({ message: "Unknown Telegram action" }, 400)
 }
 

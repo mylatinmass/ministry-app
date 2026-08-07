@@ -11,6 +11,10 @@ const botUsername = () =>
 
 const botToken = () => (process.env.TELEGRAM_BOT_TOKEN || "").trim()
 
+const deliveryAllowed = () =>
+  process.env.VERCEL_ENV === "production" ||
+  process.env.ALLOW_PREVIEW_DELIVERY === "true"
+
 const webhookSecret = () => {
   const token = botToken()
   const jwtSecret = process.env.JWT_SECRET_KEY || ""
@@ -151,6 +155,38 @@ export const handleTelegramConnection = async (request: Request) => {
 
   if (body.action === "create_link") {
     if (!configured) return json({ message: "Telegram is not configured" }, 503)
+    if (!deliveryAllowed()) {
+      return json({ message: "Telegram linking is disabled outside production" }, 403)
+    }
+    const expectedWebhookUrl = `${new URL(request.url).origin}/api/telegram/webhook`
+    try {
+      const webhook = await callTelegram("getWebhookInfo", {})
+      if (webhook.url && webhook.url !== expectedWebhookUrl) {
+        return json(
+          {
+            message:
+              "This Telegram bot is connected to another application. A Super Admin must review its webhook before members can connect.",
+          },
+          409,
+        )
+      }
+      if (!webhook.url) {
+        await callTelegram("setWebhook", {
+          url: expectedWebhookUrl,
+          secret_token: webhookSecret(),
+          allowed_updates: ["message"],
+        })
+        await audit(identity, "notification.telegram_webhook_configured", {
+          automatic: true,
+          url: expectedWebhookUrl,
+        })
+      }
+    } catch (error: any) {
+      return json(
+        { message: error?.message || "Unable to activate the Telegram bot" },
+        502,
+      )
+    }
     const token = crypto.randomBytes(24).toString("base64url")
     await pool.query(
       `
@@ -199,6 +235,9 @@ export const handleTelegramConnection = async (request: Request) => {
 
   if (body.action === "test") {
     if (!configured) return json({ message: "Telegram is not configured" }, 503)
+    if (!deliveryAllowed()) {
+      return json({ message: "Telegram delivery is disabled outside production" }, 403)
+    }
     const connectionResult = await pool.query(
       `
         SELECT chat_id
@@ -388,6 +427,9 @@ export const handleTelegramSetup = async (request: Request) => {
   }
   if (!botToken() || !botUsername()) {
     return json({ message: "Telegram is not configured" }, 503)
+  }
+  if (request.method === "POST" && !deliveryAllowed()) {
+    return json({ message: "Telegram setup is disabled outside production" }, 403)
   }
 
   const expectedUrl = `${new URL(request.url).origin}/api/telegram/webhook`

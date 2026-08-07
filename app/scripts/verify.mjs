@@ -143,6 +143,7 @@ assert.deepEqual(
   ["src/pages/api/[...path].ts"]
 )
 assert.match(apiRoute, /push\/subscriptions/)
+assert.match(apiRoute, /push\/test/)
 assert.match(apiRoute, /reminders\/process/)
 assert.match(apiRoute, /scheduling\/templates/)
 assert.match(apiRoute, /scheduling\/events/)
@@ -151,6 +152,9 @@ assert.match(apiRoute, /scheduling\/ordo/)
 
 assert.match(packageJson, /"prebuild":\s*"[^"]*sync-mass-schedule\.mjs --build"/)
 assert.match(packageJson, /"sync:mass-schedule"/)
+const migrationRunner = await read("scripts/migrate.mjs")
+assert.match(migrationRunner, /requestedFilename/)
+assert.match(migrationRunner, /Unknown migration/)
 assert.match(massScheduleMigration, /schedule_source_key STRING NULL/)
 assert.match(massScheduleMigration, /events_schedule_source_key_key/)
 assert.match(massScheduleMigration, /system_managed BOOL NOT NULL DEFAULT false/)
@@ -163,6 +167,25 @@ assert.match(massScheduleLibrary, /"Usher"/)
 assert.match(massScheduleSync, /MASS_SCHEDULE_SYNC_REQUIRED/)
 assert.match(environmentExample, /MASS_SCHEDULE_URL=/)
 assert.match(environmentExample, /MASS_SCHEDULE_USHERS_MINISTRY_SLUG=ushers/)
+
+const notificationChannelsMigration = await read(
+  "migrations/20260807_04_add_notification_channels.sql",
+)
+const pushNotificationsComponent = await read(
+  "src/react/components/ministry/PushNotifications.jsx",
+)
+assert.match(notificationChannelsMigration, /notification_email_enabled/)
+assert.match(notificationChannelsMigration, /notification_telegram_enabled/)
+assert.match(notificationChannelsMigration, /notification_sms_enabled/)
+assert.match(notificationChannelsMigration, /notification_push_enabled/)
+assert.match(notificationChannelsMigration, /last_test_at/)
+assert.match(notificationChannelsMigration, /'email', 'telegram', 'sms', 'push'/)
+assert.match(profile, /Notification methods/)
+assert.match(profile, /notificationChannelOptions/)
+assert.match(ministryProfileServer, /profile\.notification_preferences_updated/)
+assert.match(reminders, /notification_telegram_enabled/)
+assert.match(reminders, /notification_sms_enabled/)
+assert.match(pushNotificationsComponent, /Send test notification/)
 
 assert.match(authHelper, /activeProfileUserId/)
 assert.match(authHelper, /authMethod: options\.authMethod \|\| "password"/)

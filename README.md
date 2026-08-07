@@ -223,6 +223,15 @@ always strict and returns an error when the feed or database is unavailable.
   no-referrer, and no-store; this identifier is not an authentication credential
   and cannot authorize account changes. Every public form also offers the normal
   password or one-time-email-link sign-in path.
+- Each independent account chooses one or more reminder channels in its profile:
+  Email, Telegram, SMS, and browser Push. Email and Push delivery honor those
+  choices now. Telegram and SMS choices are retained for their provider/account
+  connection work; selecting them does not claim that delivery is configured.
+  Managed children inherit the guardian account's delivery channels while their
+  assignments and history remain attached to the child's profile.
+- An enabled device can receive a production-only, rate-limited test Push from
+  the profile screen. Test sends are audited, do not expose event information,
+  and expire subscriptions rejected permanently by the browser push service.
 
 ## Privacy and repository rules
 

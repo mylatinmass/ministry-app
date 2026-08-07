@@ -137,6 +137,31 @@ const PushNotifications = () => {
     }
   }
 
+  const sendTest = async () => {
+    setStatus("testing")
+    setMessage("")
+    try {
+      const token = window.sessionStorage.getItem(MINISTRY_SESSION_KEY)
+      const response = await fetch(getFunctionEndpoint("push/test"), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      })
+      const result = await response.json()
+      if (!response.ok) {
+        throw new Error(result.message || "Unable to send test notification")
+      }
+      setMessage("Test notification sent. Check this device.")
+    } catch (error) {
+      setMessage(error.message)
+    } finally {
+      setStatus("enabled")
+    }
+  }
+
   if (status === "checking") {
     return <p className="mt-4 text-sm text-gray-500">Checking this device...</p>
   }
@@ -154,22 +179,34 @@ const PushNotifications = () => {
       <p className="text-sm font-semibold text-gray-700">
         Notifications on this device
       </p>
-      <button
-        type="button"
-        onClick={status === "enabled" ? disable : enable}
-        disabled={status === "working"}
-        className={`mt-2 inline-flex min-w-44 items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-wait disabled:opacity-60 ${
-          status === "enabled"
-            ? "border border-[#d8c7b8] bg-white text-[#6f4f34] hover:bg-[#f7f3ef]"
-            : "bg-[#896542] text-white hover:bg-[#6f4f34]"
-        }`}
-      >
-        {status === "working"
-          ? "UPDATING..."
-          : status === "enabled"
-            ? "Disable notifications"
-            : "Enable notifications"}
-      </button>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={status === "enabled" ? disable : enable}
+          disabled={["working", "testing"].includes(status)}
+          className={`inline-flex min-w-44 items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-wait disabled:opacity-60 ${
+            status === "enabled" || status === "testing"
+              ? "border border-[#d8c7b8] bg-white text-[#6f4f34] hover:bg-[#f7f3ef]"
+              : "bg-[#896542] text-white hover:bg-[#6f4f34]"
+          }`}
+        >
+          {status === "working"
+            ? "UPDATING..."
+            : status === "enabled" || status === "testing"
+              ? "Disable notifications"
+              : "Enable notifications"}
+        </button>
+        {(status === "enabled" || status === "testing") && (
+          <button
+            type="button"
+            onClick={sendTest}
+            disabled={status === "testing"}
+            className="inline-flex min-w-44 items-center justify-center rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#6f4f34] disabled:cursor-wait disabled:opacity-60"
+          >
+            {status === "testing" ? "SENDING..." : "Send test notification"}
+          </button>
+        )}
+      </div>
       {message && (
         <p className="mt-2 max-w-xl text-sm leading-relaxed text-gray-500">
           {message}

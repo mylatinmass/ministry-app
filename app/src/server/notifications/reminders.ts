@@ -196,7 +196,11 @@ const loadReminderContext = async (reminderId: string) => {
         event.updated_at AS current_event_updated_at,
         event.title,
         ministry.slug AS ministry_slug,
-        recipient.email AS recipient_email
+        recipient.email AS recipient_email,
+        recipient.notification_email_enabled,
+        recipient.notification_telegram_enabled,
+        recipient.notification_sms_enabled,
+        recipient.notification_push_enabled
       FROM ministry_reminders reminder
       JOIN responsibility_assignments assignment
         ON assignment.id = reminder.assignment_id
@@ -217,7 +221,7 @@ const loadReminderContext = async (reminderId: string) => {
 const recordDelivery = (
   reminderId: string,
   subscriptionId: string | null,
-  channel: "push" | "email",
+  channel: "push" | "email" | "telegram" | "sms",
   status: "sent" | "failed" | "skipped",
   providerStatus?: number | null,
   errorCode?: string | null,
@@ -309,90 +313,110 @@ const deliverReminder = async (reminder: any) => {
     return
   }
 
-  const subscriptions = await getPool().query(
-    `
-      SELECT id, endpoint, p256dh_key, auth_key
-      FROM push_subscriptions
-      WHERE account_user_id = $1 AND status = 'active'
-    `,
-    [context.recipient_user_id],
-  )
-
   let delivered = false
   const publicKey = process.env.VAPID_PUBLIC_KEY
   const privateKey = process.env.VAPID_PRIVATE_KEY
   const subject = process.env.VAPID_SUBJECT || "mailto:notifications@mylatinmass.com"
 
-  if (subscriptions.rowCount && publicKey && privateKey) {
-    webpush.setVapidDetails(subject, publicKey, privateKey)
-    const payload = JSON.stringify({
-      title: "Upcoming ministry assignment",
-      body: `Your assignment begins ${new Intl.DateTimeFormat("en-US", {
-        weekday: "short",
-        hour: "numeric",
-        minute: "2-digit",
-        timeZone: "America/New_York",
-      }).format(new Date(context.start_time))}.`,
-      url: `/${context.ministry_slug}?event=${context.event_id}`,
-      tag: `ministry-reminder-${context.assignment_id}`,
-    })
+  if (context.notification_push_enabled) {
+    const subscriptions = await getPool().query(
+      `
+        SELECT id, endpoint, p256dh_key, auth_key
+        FROM push_subscriptions
+        WHERE account_user_id = $1 AND status = 'active'
+      `,
+      [context.recipient_user_id],
+    )
 
-    for (const subscription of subscriptions.rows) {
-      try {
-        const response = await webpush.sendNotification(
-          {
-            endpoint: subscription.endpoint,
-            keys: {
-              p256dh: subscription.p256dh_key,
-              auth: subscription.auth_key,
+    if (!subscriptions.rowCount) {
+      await recordDelivery(
+        context.id,
+        null,
+        "push",
+        "skipped",
+        null,
+        "push_subscription_missing",
+      )
+    } else if (!publicKey || !privateKey) {
+      await recordDelivery(
+        context.id,
+        null,
+        "push",
+        "skipped",
+        null,
+        "push_not_configured",
+      )
+    } else {
+      webpush.setVapidDetails(subject, publicKey, privateKey)
+      const payload = JSON.stringify({
+        title: "Upcoming ministry assignment",
+        body: `Your assignment begins ${new Intl.DateTimeFormat("en-US", {
+          weekday: "short",
+          hour: "numeric",
+          minute: "2-digit",
+          timeZone: "America/New_York",
+        }).format(new Date(context.start_time))}.`,
+        url: `/${context.ministry_slug}?event=${context.event_id}`,
+        tag: `ministry-reminder-${context.assignment_id}`,
+      })
+
+      for (const subscription of subscriptions.rows) {
+        try {
+          const response = await webpush.sendNotification(
+            {
+              endpoint: subscription.endpoint,
+              keys: {
+                p256dh: subscription.p256dh_key,
+                auth: subscription.auth_key,
+              },
             },
-          },
-          payload,
-          { TTL: 3600, urgency: "high" },
-        )
-        delivered = true
-        await recordDelivery(
-          context.id,
-          subscription.id,
-          "push",
-          "sent",
-          response.statusCode,
-        )
-        await getPool().query(
-          `
-            UPDATE push_subscriptions
-            SET last_success_at = now(), updated_at = now()
-            WHERE id = $1
-          `,
-          [subscription.id],
-        )
-      } catch (error: any) {
-        const statusCode = Number(error?.statusCode || 0) || null
-        await recordDelivery(
-          context.id,
-          subscription.id,
-          "push",
-          "failed",
-          statusCode,
-          error?.code || error?.message,
-        )
-        if ([404, 410].includes(statusCode || 0)) {
+            payload,
+            { TTL: 3600, urgency: "high" },
+          )
+          delivered = true
+          await recordDelivery(
+            context.id,
+            subscription.id,
+            "push",
+            "sent",
+            response.statusCode,
+          )
           await getPool().query(
             `
               UPDATE push_subscriptions
-              SET status = 'expired', updated_at = now()
+              SET last_success_at = now(), updated_at = now()
               WHERE id = $1
             `,
             [subscription.id],
           )
+        } catch (error: any) {
+          const statusCode = Number(error?.statusCode || 0) || null
+          await recordDelivery(
+            context.id,
+            subscription.id,
+            "push",
+            "failed",
+            statusCode,
+            error?.code || error?.message,
+          )
+          if ([404, 410].includes(statusCode || 0)) {
+            await getPool().query(
+              `
+                UPDATE push_subscriptions
+                SET status = 'expired', updated_at = now()
+                WHERE id = $1
+              `,
+              [subscription.id],
+            )
+          }
         }
       }
     }
   }
 
-  if (!delivered) {
+  if (context.notification_email_enabled) {
     try {
-      delivered = await sendEmailFallback(context)
+      delivered = (await sendEmailFallback(context)) || delivered
     } catch (error: any) {
       await recordDelivery(
         context.id,
@@ -403,6 +427,28 @@ const deliverReminder = async (reminder: any) => {
         error?.code || error?.message,
       )
     }
+  }
+
+  if (context.notification_telegram_enabled) {
+    await recordDelivery(
+      context.id,
+      null,
+      "telegram",
+      "skipped",
+      null,
+      "telegram_connection_required",
+    )
+  }
+
+  if (context.notification_sms_enabled) {
+    await recordDelivery(
+      context.id,
+      null,
+      "sms",
+      "skipped",
+      null,
+      "sms_provider_not_configured",
+    )
   }
 
   if (delivered) {

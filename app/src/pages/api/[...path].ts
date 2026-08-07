@@ -2,6 +2,7 @@ import type { APIRoute } from "astro"
 import { runLegacyHandler } from "../../server/legacy-router"
 import {
   handleSubscriptions,
+  handleTestPush,
   handleVapidPublicKey,
 } from "../../server/notifications/subscriptions"
 import { handleReminderProcessing } from "../../server/notifications/reminders"
@@ -25,6 +26,9 @@ const route: APIRoute = async ({ params, request }) => {
   }
   if (path === "push/subscriptions") {
     return handleSubscriptions(request)
+  }
+  if (path === "push/test") {
+    return handleTestPush(request)
   }
   if (path === "reminders/process") {
     return handleReminderProcessing(request)

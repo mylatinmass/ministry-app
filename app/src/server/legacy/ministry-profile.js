@@ -49,7 +49,11 @@ const loadProfile = async (client, context) => {
           profile.username,
           profile.global_role,
           profile.status,
-          contact.notification_lead_minutes
+          contact.notification_lead_minutes,
+          contact.notification_email_enabled,
+          contact.notification_telegram_enabled,
+          contact.notification_sms_enabled,
+          contact.notification_push_enabled
         FROM users profile
         JOIN users contact ON contact.id = $2
         WHERE profile.id = $1
@@ -96,6 +100,12 @@ const loadProfile = async (client, context) => {
     isManagedProfile: context.isManagedProfile,
     inheritsGuardianContact: context.isManagedProfile,
     notificationLeadMinutes: Number(profile.notification_lead_minutes || 60),
+    notificationChannels: {
+      email: Boolean(profile.notification_email_enabled),
+      telegram: Boolean(profile.notification_telegram_enabled),
+      sms: Boolean(profile.notification_sms_enabled),
+      push: Boolean(profile.notification_push_enabled),
+    },
     ministries: ministriesResult.rows.map((ministry) => ({
       id: ministry.id,
       slug: ministry.slug,
@@ -116,6 +126,12 @@ const validateProfile = (body) => {
   const phone = body.phone?.toString().trim() || ""
   const username = normalizeUsername(body.username)
   const notificationLeadMinutes = Number(body.notificationLeadMinutes)
+  const notificationChannels = {
+    email: body.notificationChannels?.email === true,
+    telegram: body.notificationChannels?.telegram === true,
+    sms: body.notificationChannels?.sms === true,
+    push: body.notificationChannels?.push === true,
+  }
   const usernameMessage = usernameError(username)
 
   if (!firstName || !lastName) return { error: "First and last name are required" }
@@ -123,8 +139,17 @@ const validateProfile = (body) => {
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return { error: "Enter a valid email address" }
   }
+  if (notificationChannels.email && !email) {
+    return { error: "Add an email address or turn off Email notifications" }
+  }
+  if (notificationChannels.sms && !phone) {
+    return { error: "Add a telephone number or turn off SMS notifications" }
+  }
   if (!REMINDER_OPTIONS.has(notificationLeadMinutes)) {
     return { error: "Choose a valid notification time" }
+  }
+  if (!Object.values(notificationChannels).some(Boolean)) {
+    return { error: "Choose at least one notification method" }
   }
 
   return {
@@ -134,6 +159,7 @@ const validateProfile = (body) => {
     phone,
     username,
     notificationLeadMinutes,
+    notificationChannels,
   }
 }
 
@@ -205,6 +231,21 @@ const handler = async (event) => {
         return jsonResponse(409, { message: "Username is already in use" })
       }
 
+      const beforeResult = await client.query(
+        `
+          SELECT
+            notification_lead_minutes,
+            notification_email_enabled,
+            notification_telegram_enabled,
+            notification_sms_enabled,
+            notification_push_enabled
+          FROM users
+          WHERE id = $1
+          LIMIT 1
+        `,
+        [context.user.id]
+      )
+
       await client.query(
         `
           UPDATE users
@@ -216,8 +257,12 @@ const handler = async (event) => {
             telephone = $4,
             username = $5,
             notification_lead_minutes = $6,
+            notification_email_enabled = $7,
+            notification_telegram_enabled = $8,
+            notification_sms_enabled = $9,
+            notification_push_enabled = $10,
             updated_at = now()
-          WHERE id = $7
+          WHERE id = $11
         `,
         [
           fields.firstName,
@@ -226,7 +271,47 @@ const handler = async (event) => {
           fields.phone,
           fields.username,
           fields.notificationLeadMinutes,
+          fields.notificationChannels.email,
+          fields.notificationChannels.telegram,
+          fields.notificationChannels.sms,
+          fields.notificationChannels.push,
           context.user.id,
+        ]
+      )
+
+      const before = beforeResult.rows[0]
+      await client.query(
+        `
+          INSERT INTO ministry_audit_log (
+            actor_user_id,
+            active_profile_user_id,
+            action,
+            entity_type,
+            entity_id,
+            before_data,
+            after_data,
+            metadata
+          )
+          VALUES ($1, $2, 'profile.notification_preferences_updated', 'user', $2,
+            $3::JSONB, $4::JSONB, $5::JSONB)
+        `,
+        [
+          context.actor.id,
+          context.user.id,
+          JSON.stringify({
+            notificationLeadMinutes: Number(before?.notification_lead_minutes || 60),
+            notificationChannels: {
+              email: Boolean(before?.notification_email_enabled),
+              telegram: Boolean(before?.notification_telegram_enabled),
+              sms: Boolean(before?.notification_sms_enabled),
+              push: Boolean(before?.notification_push_enabled),
+            },
+          }),
+          JSON.stringify({
+            notificationLeadMinutes: fields.notificationLeadMinutes,
+            notificationChannels: fields.notificationChannels,
+          }),
+          JSON.stringify({ authenticationMethod: context.authMethod || "password" }),
         ]
       )
     }

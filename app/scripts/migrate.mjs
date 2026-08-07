@@ -11,9 +11,18 @@ if (!connectionString) {
 }
 
 const migrationsDirectory = path.resolve("migrations")
-const files = (await fs.readdir(migrationsDirectory))
+const availableFiles = (await fs.readdir(migrationsDirectory))
   .filter((file) => file.endsWith(".sql"))
   .sort()
+const requestedFilename = process.argv[2] || ""
+if (
+  requestedFilename &&
+  (!/^[0-9]{8}_[0-9]{2}_[a-z0-9_]+\.sql$/.test(requestedFilename) ||
+    !availableFiles.includes(requestedFilename))
+) {
+  throw new Error(`Unknown migration: ${requestedFilename}`)
+}
+const files = requestedFilename ? [requestedFilename] : availableFiles
 
 const client = new Client({
   connectionString,

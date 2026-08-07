@@ -21,6 +21,13 @@ const reminderOptions = [
   [240, "4 hours"],
 ]
 
+const notificationChannelOptions = [
+  ["email", "Email", "Send notifications to the email address on this account."],
+  ["telegram", "Telegram", "Telegram account connection will be completed during delivery setup."],
+  ["sms", "SMS", "Send text messages to the telephone number on this account."],
+  ["push", "Push notifications", "Send browser notifications to devices you enable below."],
+]
+
 const membershipLabels = {
   owner: "Owner",
   admin: "Leader",
@@ -166,6 +173,19 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
     setDraft((current) => ({
       ...current,
       [name]: name === "notificationLeadMinutes" ? Number(value) : value,
+    }))
+    setMessage("")
+    setErrorMessage("")
+  }
+
+  const handleNotificationChannelChange = (event) => {
+    const { name, checked } = event.target
+    setDraft((current) => ({
+      ...current,
+      notificationChannels: {
+        ...current.notificationChannels,
+        [name]: checked,
+      },
     }))
     setMessage("")
     setErrorMessage("")
@@ -379,6 +399,55 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
                 </p>
               )}
             </label>
+            <div className="mt-5 border-t border-gray-100 pt-5">
+              <p className="text-sm font-semibold text-gray-700">
+                Notification methods
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {notificationChannelOptions.map(([key, label, description]) => {
+                  const selected = Boolean(draft.notificationChannels?.[key])
+                  const unavailable =
+                    (key === "email" && !draft.email) ||
+                    (key === "sms" && !draft.phone)
+                  return (
+                    <label
+                      key={key}
+                      className="flex items-start gap-3 rounded-xl border border-gray-100 p-4"
+                    >
+                      <input
+                        type="checkbox"
+                        name={key}
+                        checked={selected}
+                        onChange={handleNotificationChannelChange}
+                        disabled={
+                          !isEditing ||
+                          profile.isManagedProfile ||
+                          (unavailable && !selected)
+                        }
+                        className="mt-0.5 size-4 accent-[#896542] disabled:opacity-50"
+                      />
+                      <span>
+                        <span className="block text-sm font-semibold text-gray-900">
+                          {label}
+                        </span>
+                        <span className="mt-1 block text-xs leading-relaxed text-gray-500">
+                          {unavailable
+                            ? key === "email"
+                              ? "Add an email address before selecting Email."
+                              : "Add a telephone number before selecting SMS."
+                            : description}
+                        </span>
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+              {profile.isManagedProfile && (
+                <p className="mt-3 text-xs leading-relaxed text-gray-500">
+                  This managed profile uses its guardian's notification methods.
+                </p>
+              )}
+            </div>
             {!profile.isManagedProfile && <PushNotifications />}
           </div>
         </div>

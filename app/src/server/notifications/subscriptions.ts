@@ -1,10 +1,15 @@
 import crypto from "node:crypto"
+import webpush from "web-push"
 import { getPool } from "../database"
 import { getAuthenticatedIdentity } from "../ministry-identity"
 import { json } from "../request"
 
 const endpointHash = (endpoint: string) =>
   crypto.createHash("sha256").update(endpoint).digest("hex")
+
+const deliveryAllowed = () =>
+  process.env.VERCEL_ENV === "production" ||
+  process.env.ALLOW_PREVIEW_DELIVERY === "true"
 
 export const handleVapidPublicKey = () => {
   const publicKey = process.env.VAPID_PUBLIC_KEY
@@ -117,4 +122,134 @@ export const handleSubscriptions = async (request: Request) => {
   }
 
   return json({ message: "Method not allowed" }, 405, { Allow: "GET, POST, DELETE" })
+}
+
+export const handleTestPush = async (request: Request) => {
+  if (request.method !== "POST") {
+    return json({ message: "Method not allowed" }, 405, { Allow: "POST" })
+  }
+  if (!deliveryAllowed()) {
+    return json({ message: "Test delivery is available only in production" }, 403)
+  }
+
+  let identity
+  try {
+    identity = await getAuthenticatedIdentity(request)
+  } catch {
+    return json({ message: "Session expired" }, 401)
+  }
+
+  const publicKey = process.env.VAPID_PUBLIC_KEY
+  const privateKey = process.env.VAPID_PRIVATE_KEY
+  if (!publicKey || !privateKey) {
+    return json({ message: "Push notifications are not configured" }, 503)
+  }
+
+  const accountUserId = identity.actor.id
+  const pool = getPool()
+  const recent = await pool.query(
+    `
+      SELECT 1
+      FROM push_subscriptions
+      WHERE account_user_id = $1
+        AND last_test_at > now() - INTERVAL '1 minute'
+      LIMIT 1
+    `,
+    [accountUserId],
+  )
+  if (recent.rowCount) {
+    return json({ message: "Wait one minute before sending another test" }, 429)
+  }
+
+  const subscriptions = await pool.query(
+    `
+      UPDATE push_subscriptions
+      SET last_test_at = now(), updated_at = now()
+      WHERE account_user_id = $1 AND status = 'active'
+      RETURNING id, endpoint, p256dh_key, auth_key
+    `,
+    [accountUserId],
+  )
+  if (!subscriptions.rowCount) {
+    return json({ message: "Enable notifications on this device first" }, 409)
+  }
+
+  webpush.setVapidDetails(
+    process.env.VAPID_SUBJECT || "mailto:mylatinmass@gmail.com",
+    publicKey,
+    privateKey,
+  )
+  const payload = JSON.stringify({
+    title: "My Latin Mass notifications",
+    body: "Push notifications are working on this device.",
+    url: "/",
+    tag: `ministry-push-test-${accountUserId}`,
+  })
+  let sent = 0
+  let failed = 0
+
+  for (const subscription of subscriptions.rows) {
+    try {
+      await webpush.sendNotification(
+        {
+          endpoint: subscription.endpoint,
+          keys: {
+            p256dh: subscription.p256dh_key,
+            auth: subscription.auth_key,
+          },
+        },
+        payload,
+        { TTL: 60, urgency: "high" },
+      )
+      sent += 1
+      await pool.query(
+        `
+          UPDATE push_subscriptions
+          SET last_success_at = now(), updated_at = now()
+          WHERE id = $1
+        `,
+        [subscription.id],
+      )
+    } catch (error: any) {
+      failed += 1
+      const statusCode = Number(error?.statusCode || 0)
+      if ([404, 410].includes(statusCode)) {
+        await pool.query(
+          `
+            UPDATE push_subscriptions
+            SET status = 'expired', updated_at = now()
+            WHERE id = $1
+          `,
+          [subscription.id],
+        )
+      }
+    }
+  }
+
+  await pool.query(
+    `
+      INSERT INTO ministry_audit_log (
+        actor_user_id,
+        active_profile_user_id,
+        action,
+        entity_type,
+        entity_id,
+        metadata
+      )
+      VALUES ($1, $2, 'notification.push_test_sent', 'user', $1, $3::JSONB)
+    `,
+    [
+      identity.actor.id,
+      identity.user.id,
+      JSON.stringify({ sent, failed, attempted: subscriptions.rowCount }),
+    ],
+  )
+
+  if (!sent) {
+    return json(
+      { message: "The test could not reach an active device", sent, failed },
+      502,
+    )
+  }
+  return json({ message: "Test notification sent", sent, failed })
 }

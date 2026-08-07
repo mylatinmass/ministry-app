@@ -232,6 +232,13 @@ always strict and returns an error when the feed or database is unavailable.
 - An enabled device can receive a production-only, rate-limited test Push from
   the profile screen. Test sends are audited, do not expose event information,
   and expire subscriptions rejected permanently by the browser push service.
+- Members can connect Telegram from their profile through a 15-minute,
+  single-use deep link to the configured bot. The webhook verifies Telegram's
+  secret header, stores stable numeric Telegram/chat IDs rather than relying on
+  changeable usernames, and lets the member disconnect. A Super Admin can inspect
+  the existing webhook before activating or deliberately replacing it. Connected
+  accounts receive selected scheduled reminders through Telegram; blocked chats
+  are deactivated and delivery attempts are logged.
 
 ## Privacy and repository rules
 

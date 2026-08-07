@@ -4,6 +4,7 @@ import webpush from "web-push"
 import { getPool } from "../database"
 import { json } from "../request"
 import { verifySchedulerRequest } from "./scheduler-auth"
+import { sendTelegramMessage } from "./telegram"
 
 const ASSIGNMENT_STATUSES = [
   "pending",
@@ -430,14 +431,71 @@ const deliverReminder = async (reminder: any) => {
   }
 
   if (context.notification_telegram_enabled) {
-    await recordDelivery(
-      context.id,
-      null,
-      "telegram",
-      "skipped",
-      null,
-      "telegram_connection_required",
+    const connection = await getPool().query(
+      `
+        SELECT id, chat_id
+        FROM telegram_connections
+        WHERE account_user_id = $1 AND status = 'active'
+        LIMIT 1
+      `,
+      [context.recipient_user_id],
     )
+    if (!connection.rowCount) {
+      await recordDelivery(
+        context.id,
+        null,
+        "telegram",
+        "skipped",
+        null,
+        "telegram_connection_required",
+      )
+    } else {
+      try {
+        await sendTelegramMessage(
+          connection.rows[0].chat_id,
+          `Upcoming ministry assignment\nYour assignment begins ${new Intl.DateTimeFormat(
+            "en-US",
+            {
+              weekday: "short",
+              hour: "numeric",
+              minute: "2-digit",
+              timeZone: "America/New_York",
+            },
+          ).format(new Date(context.start_time))}.`,
+          `https://ministry.mylatinmass.com/${context.ministry_slug}?event=${context.event_id}`,
+        )
+        delivered = true
+        await recordDelivery(context.id, null, "telegram", "sent")
+        await getPool().query(
+          `
+            UPDATE telegram_connections
+            SET last_success_at = now(), last_error = NULL, updated_at = now()
+            WHERE id = $1
+          `,
+          [connection.rows[0].id],
+        )
+      } catch (error: any) {
+        const providerStatus = Number(error?.status || 0) || null
+        await recordDelivery(
+          context.id,
+          null,
+          "telegram",
+          "failed",
+          providerStatus,
+          error?.message,
+        )
+        await getPool().query(
+          `
+            UPDATE telegram_connections
+            SET status = CASE WHEN $2 = 403 THEN 'blocked' ELSE status END,
+                last_error = $3,
+                updated_at = now()
+            WHERE id = $1
+          `,
+          [connection.rows[0].id, providerStatus, error?.message?.slice(0, 500)],
+        )
+      }
+    }
   }
 
   if (context.notification_sms_enabled) {

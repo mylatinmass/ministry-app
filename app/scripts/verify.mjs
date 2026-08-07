@@ -144,6 +144,9 @@ assert.deepEqual(
 )
 assert.match(apiRoute, /push\/subscriptions/)
 assert.match(apiRoute, /push\/test/)
+assert.match(apiRoute, /telegram\/connection/)
+assert.match(apiRoute, /telegram\/setup/)
+assert.match(apiRoute, /telegram\/webhook/)
 assert.match(apiRoute, /reminders\/process/)
 assert.match(apiRoute, /scheduling\/templates/)
 assert.match(apiRoute, /scheduling\/events/)
@@ -186,6 +189,24 @@ assert.match(ministryProfileServer, /profile\.notification_preferences_updated/)
 assert.match(reminders, /notification_telegram_enabled/)
 assert.match(reminders, /notification_sms_enabled/)
 assert.match(pushNotificationsComponent, /Send test notification/)
+
+const telegramMigration = await read(
+  "migrations/20260807_05_add_telegram_connections.sql",
+)
+const telegramServer = await read("src/server/notifications/telegram.ts")
+const telegramComponent = await read(
+  "src/react/components/ministry/TelegramNotifications.jsx",
+)
+assert.match(telegramMigration, /CREATE TABLE IF NOT EXISTS telegram_connections/)
+assert.match(telegramMigration, /CREATE TABLE IF NOT EXISTS telegram_connection_tokens/)
+assert.match(telegramServer, /x-telegram-bot-api-secret-token/)
+assert.match(telegramServer, /timingSafeEqual/)
+assert.match(telegramServer, /getWebhookInfo/)
+assert.match(telegramServer, /telegram-webhook/)
+assert.match(telegramComponent, /Connect Telegram/)
+assert.match(reminders, /sendTelegramMessage/)
+assert.match(environmentExample, /TELEGRAM_BOT_USERNAME=/)
+assert.match(environmentExample, /TELEGRAM_BOT_TOKEN=/)
 
 assert.match(authHelper, /activeProfileUserId/)
 assert.match(authHelper, /authMethod: options\.authMethod \|\| "password"/)

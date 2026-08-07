@@ -6,6 +6,11 @@ import {
   handleVapidPublicKey,
 } from "../../server/notifications/subscriptions"
 import { handleReminderProcessing } from "../../server/notifications/reminders"
+import {
+  handleTelegramConnection,
+  handleTelegramSetup,
+  handleTelegramWebhook,
+} from "../../server/notifications/telegram"
 import { json } from "../../server/request"
 import { handleEvents } from "../../server/scheduling/events"
 import { handleTemplates } from "../../server/scheduling/templates"
@@ -29,6 +34,15 @@ const route: APIRoute = async ({ params, request }) => {
   }
   if (path === "push/test") {
     return handleTestPush(request)
+  }
+  if (path === "telegram/connection") {
+    return handleTelegramConnection(request)
+  }
+  if (path === "telegram/setup") {
+    return handleTelegramSetup(request)
+  }
+  if (path === "telegram/webhook") {
+    return handleTelegramWebhook(request)
   }
   if (path === "reminders/process") {
     return handleReminderProcessing(request)

@@ -10,6 +10,7 @@ import {
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 import PushNotifications from "./PushNotifications"
+import TelegramNotifications from "./TelegramNotifications"
 
 const reminderOptions = [
   [15, "15 minutes"],
@@ -448,7 +449,12 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
                 </p>
               )}
             </div>
-            {!profile.isManagedProfile && <PushNotifications />}
+            {!profile.isManagedProfile && (
+              <>
+                <PushNotifications />
+                <TelegramNotifications globalRole={profile.globalRole} />
+              </>
+            )}
           </div>
         </div>
       </section>

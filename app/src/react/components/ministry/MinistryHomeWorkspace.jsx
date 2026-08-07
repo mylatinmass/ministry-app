@@ -3,17 +3,11 @@ import { Link } from "../../compat/gatsby"
 import {
   Bars3Icon,
   BellAlertIcon,
-  CalendarDaysIcon,
   ChatBubbleLeftRightIcon,
   CheckCircleIcon,
   ChevronRightIcon,
-  ClockIcon,
-  HomeIcon,
-  LifebuoyIcon,
   PlusIcon,
-  Squares2X2Icon,
   UserCircleIcon,
-  UserGroupIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
@@ -28,6 +22,7 @@ import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import MinistrySupport from "./MinistrySupport"
 import MinistryEvents from "./MinistryEvents"
 import VolunteerEvents from "./VolunteerEvents"
+import { accountSections } from "./accountNavigation"
 
 const accessLabels = {
   owner: "Global Owner",
@@ -35,59 +30,6 @@ const accessLabels = {
   admin: "Leader",
   member: "Member",
 }
-
-const sections = [
-  {
-    id: "home",
-    label: "Home",
-    icon: HomeIcon,
-    description: "Your assignments, calendar, and ministries.",
-  },
-  {
-    id: "calendar",
-    label: "Calendar",
-    icon: CalendarDaysIcon,
-    description: "See public events and events visible to this profile.",
-  },
-  {
-    id: "events",
-    label: "Events",
-    icon: CheckCircleIcon,
-    description: "Review your assigned events or create a new event.",
-  },
-  {
-    id: "availability",
-    label: "Availability",
-    icon: ClockIcon,
-    description: "Block dates when this profile cannot be scheduled.",
-  },
-  {
-    id: "ministries",
-    label: "My Ministries",
-    icon: Squares2X2Icon,
-    description: "Open the ministry workspaces available to this profile.",
-  },
-  {
-    id: "members",
-    label: "Members",
-    icon: UserGroupIcon,
-    description: "View and manage every member across all ministries.",
-    globalOnly: true,
-  },
-  {
-    id: "profile",
-    label: "My Profile",
-    icon: UserCircleIcon,
-    description: "Manage personal details and account-wide preferences.",
-  },
-  {
-    id: "support",
-    label: "Support",
-    icon: LifebuoyIcon,
-    description:
-      "Contact the chapel support team and attach screenshots or supporting files.",
-  },
-]
 
 const formatAssignmentDate = (value) =>
   new Intl.DateTimeFormat("en-US", {
@@ -185,7 +127,10 @@ const MinistryHomeWorkspace = ({ data }) => {
     data.user.globalRole
   )
   const availableSections = React.useMemo(
-    () => sections.filter((section) => !section.globalOnly || hasGlobalAccess),
+    () =>
+      accountSections.filter(
+        (section) => !section.globalOnly || hasGlobalAccess,
+      ),
     [hasGlobalAccess]
   )
   const [sectionId, setSectionId] = React.useState(() => {
@@ -530,10 +475,10 @@ const MinistryHomeWorkspace = ({ data }) => {
                 Ministry workspace
               </p>
               <h1 className="mt-2 century-font text-2xl leading-tight text-[#6f4f34]">
-                My Ministry
+                Ministries
               </h1>
             </div>
-            <nav aria-label="Ministry sections" className="space-y-1">
+            <nav aria-label="Account sections" className="space-y-1">
               {availableSections.map((section) => {
                 const Icon = section.icon
                 const active = section.id === activeSection.id
@@ -570,7 +515,7 @@ const MinistryHomeWorkspace = ({ data }) => {
                 <span className="truncate">{activeSection.label}</span>
               </button>
               <p className="hidden text-xs font-semibold uppercase tracking-[0.16em] text-[#C1A387] lg:block">
-                My Ministry
+                Ministries
               </p>
               <h2 className="mt-1 hidden century-font text-4xl text-gray-900 lg:block">
                 {activeSection.label}
@@ -677,7 +622,7 @@ const MinistryHomeWorkspace = ({ data }) => {
                   Ministry workspace
                 </p>
                 <h2 className="mt-1 century-font text-2xl text-[#6f4f34]">
-                  My Ministry
+                  Ministries
                 </h2>
               </div>
               <button
@@ -691,7 +636,7 @@ const MinistryHomeWorkspace = ({ data }) => {
             </div>
             <nav
               className="flex-1 overflow-y-auto p-3"
-              aria-label="Ministry sections"
+              aria-label="Account sections"
             >
               {availableSections.map((section) => {
                 const Icon = section.icon

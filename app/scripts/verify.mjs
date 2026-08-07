@@ -54,6 +54,8 @@ const [
   homeWorkspace,
   profileSuppressionMigration,
   invitationResponse,
+  accountNavigation,
+  pendingInvitations,
 ] = await Promise.all([
   read("astro.config.mjs"),
   read("src/pages/api/[...path].ts"),
@@ -102,6 +104,8 @@ const [
   read("src/react/components/ministry/MinistryHomeWorkspace.jsx"),
   read("migrations/20260805_03_add_ministry_profile_suppressions.sql"),
   read("src/server/legacy/ministry-invitation-response.js"),
+  read("src/react/components/ministry/accountNavigation.jsx"),
+  read("src/react/components/ministry/MinistryPendingInvitations.jsx"),
 ])
 
 const [
@@ -206,8 +210,19 @@ assert.match(globalMembersUi, /action: "set_ministry_level"/)
 assert.match(globalMembersUi, /action: "set_global_role"/)
 assert.match(ministryMembers, /ministry_user\.global_role_changed/)
 assert.match(ministryMembers, /You cannot change your own global access/)
-assert.match(homeWorkspace, /globalOnly: true/)
+assert.match(accountNavigation, /globalOnly: true/)
+assert.match(accountNavigation, /label: "Ministries"/)
+assert.match(homeWorkspace, /accountSections/)
+assert.match(ministryWorkspace, /accountMenuSections/)
 assert.match(homeWorkspace, /<MinistryGlobalMembers \/>/)
+assert.match(globalMembersServer, /invitation\.status = 'pending'/)
+assert.match(globalMembersUi, /MinistryPendingInvitations/)
+assert.match(ministryMembersComponent, /MinistryPendingInvitations/)
+assert.match(ministryMembers, /resend_invitation/)
+assert.match(ministryMembers, /cancel_invitation/)
+assert.match(ministryMembers, /token_hash = \$2/)
+assert.match(pendingInvitations, /Resend/)
+assert.match(pendingInvitations, /Cancel/)
 assert.match(ministryMembers, /ministry_member\.added/)
 assert.match(ministryMembers, /ministry_member\.role_changed/)
 assert.match(ministryMembers, /ministry_member\.removed/)
@@ -325,7 +340,7 @@ assert.match(ministryMembers, /ministry_level\.created/)
 assert.match(ministryMembers, /ministry_member\.level_granted/)
 assert.match(ministryMembers, /move_ministry_level/)
 assert.match(ministryProfileServer, /highest_level_name/)
-assert.match(ministryMembersComponent, /Highest ministry level/)
+assert.match(ministryMembersComponent, /Highest level in/)
 assert.match(schedulingTemplates, /requiredLevelId/)
 assert.match(
   schedulingEvents,
@@ -427,8 +442,8 @@ assert.match(volunteerSignupPage, /emailConsent/)
 assert.match(volunteerSignupPage, /smsConsent/)
 assert.match(eventDetails, /Volunteer signup link/)
 assert.match(eventDetails, /Copy link/)
-assert.match(homeWorkspace, /label:\s*"Events"/)
-assert.doesNotMatch(homeWorkspace, /label:\s*"My Events"/)
+assert.match(accountNavigation, /label:\s*"Events"/)
+assert.doesNotMatch(accountNavigation, /label:\s*"My Events"/)
 assert.match(homeWorkspace, /Create event/)
 assert.match(homeWorkspace, /<MinistryEvents/)
 assert.match(homeWorkspace, /events=\{data\.calendarEvents\}/)

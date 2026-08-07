@@ -1,20 +1,53 @@
 import * as React from "react"
 import {
+  AcademicCapIcon,
   ArchiveBoxIcon,
   ChevronDownIcon,
+  ChevronUpDownIcon,
   ChevronUpIcon,
-  CheckCircleIcon,
   EnvelopeIcon,
+  HandRaisedIcon,
+  HeartIcon,
+  MusicalNoteIcon,
   PlusIcon,
+  ShieldCheckIcon,
+  SparklesIcon,
+  StarIcon,
   UserMinusIcon,
+  UserGroupIcon,
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
+import MinistryPendingInvitations from "./MinistryPendingInvitations"
 
 const roleLabels = {
   owner: "Owner",
   admin: "Ministry Admin",
   member: "Member",
+}
+
+const badgeIconOptions = [
+  { key: "academic-cap", label: "Academic cap", Icon: AcademicCapIcon },
+  { key: "hand-raised", label: "Raised hand", Icon: HandRaisedIcon },
+  { key: "heart", label: "Heart", Icon: HeartIcon },
+  { key: "musical-note", label: "Musical note", Icon: MusicalNoteIcon },
+  { key: "shield-check", label: "Shield", Icon: ShieldCheckIcon },
+  { key: "sparkles", label: "Sparkles", Icon: SparklesIcon },
+  { key: "star", label: "Star", Icon: StarIcon },
+  { key: "user-group", label: "Group", Icon: UserGroupIcon },
+]
+
+const LevelBadge = ({ iconKey, label, className = "" }) => {
+  const option = badgeIconOptions.find((badge) => badge.key === iconKey)
+  const Icon = option?.Icon
+  return (
+    <span
+      title={option ? `${label}: ${option.label}` : label}
+      className={`inline-flex size-8 items-center justify-center rounded-full bg-[#f4ede6] text-[#896542] ${className}`}
+    >
+      {Icon ? <Icon className="size-4" /> : <span className="text-xs font-semibold">{label}</span>}
+    </span>
+  )
 }
 
 const MinistryMembers = ({ data, activeAction }) => {
@@ -26,8 +59,11 @@ const MinistryMembers = ({ data, activeAction }) => {
   const [isLoading, setIsLoading] = React.useState(true)
   const [isSubmitting, setIsSubmitting] = React.useState(false)
   const [newLevelName, setNewLevelName] = React.useState("")
-  const [newLevelDescription, setNewLevelDescription] = React.useState("")
+  const [newLevelIconKey, setNewLevelIconKey] = React.useState("")
   const [levelDrafts, setLevelDrafts] = React.useState({})
+  const [selectedMemberId, setSelectedMemberId] = React.useState("")
+  const [draggedLevelId, setDraggedLevelId] = React.useState("")
+  const [levelDropTargetId, setLevelDropTargetId] = React.useState("")
   const [message, setMessage] = React.useState("")
   const [errorMessage, setErrorMessage] = React.useState("")
 
@@ -59,7 +95,7 @@ const MinistryMembers = ({ data, activeAction }) => {
             level.id,
             {
               name: level.name,
-              description: level.description || "",
+              iconKey: level.iconKey || "",
             },
           ]),
         ),
@@ -152,6 +188,18 @@ const MinistryMembers = ({ data, activeAction }) => {
     }
   }
 
+  const manageInvitation = async (action, invitation) => {
+    setIsSubmitting(true)
+    try {
+      await updateMembership({
+        action,
+        invitationId: invitation.id,
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   const createMinistryLevel = async (event) => {
     event.preventDefault()
     if (!newLevelName.trim()) return
@@ -160,11 +208,11 @@ const MinistryMembers = ({ data, activeAction }) => {
       const saved = await updateMembership({
         action: "create_ministry_level",
         name: newLevelName,
-        description: newLevelDescription,
+        iconKey: newLevelIconKey,
       })
       if (saved) {
         setNewLevelName("")
-        setNewLevelDescription("")
+        setNewLevelIconKey("")
       }
     } finally {
       setIsSubmitting(false)
@@ -179,6 +227,31 @@ const MinistryMembers = ({ data, activeAction }) => {
         [field]: value,
       },
     }))
+
+  const swapMinistryLevels = async (targetLevelId) => {
+    if (!draggedLevelId || draggedLevelId === targetLevelId) return
+
+    // The list is displayed highest-first, while rank_order is stored
+    // lowest-first. Swap what the administrator sees, then send the stored
+    // order back to the server.
+    const displayedLevels = [...(memberData?.levels || [])].reverse()
+    const draggedIndex = displayedLevels.findIndex(
+      (level) => level.id === draggedLevelId,
+    )
+    const targetIndex = displayedLevels.findIndex(
+      (level) => level.id === targetLevelId,
+    )
+    if (draggedIndex < 0 || targetIndex < 0) return
+
+    ;[displayedLevels[draggedIndex], displayedLevels[targetIndex]] = [
+      displayedLevels[targetIndex],
+      displayedLevels[draggedIndex],
+    ]
+    await updateMembership({
+      action: "reorder_ministry_levels",
+      orderedLevelIds: displayedLevels.reverse().map((level) => level.id),
+    })
+  }
 
   if (isLoading) {
     return <p className="p-6 text-center text-gray-500">Loading members...</p>
@@ -285,7 +358,7 @@ const MinistryMembers = ({ data, activeAction }) => {
         </form>
       )}
 
-      {activeAction.id === "roles" && (
+      {activeAction.id === "levels" && (
         <div className="space-y-8">
           <section>
             <div className="mb-4">
@@ -296,6 +369,10 @@ const MinistryMembers = ({ data, activeAction }) => {
                 Levels run from least to most capable. A member may serve their
                 highest granted level and every level below it.
               </p>
+              <p className="mt-2 text-xs font-semibold text-[#896542]">
+                Drag one level onto another to swap their order. The highest
+                level qualifies for every capability below it.
+              </p>
             </div>
             <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
               {[...(memberData.levels || [])].reverse().map((level) => {
@@ -304,17 +381,46 @@ const MinistryMembers = ({ data, activeAction }) => {
                 )
                 const draft = levelDrafts[level.id] || {
                   name: level.name,
-                  description: level.description || "",
+                  iconKey: level.iconKey || "",
                 }
                 return (
                   <div
                     key={level.id}
-                    className="grid gap-3 border-b border-gray-100 p-4 last:border-0 sm:grid-cols-[auto_1fr_auto] sm:items-center"
+                    draggable
+                    onDragStart={() => {
+                      setDraggedLevelId(level.id)
+                      setLevelDropTargetId(level.id)
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault()
+                      setLevelDropTargetId(level.id)
+                    }}
+                    onDrop={async (event) => {
+                      event.preventDefault()
+                      await swapMinistryLevels(level.id)
+                      setDraggedLevelId("")
+                      setLevelDropTargetId("")
+                    }}
+                    onDragEnd={() => {
+                      setDraggedLevelId("")
+                      setLevelDropTargetId("")
+                    }}
+                    className={`grid cursor-grab gap-3 border-b border-gray-100 p-4 last:border-0 active:cursor-grabbing sm:grid-cols-[auto_auto_1fr_auto] sm:items-center ${
+                      levelDropTargetId === level.id &&
+                      draggedLevelId !== level.id
+                        ? "bg-[#fcf7f2] ring-2 ring-inset ring-[#C1A387]"
+                        : ""
+                    }`}
                   >
-                    <span className="inline-flex size-8 items-center justify-center rounded-full bg-[#f4ede6] text-sm font-semibold text-[#896542]">
-                      {level.rankOrder}
+                    <span
+                      aria-hidden="true"
+                      title="Drag to swap this level"
+                      className="hidden text-gray-400 sm:block"
+                    >
+                      <ChevronUpDownIcon className="size-5" />
                     </span>
-                    <div className="grid gap-2 sm:grid-cols-[0.8fr_1.2fr]">
+                    <LevelBadge iconKey={level.iconKey} label={level.rankOrder} />
+                    <div className="grid gap-2 sm:grid-cols-[1fr_13rem]">
                       <input
                         value={draft.name}
                         onChange={(event) =>
@@ -327,19 +433,15 @@ const MinistryMembers = ({ data, activeAction }) => {
                         aria-label={`Name for level ${level.rankOrder}`}
                         className="h-10 rounded-lg border border-gray-200 px-3 text-sm font-semibold text-gray-800 outline-none focus:border-[#896542]"
                       />
-                      <input
-                        value={draft.description}
-                        onChange={(event) =>
-                          updateLevelDraft(
-                            level.id,
-                            "description",
-                            event.target.value,
-                          )
-                        }
-                        aria-label={`Description for ${level.name}`}
-                        placeholder="What members at this level can do"
-                        className="h-10 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#896542]"
-                      />
+                      <select
+                        value={draft.iconKey}
+                        onChange={(event) => updateLevelDraft(level.id, "iconKey", event.target.value)}
+                        aria-label={`Badge icon for ${level.name}`}
+                        className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 outline-none focus:border-[#896542]"
+                      >
+                        <option value="">No badge yet</option>
+                        {badgeIconOptions.map(({ key, label }) => <option key={key} value={key}>{label}</option>)}
+                      </select>
                     </div>
                     <div className="flex items-center gap-1">
                       <button
@@ -415,7 +517,7 @@ const MinistryMembers = ({ data, activeAction }) => {
               )}
               <form
                 onSubmit={createMinistryLevel}
-                className="grid gap-3 border-t border-gray-100 bg-[#fcfaf8] p-4 sm:grid-cols-[0.8fr_1.2fr_auto]"
+                className="grid gap-3 border-t border-gray-100 bg-[#fcfaf8] p-4 sm:grid-cols-[1fr_13rem_auto]"
               >
                 <input
                   value={newLevelName}
@@ -424,14 +526,15 @@ const MinistryMembers = ({ data, activeAction }) => {
                   placeholder="New level name"
                   className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#896542]"
                 />
-                <input
-                  value={newLevelDescription}
-                  onChange={(event) =>
-                    setNewLevelDescription(event.target.value)
-                  }
-                  placeholder="What this level can serve"
+                <select
+                  value={newLevelIconKey}
+                  onChange={(event) => setNewLevelIconKey(event.target.value)}
+                  aria-label="Badge icon for new level"
                   className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#896542]"
-                />
+                >
+                  <option value="">No badge yet</option>
+                  {badgeIconOptions.map(({ key, label }) => <option key={key} value={key}>{label}</option>)}
+                </select>
                 <button
                   type="submit"
                   disabled={isSubmitting}
@@ -443,21 +546,28 @@ const MinistryMembers = ({ data, activeAction }) => {
               </form>
             </div>
           </section>
+        </div>
+      )}
 
+      {activeAction.id === "member-access" && (
+        <div className="space-y-8">
           <section>
             <div className="mb-4">
               <h3 className="century-font text-2xl text-gray-900">
-                Member roles and levels
+                Member access and levels
               </h3>
               <p className="mt-1 text-sm text-gray-500">
-                Access role controls administration. Highest ministry level
-                controls which responsibilities the member can serve.
+                Access controls administration. Set each person’s highest
+                level in this ministry; they can serve that level and every
+                level below it.
               </p>
             </div>
             <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
               {memberData.members.map((member) => (
-                <div
+                <button
                   key={member.id}
+                  type="button"
+                  onClick={() => setSelectedMemberId(member.id)}
                   className="flex flex-col gap-3 border-b border-gray-100 p-4 last:border-0 lg:flex-row lg:items-center"
                 >
                   <div className="min-w-0 flex-1">
@@ -468,55 +578,54 @@ const MinistryMembers = ({ data, activeAction }) => {
                       {member.email} · {member.username || "Account pending"}
                     </p>
                   </div>
-                  <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                    Access
-                    {member.level === "owner" ? (
-                      <span className="mt-1 block rounded-full bg-[#f4ede6] px-3 py-2 text-sm font-semibold normal-case tracking-normal text-[#896542]">
-                        Owner
-                      </span>
-                    ) : (
-                      <select
-                        aria-label={`Role for ${member.firstName} ${member.lastName}`}
-                        value={member.level}
-                        onChange={(event) =>
-                          updateMembership({
-                            userId: member.userId,
-                            action: "set_role",
-                            level: event.target.value,
-                          })
-                        }
-                        className="mt-1 block rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold normal-case tracking-normal text-gray-700"
-                      >
-                        <option value="member">Member</option>
-                        <option value="admin">Ministry Admin</option>
-                      </select>
-                    )}
-                  </label>
-                  <label className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                    Highest ministry level
-                    <select
-                      aria-label={`Highest ministry level for ${member.firstName} ${member.lastName}`}
-                      value={member.highestLevelId || ""}
-                      onChange={(event) =>
-                        updateMembership({
-                          userId: member.userId,
-                          action: "set_ministry_level",
-                          highestLevelId: event.target.value,
-                        })
-                      }
-                      className="mt-1 block min-w-48 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold normal-case tracking-normal text-gray-700"
-                    >
-                      <option value="">Not assigned</option>
-                      {memberData.levels.map((level) => (
-                        <option key={level.id} value={level.id}>
-                          Level {level.rankOrder} · {level.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
+                  <span className="inline-flex items-center gap-2 rounded-full bg-[#f4ede6] px-3 py-2 text-sm font-semibold text-[#896542]">
+                    {member.highestLevelName && <LevelBadge iconKey={member.highestLevelIconKey} label={member.highestLevelRank || ""} className="bg-white" />}
+                    {member.highestLevelName || "No level assigned"}
+                  </span>
+                  <span className="text-sm font-semibold text-[#896542]">
+                    Manage member
+                  </span>
+                </button>
               ))}
             </div>
+            {selectedMemberId && (() => {
+              const member = memberData.members.find(
+                (candidate) => candidate.id === selectedMemberId,
+              )
+              if (!member) return null
+              return (
+                <div className="mt-5 rounded-2xl border border-[#d8c7b8] bg-[#fcfaf8] p-5 shadow-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-[#896542]">Member details</p>
+                      <h4 className="mt-1 century-font text-2xl text-gray-900">{member.firstName} {member.lastName}</h4>
+                      <p className="mt-1 text-sm text-gray-500">{member.email}</p>
+                    </div>
+                    <button type="button" onClick={() => setSelectedMemberId("")} className="text-sm font-semibold text-[#6f4f34] hover:underline">Close</button>
+                  </div>
+                  <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                    <label className="text-sm font-semibold text-gray-700">
+                      Access role
+                      {member.level === "owner" ? (
+                        <span className="mt-2 block rounded-lg bg-[#f4ede6] px-3 py-2 text-[#896542]">Owner</span>
+                      ) : (
+                        <select value={member.level} onChange={(event) => updateMembership({ userId: member.userId, action: "set_role", level: event.target.value })} className="mt-2 block h-11 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal">
+                          <option value="member">Member</option>
+                          <option value="admin">Ministry Admin</option>
+                        </select>
+                      )}
+                    </label>
+                    <label className="text-sm font-semibold text-gray-700">
+                      Highest level in {data.ministry.name}
+                      <select value={member.highestLevelId || ""} onChange={(event) => updateMembership({ userId: member.userId, action: "set_ministry_level", highestLevelId: event.target.value })} className="mt-2 block h-11 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal">
+                        <option value="">Not assigned</option>
+                        {memberData.levels.map((level) => <option key={level.id} value={level.id}>Level {level.rankOrder} · {level.name}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                </div>
+              )
+            })()}
           </section>
         </div>
       )}
@@ -601,17 +710,11 @@ const MinistryMembers = ({ data, activeAction }) => {
               )}
             </div>
             <h3 className="mb-4 century-font text-xl text-gray-900">Pending invitations</h3>
-            <div className="space-y-3">
-              {memberData.invitations.length ? memberData.invitations.map((invitation) => (
-                <article key={invitation.id} className="rounded-xl border border-amber-100 bg-amber-50/50 p-4">
-                  <p className="font-semibold text-gray-900">{invitation.email}</p>
-                  <p className="mt-1 text-xs leading-relaxed text-gray-500">{invitation.ministryNames.join(", ")}</p>
-                  <p className="mt-2 flex items-center gap-1 text-xs font-semibold text-amber-700"><CheckCircleIcon className="size-4" /> Awaiting response</p>
-                </article>
-              )) : (
-                <p className="rounded-xl border border-dashed border-gray-200 p-5 text-center text-sm text-gray-500">No pending invitations.</p>
-              )}
-            </div>
+            <MinistryPendingInvitations
+              invitations={memberData.invitations}
+              onAction={manageInvitation}
+              disabled={isSubmitting}
+            />
           </aside>
         </section>
       )}

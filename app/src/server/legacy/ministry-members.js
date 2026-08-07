@@ -61,6 +61,11 @@ const canManageMinistry = (managedMinistries, ministryId) =>
 const cleanText = (value, maximum = 1000) =>
   typeof value === "string" ? value.trim().slice(0, maximum) : ""
 
+const cleanIconKey = (value) => {
+  const iconKey = cleanText(value, 64)
+  return /^[a-z0-9-]+$/.test(iconKey) ? iconKey : null
+}
+
 const writeLevelAudit = async (
   client,
   {
@@ -111,6 +116,7 @@ const listMembers = async (client, user, ministryId) => {
           membership.can_serve,
           membership.highest_level_id,
           ministry_level.name AS highest_level_name,
+          ministry_level.icon_key AS highest_level_icon_key,
           ministry_level.rank_order AS highest_level_rank
         FROM ministry_members membership
         LEFT JOIN ministry_levels ministry_level
@@ -137,6 +143,7 @@ const listMembers = async (client, user, ministryId) => {
         canServe: Boolean(membershipResult.rows[0].can_serve),
         highestLevelId: membershipResult.rows[0].highest_level_id,
         highestLevelName: membershipResult.rows[0].highest_level_name,
+        highestLevelIconKey: membershipResult.rows[0].highest_level_icon_key,
         highestLevelRank:
           Number(membershipResult.rows[0].highest_level_rank) || null,
       },
@@ -164,6 +171,7 @@ const listMembers = async (client, user, ministryId) => {
           mm.can_serve,
           mm.highest_level_id,
           ministry_level.name AS highest_level_name,
+          ministry_level.icon_key AS highest_level_icon_key,
           ministry_level.rank_order AS highest_level_rank,
           mm.joined_at
         FROM ministry_members mm
@@ -199,7 +207,6 @@ const listMembers = async (client, user, ministryId) => {
             AND selected_item.ministry_id = $1
         )
           AND invitation.status = 'pending'
-          AND invitation.expires_at > now()
         GROUP BY invitation.id
         ORDER BY invitation.created_at DESC
       `,
@@ -222,7 +229,7 @@ const listMembers = async (client, user, ministryId) => {
     ),
     client.query(
       `
-        SELECT id, name, description, rank_order, status
+        SELECT id, name, description, icon_key, rank_order, status
         FROM ministry_levels
         WHERE ministry_id = $1
           AND status = 'active'
@@ -258,6 +265,7 @@ const listMembers = async (client, user, ministryId) => {
       canServe: member.can_serve,
       highestLevelId: member.highest_level_id,
       highestLevelName: member.highest_level_name,
+      highestLevelIconKey: member.highest_level_icon_key,
       highestLevelRank: Number(member.highest_level_rank) || null,
       joinedAt: member.joined_at,
     })),
@@ -265,6 +273,7 @@ const listMembers = async (client, user, ministryId) => {
       id: level.id,
       name: level.name,
       description: level.description || "",
+      iconKey: level.icon_key || "",
       rankOrder: Number(level.rank_order),
       status: level.status,
     })),
@@ -275,6 +284,7 @@ const listMembers = async (client, user, ministryId) => {
       expiresAt: invitation.expires_at,
       createdAt: invitation.created_at,
       ministryNames: invitation.ministry_names,
+      expired: new Date(invitation.expires_at).getTime() <= Date.now(),
     })),
     membershipRequests: requestsResult.rows.map((request) => ({
       id: request.id,
@@ -469,6 +479,145 @@ const createInvitation = async (
   })
 }
 
+const manageInvitation = async (
+  client,
+  event,
+  user,
+  actor,
+  managedMinistries,
+  body
+) => {
+  const invitationId = body.invitationId?.toString()
+  const action = body.action?.toString()
+  if (!invitationId) {
+    return jsonResponse(400, { message: "Invitation is required" })
+  }
+
+  await client.query("BEGIN")
+  try {
+    const invitationResult = await client.query(
+      `
+        SELECT id, email, status, expires_at, created_at
+        FROM ministry_invitations
+        WHERE id = $1
+        FOR UPDATE
+      `,
+      [invitationId]
+    )
+    const invitation = invitationResult.rows[0]
+    if (!invitation) {
+      await client.query("ROLLBACK")
+      return jsonResponse(404, { message: "Invitation not found" })
+    }
+    if (invitation.status !== "pending") {
+      await client.query("ROLLBACK")
+      return jsonResponse(409, {
+        message: "This invitation is no longer pending",
+      })
+    }
+
+    const ministriesResult = await client.query(
+      `
+        SELECT ministry.id, ministry.name, ministry.slug
+        FROM ministry_invitation_items item
+        JOIN ministries ministry ON ministry.id = item.ministry_id
+        WHERE item.invitation_id = $1
+        ORDER BY ministry.name
+      `,
+      [invitationId]
+    )
+    const ministries = ministriesResult.rows
+    if (
+      !ministries.length ||
+      ministries.some(
+        (ministry) => !canManageMinistry(managedMinistries, ministry.id)
+      )
+    ) {
+      await client.query("ROLLBACK")
+      return jsonResponse(403, {
+        message: "You cannot manage this invitation",
+      })
+    }
+
+    if (action === "cancel_invitation") {
+      await client.query(
+        `
+          UPDATE ministry_invitations
+          SET status = 'revoked',
+              token_hash = $2,
+              responded_at = now(),
+              updated_at = now()
+          WHERE id = $1 AND status = 'pending'
+        `,
+        [invitationId, hashInvitationToken(createInvitationToken())]
+      )
+      await writeLevelAudit(client, {
+        actor,
+        user,
+        action: "ministry_invitation.cancelled",
+        entityType: "ministry_invitation",
+        entityId: invitationId,
+        ministryId: ministries[0].id,
+        beforeData: {
+          email: invitation.email,
+          status: invitation.status,
+          expiresAt: invitation.expires_at,
+        },
+        afterData: { status: "revoked" },
+      })
+      await client.query("COMMIT")
+      return jsonResponse(200, {
+        success: true,
+        message: "Invitation cancelled. The previous link can no longer be used",
+      })
+    }
+
+    const token = createInvitationToken()
+    const expiresAt = new Date(
+      Date.now() + INVITATION_LIFETIME_DAYS * 24 * 60 * 60 * 1000
+    )
+    await client.query(
+      `
+        UPDATE ministry_invitations
+        SET token_hash = $2,
+            expires_at = $3,
+            updated_at = now()
+        WHERE id = $1 AND status = 'pending'
+      `,
+      [invitationId, hashInvitationToken(token), expiresAt]
+    )
+    await sendMinistryInvitationEmail({
+      email: invitation.email,
+      ministries,
+      acceptUrl: buildInvitationUrl(event, token, "accept"),
+      declineUrl: buildInvitationUrl(event, token, "decline"),
+      expiresAt,
+    })
+    await writeLevelAudit(client, {
+      actor,
+      user,
+      action: "ministry_invitation.resent",
+      entityType: "ministry_invitation",
+      entityId: invitationId,
+      ministryId: ministries[0].id,
+      beforeData: {
+        email: invitation.email,
+        status: invitation.status,
+        expiresAt: invitation.expires_at,
+      },
+      afterData: { status: "pending", expiresAt },
+    })
+    await client.query("COMMIT")
+    return jsonResponse(200, {
+      success: true,
+      message: `Invitation resent to ${invitation.email}`,
+    })
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {})
+    throw error
+  }
+}
+
 const updateMembership = async (
   client,
   event,
@@ -483,6 +632,17 @@ const updateMembership = async (
 
   if (!action) {
     return jsonResponse(400, { message: "Membership action is incomplete" })
+  }
+
+  if (["resend_invitation", "cancel_invitation"].includes(action)) {
+    return manageInvitation(
+      client,
+      event,
+      user,
+      actor,
+      managedMinistries,
+      body
+    )
   }
 
   if (action === "set_global_role") {
@@ -705,6 +865,7 @@ const updateMembership = async (
       "create_ministry_level",
       "update_ministry_level",
       "move_ministry_level",
+      "reorder_ministry_levels",
       "archive_ministry_level",
     ].includes(action)
   ) {
@@ -717,6 +878,7 @@ const updateMembership = async (
       if (action === "create_ministry_level") {
         const name = cleanText(body.name, 100)
         const description = cleanText(body.description, 1000) || null
+        const iconKey = cleanIconKey(body.iconKey)
         if (!name) {
           await client.query("ROLLBACK")
           return jsonResponse(400, { message: "Level name is required" })
@@ -727,6 +889,7 @@ const updateMembership = async (
               ministry_id,
               name,
               description,
+              icon_key,
               rank_order,
               created_by,
               updated_by
@@ -735,18 +898,19 @@ const updateMembership = async (
               $1,
               $2,
               $3,
+              $4,
               (
                 SELECT COALESCE(max(rank_order), 0) + 1
                 FROM ministry_levels
                 WHERE ministry_id = $1
                   AND status = 'active'
               ),
-              $4,
-              $4
+              $5,
+              $5
             )
-            RETURNING id, name, description, rank_order, status
+            RETURNING id, name, description, icon_key, rank_order, status
           `,
-          [ministryId, name, description, actor.id]
+          [ministryId, name, description, iconKey, actor.id]
         )
         const created = result.rows[0]
         await writeLevelAudit(client, {
@@ -765,6 +929,84 @@ const updateMembership = async (
         })
       }
 
+      if (action === "reorder_ministry_levels") {
+        const orderedLevelIds = Array.isArray(body.orderedLevelIds)
+          ? body.orderedLevelIds.map((id) => cleanText(id, 100)).filter(Boolean)
+          : []
+        const levelsResult = await client.query(
+          `
+            SELECT id, name, description, icon_key, rank_order, status
+            FROM ministry_levels
+            WHERE ministry_id = $1
+              AND status = 'active'
+            ORDER BY rank_order
+            FOR UPDATE
+          `,
+          [ministryId]
+        )
+        const currentIds = levelsResult.rows.map((level) => level.id)
+        const requestedIds = new Set(orderedLevelIds)
+        if (
+          orderedLevelIds.length !== currentIds.length ||
+          requestedIds.size !== currentIds.length ||
+          currentIds.some((id) => !requestedIds.has(id))
+        ) {
+          await client.query("ROLLBACK")
+          return jsonResponse(409, {
+            message: "The ministry levels changed. Please reload and try again.",
+          })
+        }
+        const byId = new Map(
+          levelsResult.rows.map((level) => [level.id, level])
+        )
+        const levels = orderedLevelIds.map((id) => byId.get(id))
+        const offset =
+          Math.max(...levels.map((level) => Number(level.rank_order)), 0) +
+          levels.length +
+          100
+        await client.query(
+          `
+            UPDATE ministry_levels
+            SET rank_order = rank_order + $2,
+                updated_by = $3,
+                updated_at = now()
+            WHERE ministry_id = $1
+              AND status = 'active'
+          `,
+          [ministryId, offset, actor.id]
+        )
+        for (const [index, level] of levels.entries()) {
+          await client.query(
+            `
+              UPDATE ministry_levels
+              SET rank_order = $2,
+                  updated_by = $3,
+                  updated_at = now()
+              WHERE id = $1
+            `,
+            [level.id, index + 1, actor.id]
+          )
+        }
+        await writeLevelAudit(client, {
+          actor,
+          user,
+          action: "ministry_level.reordered",
+          entityType: "ministry_level",
+          entityId: ministryId,
+          ministryId,
+          beforeData: levelsResult.rows,
+          afterData: levels.map((level, index) => ({
+            id: level.id,
+            rank_order: index + 1,
+          })),
+        })
+        await client.query("COMMIT")
+        return jsonResponse(200, {
+          success: true,
+          message: "Ministry level order updated",
+        })
+      }
+
       const levelId = cleanText(body.levelId, 100)
       if (!levelId) {
         await client.query("ROLLBACK")
@@ -772,7 +1014,7 @@ const updateMembership = async (
       }
       const levelResult = await client.query(
         `
-          SELECT id, name, description, rank_order, status
+          SELECT id, name, description, icon_key, rank_order, status
           FROM ministry_levels
           WHERE id = $1
             AND ministry_id = $2
@@ -790,6 +1032,7 @@ const updateMembership = async (
       if (action === "update_ministry_level") {
         const name = cleanText(body.name, 100)
         const description = cleanText(body.description, 1000) || null
+        const iconKey = cleanIconKey(body.iconKey)
         if (!name) {
           await client.query("ROLLBACK")
           return jsonResponse(400, { message: "Level name is required" })
@@ -799,12 +1042,13 @@ const updateMembership = async (
             UPDATE ministry_levels
             SET name = $2,
                 description = $3,
-                updated_by = $4,
+                icon_key = $4,
+                updated_by = $5,
                 updated_at = now()
             WHERE id = $1
-            RETURNING id, name, description, rank_order, status
+            RETURNING id, name, description, icon_key, rank_order, status
           `,
-          [levelId, name, description, actor.id]
+          [levelId, name, description, iconKey, actor.id]
         )
         const updated = result.rows[0]
         await writeLevelAudit(client, {
@@ -828,7 +1072,7 @@ const updateMembership = async (
         const direction = body.direction === "up" ? "up" : "down"
         const levelsResult = await client.query(
           `
-            SELECT id, name, description, rank_order, status
+            SELECT id, name, description, icon_key, rank_order, status
             FROM ministry_levels
             WHERE ministry_id = $1
               AND status = 'active'

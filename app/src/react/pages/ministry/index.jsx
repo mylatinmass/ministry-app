@@ -53,7 +53,7 @@ const MinistryHomeContent = () => {
         <meta name="viewport" content="initial-scale=1, viewport-fit=cover" />
       </Helmet>
       <Seo
-        title="My Ministry | MyLatinMass.com"
+        title="Ministries | MyLatinMass.com"
         description="Ministry project management for Our Lady of Victory Chapel."
       />
       {errorMessage ? (

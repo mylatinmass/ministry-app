@@ -72,7 +72,11 @@ const MinistryInvitePage = ({ location }) => {
         setInvitation(result.invitation)
         if (result.invitation.status !== "pending") {
           setStatus(result.invitation.status)
-          setMessage(`This invitation was already ${result.invitation.status}.`)
+          setMessage(
+            result.invitation.status === "revoked"
+              ? "This invitation was cancelled and can no longer be used."
+              : `This invitation was already ${result.invitation.status}.`,
+          )
         } else if (result.invitation.expired) {
           setStatus("expired")
           setMessage("This invitation has expired.")
@@ -180,7 +184,7 @@ const MinistryInvitePage = ({ location }) => {
               )}
               <p className="mt-4 text-lg font-semibold text-gray-900">{message}</p>
               {status === "accepted" && (
-                <Link to="/" className="mt-6 inline-block rounded-xl bg-[#896542] px-6 py-3 font-semibold text-white">Open my ministries</Link>
+                <Link to="/" className="mt-6 inline-block rounded-xl bg-[#896542] px-6 py-3 font-semibold text-white">Open Ministries</Link>
               )}
             </div>
           )}

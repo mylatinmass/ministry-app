@@ -391,7 +391,7 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
           </span>
           <div>
             <h3 className="century-font text-xl text-gray-900">
-              My ministries
+              Ministries
             </h3>
             <p className="text-sm text-gray-500">
               {profile.ministries.length} active{" "}

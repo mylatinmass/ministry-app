@@ -155,7 +155,7 @@ const TemplateList = ({ templates }) => {
   )
 }
 
-const OverviewContent = ({ data, onEventSelect }) => (
+const OverviewContent = ({ data, onEventSelect, onOpenWorkspaceArea }) => (
   <div className="space-y-6">
     <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
       <StatCard
@@ -179,6 +179,56 @@ const OverviewContent = ({ data, onEventSelect }) => (
         icon={DocumentDuplicateIcon}
       />
     </div>
+
+    {data.ministry.accessLevel !== "member" && (
+      <section className="rounded-2xl border border-[#e6ddd4] bg-[#fcfaf8] p-5 shadow-sm">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#896542]">
+            Ministry administration
+          </p>
+          <h2 className="mt-1 century-font text-2xl text-gray-900">
+            Manage {data.ministry.name}
+          </h2>
+          <p className="mt-1 text-sm text-gray-600">
+            Create and edit everything from the page where it belongs.
+          </p>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <button
+            type="button"
+            onClick={() => onOpenWorkspaceArea?.("events", "modify")}
+            className="rounded-xl border border-gray-200 bg-white p-4 text-left hover:border-[#C1A387]"
+          >
+            <p className="font-semibold text-gray-900">Events</p>
+            <p className="mt-1 text-sm text-gray-500">Create, edit, publish, or cancel events.</p>
+          </button>
+          <button
+            type="button"
+            onClick={() => onOpenWorkspaceArea?.("templates", "new-template")}
+            className="rounded-xl border border-gray-200 bg-white p-4 text-left hover:border-[#C1A387]"
+          >
+            <p className="font-semibold text-gray-900">Templates</p>
+            <p className="mt-1 text-sm text-gray-500">Create and edit reusable assignments.</p>
+          </button>
+          <button
+            type="button"
+            onClick={() => onOpenWorkspaceArea?.("members", "member-access")}
+            className="rounded-xl border border-gray-200 bg-white p-4 text-left hover:border-[#C1A387]"
+          >
+            <p className="font-semibold text-gray-900">Members</p>
+            <p className="mt-1 text-sm text-gray-500">Invite people and set their access and level.</p>
+          </button>
+          <button
+            type="button"
+            onClick={() => onOpenWorkspaceArea?.("members", "levels")}
+            className="rounded-xl border border-gray-200 bg-white p-4 text-left hover:border-[#C1A387]"
+          >
+            <p className="font-semibold text-gray-900">Levels & capabilities</p>
+            <p className="mt-1 text-sm text-gray-500">Name and order this ministry’s own hierarchy.</p>
+          </button>
+        </div>
+      </section>
+    )}
 
     <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
       <section>
@@ -230,6 +280,7 @@ const MinistryWorkspaceContent = ({
   activeAction,
   currentUser,
   onUserUpdate,
+  onOpenWorkspaceArea,
 }) => {
   const [calendarFocusDate, setCalendarFocusDate] = React.useState(null)
   const [selectedEvent, setSelectedEvent] = React.useState(null)
@@ -263,7 +314,13 @@ const MinistryWorkspaceContent = ({
   }
 
   if (section.id === "overview") {
-    content = <OverviewContent data={data} onEventSelect={setSelectedEvent} />
+    content = (
+      <OverviewContent
+        data={data}
+        onEventSelect={setSelectedEvent}
+        onOpenWorkspaceArea={onOpenWorkspaceArea}
+      />
+    )
   } else if (section.id === "schedule") {
     const calendarEvents = showOnlyMyEvents
       ? (data.calendarEvents || data.events).filter(

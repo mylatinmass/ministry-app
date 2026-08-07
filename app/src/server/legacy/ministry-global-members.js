@@ -53,7 +53,7 @@ const handler = async (event) => {
       })
     }
 
-    const [membershipsResult, ministriesResult, levelsResult] =
+    const [membershipsResult, ministriesResult, levelsResult, invitationsResult] =
       await Promise.all([
         client.query(
           `
@@ -108,6 +108,32 @@ const handler = async (event) => {
           ORDER BY ministry_id, rank_order
         `
         ),
+        client.query(
+          `
+            SELECT
+              invitation.id,
+              invitation.email,
+              invitation.status,
+              invitation.expires_at,
+              invitation.created_at,
+              array_agg(ministry.name ORDER BY ministry.name) AS ministry_names,
+              concat_ws(' ', requester.first_name, requester.last_name) AS requested_by_name
+            FROM ministry_invitations invitation
+            JOIN ministry_invitation_items item
+              ON item.invitation_id = invitation.id
+            JOIN ministries ministry
+              ON ministry.id = item.ministry_id
+            JOIN users requester
+              ON requester.id = invitation.requested_by
+            WHERE invitation.status = 'pending'
+            GROUP BY
+              invitation.id,
+              requester.id,
+              requester.first_name,
+              requester.last_name
+            ORDER BY invitation.created_at DESC
+          `
+        ),
       ])
 
     const membersById = new Map()
@@ -153,6 +179,16 @@ const handler = async (event) => {
         name: level.name,
         description: level.description || "",
         rankOrder: Number(level.rank_order),
+      })),
+      invitations: invitationsResult.rows.map((invitation) => ({
+        id: invitation.id,
+        email: invitation.email,
+        status: invitation.status,
+        expiresAt: invitation.expires_at,
+        createdAt: invitation.created_at,
+        ministryNames: invitation.ministry_names,
+        requestedByName: invitation.requested_by_name,
+        expired: new Date(invitation.expires_at).getTime() <= Date.now(),
       })),
     })
   } catch (error) {

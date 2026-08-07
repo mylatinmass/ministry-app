@@ -1,7 +1,6 @@
 import * as React from "react"
 import { Link } from "../../compat/gatsby"
 import {
-  ArrowLeftIcon,
   Bars3Icon,
   ChevronRightIcon,
   EyeIcon,
@@ -12,12 +11,8 @@ import {
 import MinistryWorkspaceContent from "./MinistryWorkspaceContent"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
-import {
-  memberSections,
-  ministrySections,
-  profileSection,
-  supportSection,
-} from "./ministryNavigation"
+import { memberSections, ministrySections } from "./ministryNavigation"
+import { accountSections, accountSectionUrl } from "./accountNavigation"
 
 const accessLabels = {
   owner: "Global Owner",
@@ -28,10 +23,13 @@ const accessLabels = {
 
 const MinistryWorkspace = ({ data }) => {
   const isMember = data.ministry.accessLevel === "member"
-  const availableSections = [
-    ...(isMember ? memberSections : ministrySections),
-    supportSection,
-  ]
+  const hasGlobalAccess = ["owner", "super_admin"].includes(
+    data.user.globalRole,
+  )
+  const accountMenuSections = accountSections.filter(
+    (section) => !section.globalOnly || hasGlobalAccess,
+  )
+  const availableSections = isMember ? memberSections : ministrySections
   const [currentUser, setCurrentUser] = React.useState(data.user)
   const [sectionId, setSectionId] = React.useState(() =>
     isMember ? "schedule" : "overview",
@@ -44,9 +42,8 @@ const MinistryWorkspace = ({ data }) => {
   const [familyData, setFamilyData] = React.useState(null)
   const [visibleProfileIds, setVisibleProfileIds] = React.useState([])
   const activeSection =
-    [...availableSections, profileSection].find(
-      (section) => section.id === sectionId,
-    ) || availableSections[0]
+    availableSections.find((section) => section.id === sectionId) ||
+    availableSections[0]
   const activeAction =
     activeSection.actions.find((item) => item.id === actionId) ||
     activeSection.actions[0]
@@ -54,7 +51,6 @@ const MinistryWorkspace = ({ data }) => {
     activeSection.id === "schedule" &&
     ["month", "week", "today", "custom"].includes(activeAction.id)
   const isSchedule = activeSection.id === "schedule"
-  const isProfile = activeSection.id === "profile"
 
   React.useEffect(() => {
     const loadProfiles = () => {
@@ -155,10 +151,13 @@ const MinistryWorkspace = ({ data }) => {
     [data, visibleCalendarEvents],
   )
 
-  const selectSection = (section) => {
-    setSectionId(section.id)
-    setActionId(section.actions[0].id)
-    setMobileMenuOpen(false)
+  const openWorkspaceArea = (nextSectionId, nextActionId) => {
+    const nextSection = availableSections.find(
+      (section) => section.id === nextSectionId,
+    )
+    if (!nextSection) return
+    setSectionId(nextSection.id)
+    setActionId(nextActionId || nextSection.actions[0].id)
   }
 
   return (
@@ -166,32 +165,23 @@ const MinistryWorkspace = ({ data }) => {
       <div className="mx-auto flex h-full w-full max-w-[1600px]">
         <aside className="hidden w-72 shrink-0 border-r border-gray-100 bg-white lg:block">
           <div className="sticky top-0 flex max-h-screen flex-col overflow-y-auto px-4 py-6">
-            <Link
-              to="/"
-              className="mb-6 flex items-center gap-2 px-3 text-sm text-gray-500 hover:text-[#896542]"
-            >
-              <ArrowLeftIcon className="size-4" />
-              {isMember ? "My ministries" : "All ministries"}
-            </Link>
             <div className="mb-5 px-3">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#C1A387]">
                 Ministry workspace
               </p>
               <h1 className="mt-2 bgcentury-font text-2xl leading-tight text-[#6f4f34]">
-                {data.ministry.name}
+                Ministries
               </h1>
             </div>
-            <nav aria-label="Ministry sections" className="space-y-1">
-              {availableSections.map((section) => {
+            <nav aria-label="Account sections" className="space-y-1">
+              {accountMenuSections.map((section) => {
                 const Icon = section.icon
-                const active = section.id === activeSection.id
+                const active = section.id === "ministries"
 
                 return (
-                  <button
+                  <Link
                     key={section.id}
-                    type="button"
-                    data-section-id={section.id}
-                    onClick={() => selectSection(section)}
+                    to={accountSectionUrl(section.id)}
                     className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${
                       active
                         ? "bg-[#f7f3ef] font-semibold text-[#6f4f34]"
@@ -199,11 +189,9 @@ const MinistryWorkspace = ({ data }) => {
                     }`}
                   >
                     <Icon className="size-5 shrink-0" />
-                    <span className="flex-1">
-                      {section.shortLabel || section.label}
-                    </span>
+                    <span className="flex-1">{section.label}</span>
                     {active && <ChevronRightIcon className="size-4" />}
-                  </button>
+                  </Link>
                 )
               })}
             </nav>
@@ -211,40 +199,43 @@ const MinistryWorkspace = ({ data }) => {
         </aside>
 
         <main
-          className={`flex h-full min-w-0 flex-1 flex-col overflow-hidden lg:pb-0 ${
-            isProfile ? "pb-0" : "pb-24"
-          }`}
+          className="flex h-full min-w-0 flex-1 flex-col overflow-hidden pb-24 lg:pb-0"
         >
           <header className="flex items-center border-b border-gray-100 px-4 py-2 bg-white">
             <div className="contents">
               <div className="order-1 min-w-0">
-                <div className=" flex items-center gap-2 lg:hidden">
-                  <Link
-                    to="/"
-                    aria-label="Back to ministries"
-                    className="rounded-lg border border-gray-200 bg-white p-2 text-gray-600"
-                  >
-                    <ArrowLeftIcon className="size-5" />
-                  </Link>
+                <div className="flex items-center gap-2 lg:hidden">
                   <button
                     type="button"
                     onClick={() => setMobileMenuOpen(true)}
-                    className="flex min-w-0 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-[#6f4f34]"
+                    aria-label="Open account menu"
+                    className="rounded-lg border border-gray-200 bg-white p-2 text-gray-600"
                   >
                     <Bars3Icon className="size-5 shrink-0" />
-                    <span className="truncate">{activeSection.label}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openWorkspaceArea("overview", "summary")}
+                    className="min-w-0 truncate text-sm font-semibold text-[#6f4f34]"
+                  >
+                    Ministry · {activeSection.label}
                   </button>
                 </div>
                 <p className="hidden text-xs font-semibold uppercase tracking-[0.16em] text-[#C1A387] lg:block">
                   {data.ministry.name}
                 </p>
-                <h2
+                <button
+                  type="button"
+                  onClick={() => openWorkspaceArea("overview", "summary")}
                   className={`hidden lg:block century-font text-3xl text-gray-900 lg:mt-1 lg:text-4xl ${
                     isMobileCalendarView ? "sr-only lg:not-sr-only" : ""
                   }`}
                 >
+                  Ministry
+                </button>
+                <p className="mt-1 hidden text-sm font-semibold text-[#896542] lg:block">
                   {activeSection.label}
-                </h2>
+                </p>
                 <p
                   className={` hidden lg:block mt-2 max-w-2xl text-sm leading-relaxed text-gray-500 sm:text-base ${
                     isMobileCalendarView ? "hidden lg:block" : ""
@@ -327,45 +318,40 @@ const MinistryWorkspace = ({ data }) => {
                     >
                       Availability
                     </Link>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProfileMenuOpen(false)
-                        selectSection(profileSection)
-                      }}
+                    <Link
+                      to="/?section=profile"
+                      onClick={() => setProfileMenuOpen(false)}
                       className="w-full border-t border-gray-100 px-4 py-3 text-left text-sm font-semibold text-[#896542] hover:bg-[#f7f3ef]"
                     >
                       Manage Profiles
-                    </button>
+                    </Link>
                   </div>
                 )}
               </div>
             </div>
 
-            {!isProfile && (
-              <div className="order-2 mt-5 hidden flex-wrap gap-2 lg:flex">
-                {activeSection.actions.map((item) => {
-                  const Icon = item.icon
-                  const active = item.id === activeAction.id
+            <div className="order-2 mt-5 hidden flex-wrap gap-2 lg:flex">
+              {activeSection.actions.map((item) => {
+                const Icon = item.icon
+                const active = item.id === activeAction.id
 
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setActionId(item.id)}
-                      className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                        active
-                          ? "bg-[#896542] text-white shadow-sm"
-                          : "border border-gray-200 bg-white text-gray-600 hover:border-[#C1A387] hover:text-[#896542]"
-                      }`}
-                    >
-                      <Icon className="size-4" />
-                      {item.label}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setActionId(item.id)}
+                    className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                      active
+                        ? "bg-[#896542] text-white shadow-sm"
+                        : "border border-gray-200 bg-white text-gray-600 hover:border-[#C1A387] hover:text-[#896542]"
+                    }`}
+                  >
+                    <Icon className="size-4" />
+                    {item.label}
+                  </button>
+                )
+              })}
+            </div>
           </header>
 
           <div
@@ -379,6 +365,7 @@ const MinistryWorkspace = ({ data }) => {
               activeAction={activeAction}
               currentUser={currentUser}
               onUserUpdate={setCurrentUser}
+              onOpenWorkspaceArea={openWorkspaceArea}
             />
           </div>
         </main>
@@ -413,28 +400,17 @@ const MinistryWorkspace = ({ data }) => {
             </div>
             <nav
               className="flex-1 overflow-y-auto p-3"
-              aria-label="Ministry sections"
+              aria-label="Account sections"
             >
-              {isMember && (
-                <Link
-                  to="/"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="mb-2 flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-gray-600"
-                >
-                  <ArrowLeftIcon className="size-5" />
-                  <span>My Ministries</span>
-                </Link>
-              )}
-              {availableSections.map((section) => {
+              {accountMenuSections.map((section) => {
                 const Icon = section.icon
-                const active = section.id === activeSection.id
+                const active = section.id === "ministries"
 
                 return (
-                  <button
+                  <Link
                     key={section.id}
-                    type="button"
-                    data-section-id={section.id}
-                    onClick={() => selectSection(section)}
+                    to={accountSectionUrl(section.id)}
+                    onClick={() => setMobileMenuOpen(false)}
                     className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left ${
                       active
                         ? "bg-[#f7f3ef] font-semibold text-[#6f4f34]"
@@ -443,7 +419,7 @@ const MinistryWorkspace = ({ data }) => {
                   >
                     <Icon className="size-5" />
                     <span>{section.label}</span>
-                  </button>
+                  </Link>
                 )
               })}
             </nav>
@@ -451,33 +427,31 @@ const MinistryWorkspace = ({ data }) => {
         </div>
       )}
 
-      {!isProfile && (
-        <nav
-          aria-label={`${activeSection.label} actions`}
-          className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 shadow-[0_-8px_30px_rgba(63,45,29,0.10)] backdrop-blur lg:hidden"
-        >
-          <div className="mx-auto flex max-w-xl items-start justify-around gap-1">
-            {activeSection.actions.map((item) => {
-              const Icon = item.icon
-              const active = item.id === activeAction.id
+      <nav
+        aria-label={`${activeSection.label} actions`}
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 shadow-[0_-8px_30px_rgba(63,45,29,0.10)] backdrop-blur lg:hidden"
+      >
+        <div className="mx-auto flex max-w-xl items-start justify-around gap-1">
+          {activeSection.actions.map((item) => {
+            const Icon = item.icon
+            const active = item.id === activeAction.id
 
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setActionId(item.id)}
-                  className={`flex min-w-16 flex-1 flex-col items-center gap-1 rounded-xl px-2 py-2 text-[11px] font-medium transition ${
-                    active ? "bg-[#f7f3ef] text-[#6f4f34]" : "text-gray-500"
-                  }`}
-                >
-                  <Icon className="size-5" />
-                  <span className="leading-tight">{item.label}</span>
-                </button>
-              )
-            })}
-          </div>
-        </nav>
-      )}
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActionId(item.id)}
+                className={`flex min-w-16 flex-1 flex-col items-center gap-1 rounded-xl px-2 py-2 text-[11px] font-medium transition ${
+                  active ? "bg-[#f7f3ef] text-[#6f4f34]" : "text-gray-500"
+                }`}
+              >
+                <Icon className="size-5" />
+                <span className="leading-tight">{item.label}</span>
+              </button>
+            )
+          })}
+        </div>
+      </nav>
     </div>
   )
 }

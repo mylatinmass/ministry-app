@@ -11,6 +11,7 @@ import {
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
+import MinistryPendingInvitations from "./MinistryPendingInvitations"
 
 const ministryRoleLabels = {
   owner: "Owner",
@@ -140,6 +141,7 @@ const MinistryGlobalMembers = () => {
       setInviteEmail("")
       setInviteMinistryIds([])
       setInviteOpen(false)
+      await loadMembers()
     } catch (error) {
       setErrorMessage(error.message)
     } finally {
@@ -494,6 +496,24 @@ const MinistryGlobalMembers = () => {
             className="h-12 w-full rounded-xl border border-gray-200 pl-10 pr-3 text-sm outline-none focus:border-[#896542]"
           />
         </label>
+      </section>
+
+      <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+        <div className="mb-4">
+          <h2 className="century-font text-2xl text-gray-950">
+            Pending invitations
+          </h2>
+          <p className="mt-1 text-sm text-gray-500">
+            People who have been invited but have not accepted yet.
+          </p>
+        </div>
+        <MinistryPendingInvitations
+          invitations={data.invitations || []}
+          onAction={(action, invitation) =>
+            runMemberAction({ action, invitationId: invitation.id })
+          }
+          disabled={isSaving}
+        />
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">

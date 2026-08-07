@@ -85,10 +85,12 @@ const ministrySections = [
     id: "members",
     label: "Members",
     icon: UserGroupIcon,
-    description: "Manage access roles separately from the serving roster.",
+    description:
+      "Manage members, access roles, and the level-to-capability hierarchy.",
     actions: [
       action("add-member", "Add Member", PlusIcon),
-      action("roles", "Roles", UsersIcon),
+      action("levels", "Levels & Capabilities", AdjustmentsHorizontalIcon),
+      action("member-access", "Member Access", UsersIcon),
       action("roster", "Roster", ListBulletIcon),
     ],
   },

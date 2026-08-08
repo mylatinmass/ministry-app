@@ -6,6 +6,10 @@ import { json } from "../request"
 import { verifySchedulerRequest } from "./scheduler-auth"
 import { sendTelegramMessage } from "./telegram"
 import { sendKlaviyoReminderDue } from "./klaviyo"
+import {
+  processNotificationDigests,
+  queueAssignmentReminderAlert,
+} from "./assignment-notifications"
 
 const ASSIGNMENT_STATUSES = [
   "pending",
@@ -568,11 +572,14 @@ export const handleReminderProcessing = async (request: Request) => {
   const reminders = await claimDueReminders()
 
   for (const reminder of reminders) {
-    await deliverReminder(reminder)
+    await queueAssignmentReminderAlert(reminder.id)
   }
+
+  const processedAlerts = await processNotificationDigests()
 
   return json({
     reconciledAssignments: reconciled,
     processedReminders: reminders.length,
+    processedAlerts,
   })
 }

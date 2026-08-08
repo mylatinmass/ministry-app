@@ -1,14 +1,13 @@
 import type { PoolClient } from "pg"
 import { getPool } from "../database"
 import { json } from "../request"
-import { sendAssignmentDeclinedNotification } from "../notifications/assignment-responses"
+import { sendAssignmentChangeRequestedNotification } from "../notifications/assignment-notifications"
 import {
   getIdentityContext,
   writeSchedulingAudit,
 } from "./authorization"
 
-const ACTIVE_ASSIGNMENT_STATUSES = [
-  "pending",
+const ASSIGNED_DUTY_STATUSES = [
   "assigned",
   "confirmed",
   "change_requested",
@@ -54,14 +53,6 @@ const parseDateKey = (value: unknown, fieldName: string) => {
   return { dateKey, date }
 }
 
-const addDays = (date: Date, amount: number) => {
-  const next = new Date(date)
-  next.setUTCDate(next.getUTCDate() + amount)
-  return next
-}
-
-const dateKeyFromUtc = (date: Date) => date.toISOString().slice(0, 10)
-
 const cleanText = (value: unknown, maximum = 250) =>
   typeof value === "string" ? value.trim().slice(0, maximum) : ""
 
@@ -94,7 +85,7 @@ const loadAssignments = async (client: PoolClient, userId: string) => {
         AND event.status = 'published'
       ORDER BY event.start_time, lower(responsibility.name)
     `,
-    [userId, ACTIVE_ASSIGNMENT_STATUSES],
+    [userId, ASSIGNED_DUTY_STATUSES],
   )
 
   return result.rows.map((row) => ({
@@ -143,42 +134,6 @@ const loadBlocks = async (client: PoolClient, userId: string) => {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }))
-}
-
-const splitAroundAssignedDates = (
-  start: Date,
-  end: Date,
-  assignedDates: Set<string>,
-) => {
-  const segments: Array<{ startDate: string; endDate: string }> = []
-  let segmentStart: Date | null = null
-
-  for (
-    let cursor = new Date(start);
-    cursor <= end;
-    cursor = addDays(cursor, 1)
-  ) {
-    const key = dateKeyFromUtc(cursor)
-    if (assignedDates.has(key)) {
-      if (segmentStart) {
-        segments.push({
-          startDate: dateKeyFromUtc(segmentStart),
-          endDate: dateKeyFromUtc(addDays(cursor, -1)),
-        })
-        segmentStart = null
-      }
-    } else if (!segmentStart) {
-      segmentStart = new Date(cursor)
-    }
-  }
-
-  if (segmentStart) {
-    segments.push({
-      startDate: dateKeyFromUtc(segmentStart),
-      endDate: dateKeyFromUtc(end),
-    })
-  }
-  return segments
 }
 
 const createBlock = async (
@@ -280,14 +235,21 @@ const createBlock = async (
       updated: false,
     }
   }
-  const assignedDates = new Set(
-    conflicts.map((assignment) => assignment.date),
-  )
-  const segments = splitAroundAssignedDates(
-    new Date(`${mergedStart}T00:00:00.000Z`),
-    new Date(`${mergedEnd}T00:00:00.000Z`),
-    assignedDates,
-  )
+  if (conflicts.length && body.requestChanges !== true) {
+    throw Object.assign(
+      new Error("Confirm that change requests should be sent for assigned duties"),
+      { status: 409 },
+    )
+  }
+  const changeRequestedAssignmentIds = []
+  for (const assignment of conflicts) {
+    const change = await requestAssignmentChange(client, context, {
+      assignmentId: assignment.id,
+      reason: `Availability marked unavailable from ${mergedStart} through ${mergedEnd}.`,
+    })
+    if (change.created) changeRequestedAssignmentIds.push(assignment.id)
+  }
+  const segments = [{ startDate: mergedStart, endDate: mergedEnd }]
   const label = cleanText(body.label) || null
   const createdBlocks = []
 
@@ -351,14 +313,13 @@ const createBlock = async (
   }
 
   return {
-    message: conflicts.length
-      ? createdBlocks.length
-        ? "Available dates were blocked. Assigned dates still require a change request."
-        : "These dates already contain assignments. Request a change for each duty."
+    message: changeRequestedAssignmentIds.length
+      ? `Availability blocked and ${changeRequestedAssignmentIds.length} ${changeRequestedAssignmentIds.length === 1 ? "change request was" : "change requests were"} sent`
       : "Availability blocked",
     blocks: createdBlocks,
     conflicts,
     updated: createdBlocks.length > 0,
+    changeRequestedAssignmentIds,
   }
 }
 
@@ -412,115 +373,11 @@ const cancelBlock = async (
   return { message: "Availability block removed" }
 }
 
-const respondToAssignments = async (
+async function requestAssignmentChange(
   client: PoolClient,
   context: Awaited<ReturnType<typeof getIdentityContext>>,
   body: any,
-) => {
-  const response = body.response === "confirm" ? "confirmed" :
-    body.response === "decline" ? "declined" : ""
-  if (!response) {
-    throw Object.assign(new Error("Choose confirm or decline"), { status: 400 })
-  }
-  const assignmentIds = Array.from(new Set(
-    (Array.isArray(body.assignmentIds) ? body.assignmentIds : [body.assignmentId])
-      .map((value: unknown) => cleanText(value, 100))
-      .filter(Boolean),
-  )).slice(0, 100)
-  if (!assignmentIds.length) {
-    throw Object.assign(new Error("Choose at least one assignment"), { status: 400 })
-  }
-  const assignmentResult = await client.query(
-    `
-      SELECT
-        assignment.id,
-        assignment.status,
-        assignment.event_id,
-        assignment.responsibility_id,
-        COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id
-      FROM responsibility_assignments assignment
-      JOIN event_responsibilities responsibility
-        ON responsibility.id = assignment.responsibility_id
-      JOIN events event ON event.id = assignment.event_id
-      WHERE assignment.id = ANY($1::UUID[])
-        AND assignment.user_id = $2
-        AND assignment.status IN ('pending', 'assigned')
-        AND event.status = 'published'
-      ORDER BY event.start_time, assignment.id
-      FOR UPDATE
-    `,
-    [assignmentIds, context.user.id],
-  )
-  const assignments = assignmentResult.rows
-  if (!assignments.length) {
-    throw Object.assign(
-      new Error("No active assignments are awaiting confirmation"),
-      { status: 409 },
-    )
-  }
-  await client.query(
-    `
-      UPDATE responsibility_assignments
-      SET status = $2,
-          confirmed_at = CASE WHEN $2 = 'confirmed' THEN now() ELSE NULL END,
-          updated_at = now()
-      WHERE id = ANY($1::UUID[])
-    `,
-    [assignments.map((assignment) => assignment.id), response],
-  )
-  await client.query(
-    `
-      UPDATE event_responsibilities responsibility
-      SET status = CASE
-            WHEN responsibility.unlimited_capacity THEN 'open'
-            WHEN (
-              SELECT COALESCE(sum(quantity), 0)
-              FROM responsibility_assignments assignment
-              WHERE assignment.responsibility_id = responsibility.id
-                AND assignment.status NOT IN ('declined', 'cancelled')
-            ) >= responsibility.quantity_needed THEN 'filled'
-            ELSE 'open'
-          END,
-          updated_at = now()
-      WHERE responsibility.id = ANY($1::UUID[])
-    `,
-    [assignments.map((assignment) => assignment.responsibility_id)],
-  )
-  await client.query(
-    `
-      UPDATE assignment_response_tokens
-      SET used_at = now()
-      WHERE assignment_id = ANY($1::UUID[]) AND used_at IS NULL
-    `,
-    [assignments.map((assignment) => assignment.id)],
-  )
-  for (const assignment of assignments) {
-    await writeSchedulingAudit(client, context, {
-      action: `responsibility_assignment.${response}_in_app`,
-      entityType: "responsibility_assignment",
-      entityId: assignment.id,
-      ministryId: assignment.ministry_id,
-      beforeData: { status: assignment.status },
-      afterData: { status: response },
-      metadata: { eventId: assignment.event_id, bulk: assignmentIds.length > 1 },
-    })
-  }
-  return {
-    message: `${assignments.length} ${assignments.length === 1 ? "assignment" : "assignments"} ${response}`,
-    assignments: assignments.map((assignment) => ({
-      id: assignment.id,
-      status: response,
-    })),
-    declinedAssignmentIds:
-      response === "declined" ? assignments.map((assignment) => assignment.id) : [],
-  }
-}
-
-const requestAssignmentChange = async (
-  client: PoolClient,
-  context: Awaited<ReturnType<typeof getIdentityContext>>,
-  body: any,
-) => {
+) {
   const assignmentId =
     typeof body.assignmentId === "string" ? body.assignmentId : ""
   const assignmentResult = await client.query(
@@ -541,7 +398,7 @@ const requestAssignmentChange = async (
       LIMIT 1
       FOR UPDATE
     `,
-    [assignmentId, context.user.id, ACTIVE_ASSIGNMENT_STATUSES],
+    [assignmentId, context.user.id, ASSIGNED_DUTY_STATUSES],
   )
   const assignment = assignmentResult.rows[0]
   if (!assignment) {
@@ -564,6 +421,9 @@ const requestAssignmentChange = async (
     return {
       message: "A change has already been requested for this duty",
       changeRequestId: existing.rows[0].id,
+      assignmentId: assignment.id,
+      created: false,
+      changeRequestedAssignmentIds: [],
     }
   }
 
@@ -600,12 +460,15 @@ const requestAssignmentChange = async (
       changeRequestId: requestResult.rows[0].id,
       eventId: assignment.event_id,
       reason,
-      notificationStatus: "pending_implementation",
+      notificationStatus: "delivery_requested",
     },
   })
   return {
     message: "Change request recorded",
     changeRequestId: requestResult.rows[0].id,
+    assignmentId: assignment.id,
+    created: true,
+    changeRequestedAssignmentIds: [assignment.id],
   }
 }
 
@@ -654,25 +517,16 @@ export const handleAvailability = async (request: Request) => {
         result = await cancelBlock(client, context, body)
       } else if (body.action === "request_change") {
         result = await requestAssignmentChange(client, context, body)
-      } else if (
-        body.action === "decline_assignment" ||
-        body.action === "respond_assignments"
-      ) {
-        result = await respondToAssignments(client, context, {
-          ...body,
-          response:
-            body.action === "decline_assignment" ? "decline" : body.response,
-        })
       } else {
         throw Object.assign(new Error("Unknown availability action"), {
           status: 400,
         })
       }
       await client.query("COMMIT")
-      for (const assignmentId of result.declinedAssignmentIds || []) {
-        await sendAssignmentDeclinedNotification(assignmentId).catch(
+      for (const assignmentId of result.changeRequestedAssignmentIds || []) {
+        await sendAssignmentChangeRequestedNotification(assignmentId).catch(
           (error) => {
-            console.error("Unable to notify leaders about a declined assignment:", error)
+            console.error("Unable to notify leaders about a requested assignment change:", error)
           },
         )
       }

@@ -1,10 +1,5 @@
 import * as React from "react"
-import {
-  CheckCircleIcon,
-  ExclamationTriangleIcon,
-  MapPinIcon,
-  XCircleIcon,
-} from "@heroicons/react/24/outline"
+import { MapPinIcon } from "@heroicons/react/24/outline"
 
 const toDateKey = (value) => {
   const date = value instanceof Date ? value : new Date(value)
@@ -26,9 +21,6 @@ const MinistryEventAgenda = ({
   emptyText,
   showDateHeadings = true,
   onEventSelect,
-  showAssignmentActions = false,
-  onAssignmentResponse,
-  savingAssignmentIds = new Set(),
 }) => {
   const groupedEvents = events.reduce((groups, event) => {
     const key = toDateKey(event.start_time)
@@ -89,131 +81,54 @@ const MinistryEventAgenda = ({
                         : ordoEventName || event.title
                       : event.title
 
-                    const assignmentRows =
-                      event.visibleProfileAssignments || []
-
                     return (
-                      <article
+                      <button
                         key={event.id}
-                        className={`relative w-full border border-l-8 transition hover:bg-gray-50 ${
+                        type="button"
+                        onClick={() => onEventSelect?.(event)}
+                        className={`relative w-full flex flex-col items-center gap-1 border border-l-8 px-4 py-2 transition hover:bg-gray-50 ${
                           event.is_assigned
                             ? "border-orange-400"
                             : "border-gray-200"
                         }`}
                       >
-                        <button
-                          type="button"
-                          onClick={() => onEventSelect?.(event)}
-                          className="flex w-full flex-col items-center gap-1 px-4 py-2"
-                        >
-                          <div className="flex flex-row items-center gap-3 w-full leading-relaxed text-gray-400 text-sm">
-                            {formatTime(event.start_time)}
-                            {templateName && (
-                              <h6 className="font-semibold uppercase">
-                                {templateName}
-                              </h6>
-                            )}
-                          </div>
-                          {eventName && eventName !== templateName && (
-                            <p className="text-xs font-semibold uppercase sm:text-sm text-left w-full max-h-8 overflow-hidden text-ellipsis">
-                              {eventName}
-                            </p>
+                        <div className="flex flex-row items-center gap-3 w-full leading-relaxed text-gray-400 text-sm">
+                          {formatTime(event.start_time)}
+                          {templateName && (
+                            <h6 className="font-semibold uppercase">
+                              {templateName}
+                            </h6>
                           )}
-                          <div className="min-w-0">
-
-
-                          {/* {event.visibleProfileAssignments?.length > 0 && (
-                            <p className="mt-1 text-xs text-gray-500">
-                              {event.visibleProfileAssignments
-                                .map(
-                                  (assignment) =>
-                                    `${assignment.firstName} ${assignment.lastName}: ${assignment.responsibilityName}`,
-                                )
-                                .join(" · ")}
-                            </p>
-                          )} */}
-                          {/* <p className="mt-0.5 text-sm text-gray-600 sm:text-base">
-                            {event.description || "Parish event"}
-                          </p> */}
-                          {/* {event.location && (
-                            <p className="mt-1 flex items-center gap-1 text-xs text-gray-400 sm:text-sm">
-                              <MapPinIcon className="size-4" />
-                              {event.location}
-                            </p>
-                          )} */}
-                          </div>
-                        </button>
-                        {showAssignmentActions && assignmentRows.length > 0 && (
-                          <div className="border-t border-gray-100 px-4 py-2">
-                            {assignmentRows.map((assignment) => {
-                              const pending = ["pending", "assigned"].includes(
-                                assignment.status,
-                              )
-                              const saving = savingAssignmentIds.has(
-                                assignment.id,
-                              )
-                              return (
-                                <div
-                                  key={assignment.id}
-                                  className="flex items-center gap-3 py-1 text-left text-xs sm:text-sm"
-                                >
-                                  <span className="min-w-0 flex-1 font-semibold text-gray-600">
-                                    {assignment.responsibilityName}
-                                  </span>
-                                  {pending ? (
-                                    <div className="flex shrink-0 items-center gap-1">
-                                      <button
-                                        type="button"
-                                        disabled={saving}
-                                        onClick={() =>
-                                          onAssignmentResponse?.(
-                                            assignment,
-                                            "confirm",
-                                            event,
-                                          )
-                                        }
-                                        className="rounded-full p-1 text-green-600 transition hover:bg-green-50 disabled:opacity-50"
-                                        aria-label={`Accept ${assignment.responsibilityName}`}
-                                        title="Accept assignment"
-                                      >
-                                        <CheckCircleIcon className="size-6" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        disabled={saving}
-                                        onClick={() =>
-                                          onAssignmentResponse?.(
-                                            assignment,
-                                            "decline",
-                                            event,
-                                          )
-                                        }
-                                        className="rounded-full p-1 text-red-600 transition hover:bg-red-50 disabled:opacity-50"
-                                        aria-label={`Decline ${assignment.responsibilityName}`}
-                                        title="Decline assignment"
-                                      >
-                                        <XCircleIcon className="size-6" />
-                                      </button>
-                                    </div>
-                                  ) : assignment.status === "confirmed" ? (
-                                    <span className="inline-flex shrink-0 items-center gap-1 font-semibold text-green-700">
-                                      <CheckCircleIcon className="size-5" /> Accepted
-                                    </span>
-                                  ) : assignment.status === "declined" ? (
-                                    <span className="inline-flex shrink-0 items-center gap-1 font-semibold text-red-700">
-                                      <XCircleIcon className="size-5" /> Declined
-                                    </span>
-                                  ) : (
-                                    <span className="inline-flex shrink-0 items-center gap-1 font-semibold text-orange-600">
-                                      <ExclamationTriangleIcon className="size-5" /> Pending
-                                    </span>
-                                  )}
-                                </div>
-                              )
-                            })}
-                          </div>
+                        </div>
+                        {eventName && eventName !== templateName && (
+                          <p className="text-xs font-semibold uppercase sm:text-sm text-left w-full max-h-8 overflow-hidden text-ellipsis">
+                            {eventName}
+                          </p>
                         )}
-                      </article>
+                        <div className="min-w-0">
+
+
+                        {/* {event.visibleProfileAssignments?.length > 0 && (
+                          <p className="mt-1 text-xs text-gray-500">
+                            {event.visibleProfileAssignments
+                              .map(
+                                (assignment) =>
+                                  `${assignment.firstName} ${assignment.lastName}: ${assignment.responsibilityName}`,
+                              )
+                              .join(" · ")}
+                          </p>
+                        )} */}
+                        {/* <p className="mt-0.5 text-sm text-gray-600 sm:text-base">
+                          {event.description || "Parish event"}
+                        </p> */}
+                        {/* {event.location && (
+                          <p className="mt-1 flex items-center gap-1 text-xs text-gray-400 sm:text-sm">
+                            <MapPinIcon className="size-4" />
+                            {event.location}
+                          </p>
+                        )} */}
+                        </div>
+                      </button>
                     )
                   })}
                 </div>

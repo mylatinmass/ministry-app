@@ -59,9 +59,9 @@ configuration names only; secrets and production data must never be committed.
 | 1962ordo.today | Current read-only reference | Supplies public liturgical reference data. The application normalizes and caches it; the source never receives ministry rosters, assignments, contact data, or private notes. | Outbound HTTPS; cache/refresh behavior in the Ordo service; source-failure monitoring and terms review remain required. |
 | MyLatinMass/public websites | Current schedule input and link boundary | Each Ministry App build reads the same public Mass Schedule and liturgical-days feeds used by MyLatinMass and idempotently creates or refreshes Mass events in CockroachDB. The liturgical-day name becomes the event name while Low Mass or High Mass remains the scheduling template. Only rows whose descriptions contain Mass are imported; Confession, Rosary, Holy Hour, Adoration, Benediction, and similar rows remain public schedule context and do not become Ministry App events. The public website still must not receive volunteer names, staffing details, private notes, eligibility, family data, or private events. | `MASS_SCHEDULE_URL`, `MASS_SCHEDULE_LITURGICAL_DAYS_URL`, location/time-zone settings, ministry slug mappings, `COCKROACHDB_CONNECTION_STRING`, and migration `20260806_04_add_mass_schedule_sync.sql`. |
 | Klaviyo | Future preferred communications platform | Intended provider for permission-based email and SMS, including assignment messages, reminders, schedule changes, cancellations, volunteer opportunities, and chapel subscriptions. CockroachDB remains the operational source of truth; Klaviyo receives only the minimum approved profile, consent, subscription, and event data needed for delivery. | Klaviyo account ownership; private API key/credential; list and segment design; event schema; consent and unsubscribe mapping; sender/domain authentication; webhook handling; retry, deduplication, delivery-status, retention, and deletion rules. |
-| SMTP/Nodemailer | Transitional, limited | Existing account invitation, one-time member sign-in, managed-profile review, and authenticated Support contact flows can send transactional email. Sign-in links are single-use, expire after 15 minutes, are unavailable to Owner/Super Admin accounts, and create restricted sessions that cannot change account or member access. The Support recipient list stays server-side and may contain the webmaster and other designated people; it falls back to `GMAIL_USER` until a dedicated list is configured. This is not the completed Ministry notification system and should be replaced or deliberately retained when Klaviyo is integrated. | `GMAIL_USER`, `GMAIL_PASS`, comma-separated `SUPPORT_RECIPIENTS`, `SITE_URL`, `MINISTRY_LOGIN_LINK_TTL_MINUTES`, delivery-safety controls, and an approved migration plan to Klaviyo. |
+| SMTP/Nodemailer | Transitional, limited | Existing account invitation, one-time member sign-in, managed-profile review, authenticated Support contact, and grouped Ministry alert digests can send transactional email. Alert records remain attached to the affected profile while a managed child's digest is delivered to the parent/contact. Sign-in links are single-use, expire after 15 minutes, are unavailable to Owner/Super Admin accounts, and create restricted sessions that cannot change account or member access. The Support recipient list stays server-side and may contain the webmaster and other designated people; it falls back to `GMAIL_USER` until a dedicated list is configured. This should be replaced or deliberately retained when Klaviyo is integrated. | `GMAIL_USER`, `GMAIL_PASS`, comma-separated `SUPPORT_RECIPIENTS`, `SITE_URL`, `MINISTRY_LOGIN_LINK_TTL_MINUTES`, optional `MINISTRY_NOTIFICATION_DIGEST_MINUTES` (default 5), delivery-safety controls, and an approved migration plan to Klaviyo. |
 | Browser push | Designed, not operationally accepted | The codebase contains a subscription and reminder-delivery foundation, but notifications are still considered Pending until production configuration, scheduling, consent, delivery testing, and stakeholder acceptance are complete. | VAPID keys, `VAPID_SUBJECT`, scheduler identity, delivery monitoring, retry policy, and user-facing consent. |
-| Telegram | Future optional channel | May provide direct volunteer interactions and privacy-safe opening summaries. It must never be the only participation method or expose sensitive records. | Chapel-owned bot, account-linking and authorization design, webhook secret, privacy review, delivery fallback, and acceptance testing. |
+| Telegram | Implemented, pending operational acceptance | Linked contacts can receive the same grouped Ministry alert digest as email. Managed-child alerts are grouped by child name and delivered only to the parent/contact's linked Telegram account. Telegram is optional and is never the only way to view an alert. | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, account linking, scheduler invocation of `/api/reminders/process`, optional `MINISTRY_NOTIFICATION_DIGEST_MINUTES` (default 5), privacy review, monitoring, and acceptance testing. |
 | Google Calendar / Apple Calendar | Future | May import approved future events and provide private revocable personal calendar subscriptions. External calendars must receive only the view authorized for that subscriber. | Import contract, duplicate/conflict rules, revocable feed tokens, visibility filtering, and transition/archive plan. |
 | Priory priest-assignment Google Sheet or CSV | Future optional input | May provide celebrant assignments as helpful scheduling input. Missing or conflicting data must warn rather than cancel a service, and no private Ministry data is written back without separate approval. | Approved file ownership/access, column schema, validation, refresh cadence, source audit, and conflict handling. |
 | fsspx.today | Future optional input | May provide public chapel service information if permission, reliability, and source terms are acceptable. Imported information is treated as untrusted input and must not overwrite approved local data silently. | Source/terms approval, adapter contract, caching, structural-change detection, validation, and manual correction path. |
@@ -179,15 +179,24 @@ always strict and returns an error when the feed or database is unavailable.
 - Leaders receive a pre-publication review of required-position shortages,
   overlapping assignments, available backup candidates, event-only overrides,
   and pending change requests.
-- Assignment confirmation and actual service outcome are preserved separately.
-  After an event begins, an authorized leader can record Served, No-show,
+- Assignment and actual service outcome are preserved separately. An assignment
+  takes effect immediately and does not require volunteer confirmation. After
+  an event begins, an authorized leader can record Served, No-show,
   Substitute served, or Excused. Every change records the actor and before/after
   values in `ministry_audit_log`.
 - Candidate selection shows historical reliability when enough recorded outcomes
   exist, including a separate comparison for the event's local start time. This
   is decision support for a leader, not an automatic ban after one incident.
-- Members can decline an unconfirmed assignment without creating substitute
-  responsibility. Coverage immediately reopens and the decline remains audited.
+- Members cannot accept or decline assignments. They can request a change. If
+  an unavailable-date range overlaps an assignment, the app warns before
+  continuing, records the unavailability, creates the change request, and
+  alerts enabled ministry leaders.
+- Assignment and change-request alerts are stored against the affected profile
+  and delivered in short email/Telegram digests instead of one message per
+  change. For a parent account, one digest groups totals and details separately
+  for the parent and each managed child. Unread profile alerts appear in the
+  Home workspace and as orange dots in the profile switcher; profiles without
+  unread alerts use a gray dot.
 - An availability block can apply to every ministry or only one selected ministry.
   Account-wide remains the default for backward compatibility.
 - The Reports workspace provides six-month participation and workload history,
@@ -242,13 +251,9 @@ always strict and returns an error when the feed or database is unavailable.
   the existing webhook before activating or deliberately replacing it. Connected
   accounts receive selected scheduled reminders through Telegram; blocked chats
   are deactivated and delivery attempts are logged. New administrative
-  assignments send an immediate notice through each enabled Email and Telegram
-  channel. Email opens a private confirmation page, while Telegram provides
-  inline Confirm and Decline buttons. Both channels share a single-use response
-  token, update the same assignment record, and audit the accepted response.
-  The account Calendar also supports individual and visible-month bulk
-  responses, while Home and the profile alert show assignments still awaiting
-  confirmation. A decline reopens coverage and alerts enabled ministry leaders.
+  assignments send an immediate informational notice through each enabled Email
+  and Telegram channel with a link to the Ministry app. Assigned members may
+  request a change from Availability; they do not confirm or decline duties.
 
 ## Privacy and repository rules
 

@@ -301,11 +301,23 @@ const MinistryWorkspace = ({ data }) => {
                             <button
                               type="button"
                               onClick={() => switchProfile(profile.id)}
-                              className={`min-w-0 flex-1 px-2 py-2 text-right text-sm ${
+                              className={`flex min-w-0 flex-1 items-center justify-end gap-2 px-2 py-2 text-right text-sm ${
                                 active ? "font-semibold text-[#6f4f34]" : "text-gray-700"
                               }`}
                             >
-                              {profile.firstName} {profile.lastName}
+                              <span
+                                className={`size-2 shrink-0 rounded-full ${
+                                  profile.alertCount > 0
+                                    ? "bg-orange-400"
+                                    : "bg-gray-300"
+                                }`}
+                                aria-label={
+                                  profile.alertCount > 0
+                                    ? `${profile.alertCount} unread alerts`
+                                    : "No unread alerts"
+                                }
+                              />
+                              <span>{profile.firstName} {profile.lastName}</span>
                             </button>
                           </div>
                         )

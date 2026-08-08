@@ -10,7 +10,6 @@ import {
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 
-const DISPLAYED_MONTH_COUNT = 12
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"]
 
 const toDateKey = (value) => {
@@ -93,6 +92,7 @@ const MinistryAvailability = () => {
   const [visibleMonth, setVisibleMonth] = React.useState(
     () => new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   )
+  const [showsTwoMonths, setShowsTwoMonths] = React.useState(false)
   const [selectionStart, setSelectionStart] = React.useState("")
   const [selectionEnd, setSelectionEnd] = React.useState("")
   const [label, setLabel] = React.useState("")
@@ -101,6 +101,8 @@ const MinistryAvailability = () => {
   const [isSaving, setIsSaving] = React.useState(false)
   const [message, setMessage] = React.useState("")
   const [errorMessage, setErrorMessage] = React.useState("")
+  const [pendingConflictRequest, setPendingConflictRequest] =
+    React.useState(null)
   const dragStart = React.useRef("")
   const dragMoved = React.useRef(false)
   const dragging = React.useRef(false)
@@ -138,6 +140,14 @@ const MinistryAvailability = () => {
   React.useEffect(() => {
     loadAvailability()
   }, [loadAvailability])
+
+  React.useEffect(() => {
+    const media = window.matchMedia("(min-width: 1024px)")
+    const updateMonthCount = () => setShowsTwoMonths(media.matches)
+    updateMonthCount()
+    media.addEventListener("change", updateMonthCount)
+    return () => media.removeEventListener("change", updateMonthCount)
+  }, [])
 
   React.useEffect(() => {
     const stopDragging = () => {
@@ -193,20 +203,13 @@ const MinistryAvailability = () => {
     : []
   const todayKey = toDateKey(new Date())
   const visibleMonths = React.useMemo(
-    () =>
-      Array.from(
-        { length: DISPLAYED_MONTH_COUNT },
-        (_, index) =>
-          new Date(
-            visibleMonth.getFullYear(),
-            visibleMonth.getMonth() + index,
-            1,
-          ),
-      ),
+    () => [
+      visibleMonth,
+      new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 1),
+    ],
     [visibleMonth],
   )
-  const lastVisibleMonth =
-    visibleMonths[visibleMonths.length - 1] || visibleMonth
+  const displayedMonths = showsTwoMonths ? visibleMonths : [visibleMonth]
 
   const blocksForDate = (key) =>
     availability.blocks.filter(
@@ -269,13 +272,38 @@ const MinistryAvailability = () => {
     })
     if (result?.conflicts?.length) {
       setMessage("")
-      setErrorMessage(result.message)
+      setErrorMessage("")
+      setPendingConflictRequest({
+        selection,
+        label,
+        ministryId: scopeMinistryId,
+        conflicts: result.conflicts,
+      })
       return
     }
     if (result?.updated) {
       setSelectionStart("")
       setSelectionEnd("")
       setLabel("")
+    }
+  }
+
+  const continueBlockSelection = async () => {
+    if (!pendingConflictRequest) return
+    const result = await postAction({
+      action: "create_block",
+      startDate: pendingConflictRequest.selection.startDate,
+      endDate: pendingConflictRequest.selection.endDate,
+      label: pendingConflictRequest.label,
+      ministryId: pendingConflictRequest.ministryId,
+      requireConflictFree: false,
+      requestChanges: true,
+    })
+    if (result?.updated) {
+      setSelectionStart("")
+      setSelectionEnd("")
+      setLabel("")
+      setPendingConflictRequest(null)
     }
   }
 
@@ -289,20 +317,6 @@ const MinistryAvailability = () => {
   const requestChange = async (assignment) => {
     await postAction({
       action: "request_change",
-      assignmentId: assignment.id,
-    })
-  }
-
-  const declineAssignment = async (assignment) => {
-    if (
-      !window.confirm(
-        `Decline ${assignment.responsibilityName} for ${assignment.eventTitle}?`,
-      )
-    ) {
-      return
-    }
-    await postAction({
-      action: "decline_assignment",
       assignmentId: assignment.id,
     })
   }
@@ -326,8 +340,9 @@ const MinistryAvailability = () => {
             </h2>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-gray-500">
               Tap the first and last date, or drag across the calendar. Dates
-              with an assigned duty cannot be blocked; request a change for
-              those duties instead. Scroll to select across different months.
+              with an assigned duty will ask you to continue before the date is
+              blocked and a change request is sent. Use the previous and next
+              buttons to move between months.
             </p>
           </div>
           {availability.user && (
@@ -350,49 +365,37 @@ const MinistryAvailability = () => {
           </p>
         )}
 
-        <div className="mt-6 flex items-center justify-between gap-3">
+        <div className="relative mt-6 xl:mx-12">
           <button
             type="button"
             aria-label="Previous month"
             onClick={() => moveMonth(-1)}
-            className="rounded-xl p-2 text-gray-400 transition hover:bg-gray-100"
+            className="absolute left-2 top-1 z-10 rounded-xl p-2 text-gray-400 transition hover:bg-gray-100 lg:top-1/2 lg:-translate-y-1/2 xl:-left-12"
           >
             <ChevronLeftIcon className="size-5" />
           </button>
-          <h3 className="font-semibold text-gray-900">
-            {new Intl.DateTimeFormat("en-US", {
-              month: "long",
-              year: "numeric",
-            }).format(visibleMonth)}{" "}
-            –{" "}
-            {new Intl.DateTimeFormat("en-US", {
-              month: "long",
-              year: "numeric",
-            }).format(lastVisibleMonth)}
-          </h3>
           <button
             type="button"
             aria-label="Next month"
             onClick={() => moveMonth(1)}
-            className="rounded-xl p-2 text-gray-400 transition hover:bg-gray-100"
+            className="absolute right-2 top-1 z-10 rounded-xl p-2 text-gray-400 transition hover:bg-gray-100 lg:top-1/2 lg:-translate-y-1/2 xl:-right-12"
           >
             <ChevronRightIcon className="size-5" />
           </button>
-        </div>
 
-        {isLoading ? (
-          <p className="py-14 text-center text-sm text-gray-500">
-            Loading availability...
-          </p>
-        ) : (
-          <div className="mt-4 flex snap-x snap-mandatory gap-6 overflow-x-auto overflow-y-hidden pb-3 pr-1 touch-pan-x">
-            {visibleMonths.map((month) => {
+          {isLoading ? (
+            <p className="py-14 text-center text-sm text-gray-500">
+              Loading availability...
+            </p>
+          ) : (
+            <div className="grid gap-6 lg:grid-cols-2">
+              {displayedMonths.map((month) => {
               const monthKey = `${month.getFullYear()}-${month.getMonth()}`
               const monthCells = getMonthCells(month)
               return (
                 <section
                   key={monthKey}
-                  className="w-full shrink-0 snap-start rounded-xl border border-gray-100 p-3 lg:w-[calc(50%-0.75rem)]"
+                  className="w-full rounded-xl border border-gray-100 p-3"
                 >
                   <h4 className="text-center font-semibold text-gray-900">
                     {new Intl.DateTimeFormat("en-US", {
@@ -418,7 +421,7 @@ const MinistryAvailability = () => {
                           <span
                             key={`${monthKey}-${key}`}
                             aria-hidden="true"
-                            className="mx-auto size-10 sm:size-12"
+                            className="mx-auto size-8 sm:size-12"
                           />
                         )
                       }
@@ -440,16 +443,16 @@ const MinistryAvailability = () => {
                           onPointerDown={() => beginDrag(key)}
                           onPointerEnter={() => extendDrag(key)}
                           onPointerUp={() => finishPointer(key)}
-                          className={`relative mx-auto flex size-10 items-center justify-center rounded-2xl text-sm font-semibold text-gray-900 transition sm:size-12 sm:text-base ${
+                          className={`relative mx-auto flex size-8 items-center justify-center rounded-full text-sm font-semibold text-gray-900 transition sm:size-12 md:text-base ${
                             selected
-                              ? "bg-[#eee2d5] text-[#6f4f34] ring-2 ring-[#C1A387]"
+                              ? "bg-[#eee2d5] text-[#6f4f34] ring-2 ring-[#6f4f34]"
+                              : key === todayKey
+                                ? "bg-orange-500 text-white ring-2 ring-orange-500"
                               : assigned
-                                ? "ring-2 ring-orange-400"
+                                ? "ring-2 ring-orange-500"
                                 : blocked
                                   ? "bg-[#f4ede6] text-[#6f4f34]"
-                                  : key === todayKey
-                                    ? "ring-1 ring-gray-300"
-                                    : ""
+                                  : ""
                           } ${
                             past
                               ? "cursor-not-allowed opacity-40"
@@ -469,16 +472,17 @@ const MinistryAvailability = () => {
                   </div>
                 </section>
               )
-            })}
-          </div>
-        )}
+              })}
+            </div>
+          )}
+        </div>
 
         <div className="mt-6 flex flex-wrap gap-x-5 gap-y-2 border-t border-gray-100 pt-4 text-xs text-gray-500">
           <span className="inline-flex items-center gap-2">
             <span className="size-3 rounded bg-[#f4ede6]" /> Unavailable
           </span>
           <span className="inline-flex items-center gap-2">
-            <span className="size-3 rounded-full ring-2 ring-orange-400" />{" "}
+            <span className="size-3 rounded-full ring-2 ring-orange-500" />{" "}
             Assigned duty
           </span>
           <span className="inline-flex items-center gap-2">
@@ -504,7 +508,7 @@ const MinistryAvailability = () => {
               </h3>
               <p className="mt-1 text-sm text-gray-500">
                 Nothing is saved until you select UPDATE. Assigned dates
-                require a change request before this range can be blocked.
+                will show a warning before change requests are sent.
               </p>
             </div>
           </div>
@@ -570,16 +574,6 @@ const MinistryAvailability = () => {
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {["pending", "assigned"].includes(assignment.status) && (
-                        <button
-                          type="button"
-                          disabled={isSaving}
-                          onClick={() => declineAssignment(assignment)}
-                          className="rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-70"
-                        >
-                          Decline
-                        </button>
-                      )}
                       <button
                         type="button"
                         disabled={
@@ -647,6 +641,62 @@ const MinistryAvailability = () => {
           </p>
         )}
       </section>
+
+      {pendingConflictRequest && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 px-4">
+          <section
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="availability-conflict-title"
+            className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"
+          >
+            <h3
+              id="availability-conflict-title"
+              className="century-font text-2xl text-gray-950"
+            >
+              Assigned duties need a change request
+            </h3>
+            <p className="mt-3 text-sm leading-relaxed text-gray-600">
+              This unavailable range contains the following assigned duties. If
+              you continue, the dates will be marked unavailable and the
+              ministry administrators will be alerted automatically.
+            </p>
+            <div className="mt-4 max-h-56 space-y-2 overflow-y-auto">
+              {pendingConflictRequest.conflicts.map((assignment) => (
+                <div
+                  key={assignment.id}
+                  className="rounded-xl border border-orange-200 bg-orange-50/40 p-3"
+                >
+                  <p className="font-semibold text-gray-900">
+                    {assignment.responsibilityName}
+                  </p>
+                  <p className="mt-1 text-xs text-gray-600">
+                    {formatDate(assignment.date)} · {assignment.eventTitle}
+                  </p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={() => setPendingConflictRequest(null)}
+                className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-600 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={continueBlockSelection}
+                className="rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {isSaving ? "Updating..." : "Continue"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   )
 }

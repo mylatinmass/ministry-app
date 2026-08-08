@@ -22,18 +22,12 @@ const getMonthCells = (month) => {
 const MinistryHomeCalendar = ({
   events = [],
   onEventSelect,
-  onAssignmentResponse,
-  onBulkAssignmentResponse,
-  savingAssignmentIds,
-  bulkResponsePending = false,
 }) => {
-  const calendarViewportRef = React.useRef(null)
   const [visibleMonth, setVisibleMonth] = React.useState(() => {
     const today = new Date()
     return new Date(today.getFullYear(), today.getMonth(), 1)
   })
   const [selectedDate, setSelectedDate] = React.useState(null)
-  const [mobileMonthIndex, setMobileMonthIndex] = React.useState(0)
   const [showsTwoMonths, setShowsTwoMonths] = React.useState(false)
   const visibleMonths = React.useMemo(
     () => [
@@ -60,9 +54,8 @@ const MinistryHomeCalendar = ({
     [validEvents],
   )
   const selectedKey = selectedDate ? toDateKey(selectedDate) : ""
-  const agendaMonths = showsTwoMonths
-    ? visibleMonths
-    : [visibleMonths[mobileMonthIndex] || visibleMonth]
+  const displayedMonths = showsTwoMonths ? visibleMonths : [visibleMonth]
+  const agendaMonths = displayedMonths
   const visibleMonthEvents = validEvents.filter((event) => {
     const eventDate = new Date(event.start_time)
     return agendaMonths.some(
@@ -74,12 +67,6 @@ const MinistryHomeCalendar = ({
   const agendaEvents = selectedKey
     ? eventsByDate[selectedKey] || []
     : visibleMonthEvents
-  const visibleAssignments = visibleMonthEvents.flatMap(
-    (event) => event.visibleProfileAssignments || [],
-  )
-  const pendingAssignments = visibleAssignments.filter((assignment) =>
-    ["pending", "assigned"].includes(assignment.status),
-  )
   const todayKey = toDateKey(new Date())
 
   React.useEffect(() => {
@@ -92,8 +79,6 @@ const MinistryHomeCalendar = ({
 
   const moveMonth = (amount) => {
     setSelectedDate(null)
-    setMobileMonthIndex(0)
-    calendarViewportRef.current?.scrollTo({ left: 0 })
     setVisibleMonth(
       (current) =>
         new Date(current.getFullYear(), current.getMonth() + amount, 1),
@@ -103,22 +88,6 @@ const MinistryHomeCalendar = ({
   const selectDay = (date) => {
     const key = toDateKey(date)
     setSelectedDate(key === selectedKey ? null : date)
-  }
-
-  const updateVisibleMobileMonth = (event) => {
-    if (showsTwoMonths) return
-    const viewport = event.currentTarget
-    const nextIndex = Math.max(
-      0,
-      Math.min(
-        visibleMonths.length - 1,
-        Math.round(viewport.scrollLeft / viewport.clientWidth),
-      ),
-    )
-    if (nextIndex !== mobileMonthIndex) {
-      setMobileMonthIndex(nextIndex)
-      setSelectedDate(null)
-    }
   }
 
   const visibleMonthLabel = agendaMonths
@@ -153,12 +122,8 @@ const MinistryHomeCalendar = ({
           <ChevronRightIcon className="size-5" />
         </button>
 
-        <div
-          ref={calendarViewportRef}
-          onScroll={updateVisibleMobileMonth}
-          className="flex snap-x snap-mandatory gap-6 overflow-x-auto overflow-y-hidden pb-3 pr-1 touch-pan-x"
-        >
-          {visibleMonths.map((month) => {
+        <div className="grid gap-6 lg:grid-cols-2">
+          {displayedMonths.map((month) => {
             const monthKey = `${month.getFullYear()}-${month.getMonth()}`
             const monthCells = getMonthCells(month)
 
@@ -169,7 +134,7 @@ const MinistryHomeCalendar = ({
                   month: "long",
                   year: "numeric",
                 }).format(month)}
-                className="w-full shrink-0 snap-start rounded-xl border border-gray-100 p-3 lg:w-[calc(50%-0.75rem)]"
+                className="w-full rounded-xl border border-gray-100 p-3"
               >
               <h3 className="text-center font-semibold text-gray-900">
                 {new Intl.DateTimeFormat("en-US", {
@@ -256,39 +221,6 @@ const MinistryHomeCalendar = ({
         </span>
       </div> */}
 
-      <div className="mb-5 mt-3 flex flex-col gap-3 border-y border-gray-100 py-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="font-semibold text-gray-900">
-            {visibleAssignments.length} {visibleAssignments.length === 1 ? "assignment" : "assignments"}
-          </p>
-          <p className="mt-1 text-xs text-gray-500">
-            {pendingAssignments.length} awaiting confirmation in {visibleMonthLabel}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled={!pendingAssignments.length || bulkResponsePending}
-            onClick={() =>
-              onBulkAssignmentResponse?.(pendingAssignments, "confirm")
-            }
-            className="rounded-lg border border-green-200 px-4 py-2 text-sm font-semibold text-green-700 disabled:opacity-40"
-          >
-            Accept All
-          </button>
-          <button
-            type="button"
-            disabled={!pendingAssignments.length || bulkResponsePending}
-            onClick={() =>
-              onBulkAssignmentResponse?.(pendingAssignments, "decline")
-            }
-            className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-40"
-          >
-            Decline All
-          </button>
-        </div>
-      </div>
-
       <MinistryEventAgenda
         events={agendaEvents}
         label={agendaLabel}
@@ -301,9 +233,6 @@ const MinistryHomeCalendar = ({
             : "Published ministry events will appear here."
         }
         onEventSelect={onEventSelect}
-        showAssignmentActions
-        onAssignmentResponse={onAssignmentResponse}
-        savingAssignmentIds={savingAssignmentIds}
       />
     </section>
   )

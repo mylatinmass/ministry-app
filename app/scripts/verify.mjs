@@ -113,13 +113,11 @@ const [
   massScheduleSync,
   massScheduleLibrary,
   packageJson,
-  environmentExample,
 ] = await Promise.all([
   read("migrations/20260806_04_add_mass_schedule_sync.sql"),
   read("scripts/sync-mass-schedule.mjs"),
   read("scripts/lib/mass-schedule-sync.mjs"),
   read("package.json"),
-  read(".env.example"),
 ])
 
 assert.match(astroConfig, /site:\s*"https:\/\/ministry\.mylatinmass\.com"/)
@@ -168,8 +166,6 @@ assert.match(massScheduleLibrary, /"Master of Ceremonies"/)
 assert.match(massScheduleLibrary, /"Torchbearer 4"/)
 assert.match(massScheduleLibrary, /"Usher"/)
 assert.match(massScheduleSync, /MASS_SCHEDULE_SYNC_REQUIRED/)
-assert.match(environmentExample, /MASS_SCHEDULE_URL=/)
-assert.match(environmentExample, /MASS_SCHEDULE_USHERS_MINISTRY_SLUG=ushers/)
 
 const notificationChannelsMigration = await read(
   "migrations/20260807_04_add_notification_channels.sql",
@@ -210,8 +206,6 @@ assert.match(telegramServer, /getWebhookInfo/)
 assert.match(telegramServer, /telegram-webhook/)
 assert.match(telegramComponent, /Connect Telegram/)
 assert.match(reminders, /sendTelegramMessage/)
-assert.match(environmentExample, /TELEGRAM_BOT_USERNAME=/)
-assert.match(environmentExample, /TELEGRAM_BOT_TOKEN=/)
 
 assert.match(authHelper, /activeProfileUserId/)
 assert.match(authHelper, /authMethod: options\.authMethod \|\| "password"/)
@@ -363,19 +357,18 @@ assert.match(
 )
 assert.match(schedulingAvailability, /context\.user\.id/)
 assert.match(schedulingAvailability, /toStoredDateKey/)
-assert.match(schedulingAvailability, /splitAroundAssignedDates/)
 assert.match(schedulingAvailability, /assignment\.change_requested/)
 assert.match(
   schedulingAvailability,
-  /notificationStatus:\s*"pending_implementation"/
+  /notificationStatus:\s*"delivery_requested"/
 )
 assert.match(availabilityComponent, /UPDATING\.\.\." : "UPDATE/)
 assert.match(availabilityComponent, /Request change/)
-assert.match(availabilityComponent, /DISPLAYED_MONTH_COUNT = 12/)
-assert.match(availabilityComponent, /overflow-x-auto/)
-assert.match(availabilityComponent, /overflow-y-hidden/)
-assert.match(availabilityComponent, /w-full shrink-0 snap-start/)
-assert.match(availabilityComponent, /lg:w-\[calc\(50%-0\.75rem\)\]/)
+assert.match(availabilityComponent, /showsTwoMonths/)
+assert.match(availabilityComponent, /displayedMonths/)
+assert.match(availabilityComponent, /lg:grid-cols-2/)
+assert.doesNotMatch(availabilityComponent, /overflow-x-auto|snap-mandatory|touch-pan-x/)
+assert.doesNotMatch(homeWorkspace, /assignments awaiting confirmation/)
 assert.match(schedulingAvailability, /body\.requireConflictFree === true/)
 assert.match(availabilityRoute, /AvailabilityApp/)
 assert.match(availabilityApp, /MinistryRouteGuard/)
@@ -428,7 +421,7 @@ assert.match(schedulingOrdo, /sourceHash/)
 assert.match(schedulingOrdo, /event\.ordo_updated/)
 assert.match(ordoReference, /View 1962 Ordo/)
 assert.match(ordoReference, /Sacristy page and setup notes/)
-assert.match(ordoReference, /Selection required/)
+assert.match(ordoReference, /const selectionRequired/)
 assert.match(
   ordoReference,
   /The Ordo does not explicitly state the vestment color/
@@ -452,14 +445,29 @@ assert.match(serviceOutcomeMigration, /service_outcome STRING NULL/)
 assert.match(serviceOutcomeMigration, /outcome_recorded_by UUID NULL/)
 assert.match(serviceOutcomeMigration, /ministry_id UUID NULL REFERENCES ministries/)
 assert.match(schedulingEvents, /record_service_outcome/)
-assert.match(schedulingEvents, /record_assignment_status/)
+assert.doesNotMatch(schedulingEvents, /record_assignment_status/)
 assert.match(schedulingEvents, /sameTimeReliability/)
 assert.match(eventDetails, /Pre-publication review/)
 assert.match(eventDetails, /Record outcome/)
-assert.match(schedulingAvailability, /decline_assignment/)
+assert.doesNotMatch(schedulingAvailability, /decline_assignment/)
+assert.match(schedulingAvailability, /requestChanges/)
+assert.match(schedulingAvailability, /changeRequestedAssignmentIds/)
 assert.match(schedulingAvailability, /block\.ministry_id/)
 assert.match(availabilityComponent, /All ministries/)
-assert.match(availabilityComponent, /Decline/)
+assert.match(availabilityComponent, /Assigned duties need a change request/)
+assert.match(availabilityComponent, /"Continue"/)
+const [alertMigration, assignmentNotifications, alertsServer] = await Promise.all([
+  read("migrations/20260808_02_add_ministry_alert_digests.sql"),
+  read("src/server/notifications/assignment-notifications.ts"),
+  read("src/server/notifications/alerts.ts"),
+])
+assert.match(alertMigration, /subject_user_id/)
+assert.match(alertMigration, /recipient_user_id/)
+assert.match(assignmentNotifications, /processNotificationDigests/)
+assert.match(assignmentNotifications, /buildDigest/)
+assert.match(alertsServer, /mark_all_read/)
+assert.match(homeWorkspace, /profile\.alertCount > 0/)
+assert.match(homeWorkspace, /bg-orange-400/)
 assert.match(apiRoute, /scheduling\/reports/)
 assert.match(schedulingReports, /INTERVAL '6 months'/)
 assert.match(schedulingReports, /levelHistory/)

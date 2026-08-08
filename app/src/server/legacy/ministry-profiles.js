@@ -49,7 +49,7 @@ const audit = (client, actorId, subjectId, action, entityType, entityId, metadat
   )
 
 const listProfiles = async (client, context) => {
-  const [childrenResult, ministriesResult, requestsResult] = await Promise.all([
+  const [childrenResult, ministriesResult, requestsResult, alertsResult] = await Promise.all([
     client.query(
       `
         SELECT
@@ -101,13 +101,40 @@ const listProfiles = async (client, context) => {
       `,
       [context.actor.id]
     ),
+    client.query(
+      `
+        SELECT alert.subject_user_id, count(*)::INT AS unread_count
+        FROM ministry_alerts alert
+        WHERE alert.read_at IS NULL
+          AND (
+            alert.subject_user_id = $1
+            OR EXISTS (
+              SELECT 1 FROM managed_profiles profile
+              WHERE profile.guardian_user_id = $1
+                AND profile.child_user_id = alert.subject_user_id
+                AND profile.status IN ('active', 'separation_pending')
+            )
+          )
+        GROUP BY alert.subject_user_id
+      `,
+      [context.actor.id]
+    ),
   ])
+
+  const unreadCounts = new Map(
+    alertsResult.rows.map((row) => [row.subject_user_id, Number(row.unread_count || 0)])
+  )
 
   return {
     actor: toPublicMinistryUser(context.actor),
     activeProfile: toPublicMinistryUser(context.user),
     profiles: [
-      { ...toPublicMinistryUser(context.actor), isGuardian: true, relationshipStatus: "self" },
+      {
+        ...toPublicMinistryUser(context.actor),
+        isGuardian: true,
+        relationshipStatus: "self",
+        alertCount: unreadCounts.get(context.actor.id) || 0,
+      },
       ...childrenResult.rows.map((row) => ({
         id: row.id,
         firstName: row.first_name,
@@ -119,6 +146,7 @@ const listProfiles = async (client, context) => {
         relationshipId: row.relationship_id,
         relationshipStatus: row.relationship_status,
         separationEmail: row.separation_email || "",
+        alertCount: unreadCounts.get(row.id) || 0,
       })),
     ],
     ministries: ministriesResult.rows,

@@ -374,38 +374,6 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
     }
   }
 
-  const recordAssignmentStatus = async (assignment, status) => {
-    if (!status) return
-    setSavingAssignmentId(assignment.id)
-    setMessage("")
-    setErrorMessage("")
-    try {
-      const response = await fetch(getFunctionEndpoint("scheduling/events"), {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${window.sessionStorage.getItem(
-            MINISTRY_SESSION_KEY,
-          )}`,
-        },
-        body: JSON.stringify({
-          action: "record_assignment_status",
-          eventId: displayedEvent.id,
-          assignmentId: assignment.id,
-          status,
-        }),
-      })
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.message || "Unable to update assignment")
-      setMessage(result.message)
-      await loadDetails()
-    } catch (error) {
-      setErrorMessage(error.message)
-    } finally {
-      setSavingAssignmentId("")
-    }
-  }
-
   const configureVolunteerSignup = async (signupOpen) => {
     setIsSavingSignup(true)
     setMessage("")
@@ -1101,19 +1069,6 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                                         <span className="rounded-full bg-white px-2 py-1">
                                           {assignment.serviceOutcome.replaceAll("_", " ")}
                                         </span>
-                                      )}
-                                      {canManage && !eventHasStarted && (
-                                        <select
-                                          aria-label={`Offline response for ${assignment.firstName} ${assignment.lastName}`}
-                                          value={["confirmed", "declined"].includes(assignment.status) ? assignment.status : ""}
-                                          disabled={savingAssignmentId === assignment.id}
-                                          onChange={(event) => recordAssignmentStatus(assignment, event.target.value)}
-                                          className="ml-auto h-8 rounded-lg border border-[#d8c7b8] bg-white px-2 text-xs"
-                                        >
-                                          <option value="">Record offline response</option>
-                                          <option value="confirmed">Confirmed</option>
-                                          <option value="declined">Declined</option>
-                                        </select>
                                       )}
                                       {canManage && eventHasStarted && (
                                         <select

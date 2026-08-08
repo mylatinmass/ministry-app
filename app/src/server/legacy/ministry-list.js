@@ -172,7 +172,6 @@ const handler = async (event) => {
       client.query(
         `
           SELECT
-            ra.id,
             ra.event_id,
             ra.status,
             er.name AS responsibility_name
@@ -181,7 +180,7 @@ const handler = async (event) => {
           WHERE ra.user_id = $1
             AND ra.status IN (
               'interested', 'pending', 'assigned', 'confirmed',
-              'change_requested', 'completed', 'declined'
+              'change_requested', 'completed'
             )
         `,
         [user.id]
@@ -199,7 +198,6 @@ const handler = async (event) => {
     const calendarEvents = calendarEventsResult.rows.map((event) => {
       const assignments = assignmentsByEvent[event.id] || []
       const visibleProfileAssignments = assignments.map((assignment) => ({
-        id: assignment.id,
         profileId: user.id,
         firstName: user.first_name,
         lastName: user.last_name,
@@ -209,9 +207,7 @@ const handler = async (event) => {
       return {
         ...event,
         responsibility_count: Number(event.responsibility_count),
-        is_assigned: assignments.some(
-          (assignment) => !["declined", "cancelled"].includes(assignment.status)
-        ),
+        is_assigned: assignments.length > 0,
         visibleProfileAssignments,
       }
     })

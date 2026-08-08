@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import type { PoolClient } from "pg"
 import { getPool } from "../database"
 import { json } from "../request"
-import { sendAssignmentNotification } from "../notifications/assignment-responses"
+import { sendAssignmentNotification } from "../notifications/assignment-notifications"
 import {
   getIdentityContext,
   getMinistryAccess,
@@ -50,7 +50,6 @@ const SERVICE_OUTCOMES = new Set([
   "substitute_served",
   "excused",
 ])
-const LEADER_ASSIGNMENT_STATUSES = new Set(["confirmed", "declined"])
 const PARTICIPATION_TYPES = new Set(["members", "volunteers", "both"])
 const SIGNUP_CODE_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const RESERVED_SIGNUP_CODES = new Set([
@@ -1116,80 +1115,6 @@ const recordServiceOutcome = async (
   return "Service outcome recorded"
 }
 
-const recordAssignmentStatus = async (
-  client: PoolClient,
-  context: any,
-  event: any,
-  body: any,
-) => {
-  const assignmentId = cleanText(body.assignmentId, 100)
-  const status = cleanText(body.status, 40)
-  if (!LEADER_ASSIGNMENT_STATUSES.has(status)) {
-    throw Object.assign(new Error("Choose confirmed or declined"), {
-      status: 400,
-    })
-  }
-  const assignmentResult = await client.query(
-    `
-      SELECT
-        assignment.*,
-        COALESCE(responsibility.ministry_id, $3) AS ministry_id
-      FROM responsibility_assignments assignment
-      JOIN event_responsibilities responsibility
-        ON responsibility.id = assignment.responsibility_id
-      WHERE assignment.id = $1
-        AND assignment.event_id = $2
-        AND assignment.status NOT IN ('cancelled', 'completed')
-      LIMIT 1
-      FOR UPDATE
-    `,
-    [assignmentId, event.id, event.ministry_id],
-  )
-  const assignment = assignmentResult.rows[0]
-  if (!assignment) {
-    throw Object.assign(new Error("Active assignment not found"), { status: 404 })
-  }
-  await requireMinistryAccess(client, context.user, assignment.ministry_id, true)
-  await client.query(
-    `
-      UPDATE responsibility_assignments
-      SET status = $2,
-          confirmed_at = CASE WHEN $2 = 'confirmed' THEN now() ELSE NULL END,
-          updated_at = now()
-      WHERE id = $1
-    `,
-    [assignment.id, status],
-  )
-  await client.query(
-    `
-      UPDATE event_responsibilities responsibility
-      SET status = CASE
-            WHEN responsibility.unlimited_capacity THEN 'open'
-            WHEN (
-              SELECT COALESCE(sum(quantity), 0)
-              FROM responsibility_assignments assignment
-              WHERE assignment.responsibility_id = responsibility.id
-                AND assignment.status NOT IN ('declined', 'cancelled')
-            ) >= responsibility.quantity_needed THEN 'filled'
-            ELSE 'open'
-          END,
-          updated_at = now()
-      WHERE responsibility.id = $1
-    `,
-    [assignment.responsibility_id],
-  )
-  await writeSchedulingAudit(client, context, {
-    action: `responsibility_assignment.${status}_offline`,
-    entityType: "responsibility_assignment",
-    entityId: assignment.id,
-    ministryId: assignment.ministry_id,
-    beforeData: { status: assignment.status, confirmedAt: assignment.confirmed_at },
-    afterData: { status, recordedFrom: "offline_conversation" },
-    metadata: { eventId: event.id },
-  })
-  return `Assignment marked ${status}`
-}
-
 const createEvents = async (
   client: PoolClient,
   context: any,
@@ -1709,6 +1634,10 @@ const assignMemberToResponsibility = async (
           FROM availability_blocks block
           WHERE block.user_id = member.id
             AND block.status = 'active'
+            AND (
+              block.ministry_id IS NULL
+              OR block.ministry_id = $1
+            )
             AND block.start_date <= $3::DATE
             AND block.end_date >= $3::DATE
         )
@@ -2156,10 +2085,6 @@ const updateEvent = async (
 
   if (body.action === "record_service_outcome") {
     return recordServiceOutcome(client, context, event, body)
-  }
-
-  if (body.action === "record_assignment_status") {
-    return recordAssignmentStatus(client, context, event, body)
   }
 
   if (body.action === "configure_volunteer_signup") {

@@ -6,7 +6,7 @@ import {
   handleVapidPublicKey,
 } from "../../server/notifications/subscriptions"
 import { handleReminderProcessing } from "../../server/notifications/reminders"
-import { handleAssignmentResponse } from "../../server/notifications/assignment-responses"
+import { handleAlerts } from "../../server/notifications/alerts"
 import {
   handleTelegramConnection,
   handleTelegramSetup,
@@ -48,8 +48,8 @@ const route: APIRoute = async ({ params, request }) => {
   if (path === "reminders/process") {
     return handleReminderProcessing(request)
   }
-  if (path === "assignment-response") {
-    return handleAssignmentResponse(request)
+  if (path === "notifications") {
+    return handleAlerts(request)
   }
   if (path === "scheduling/templates") {
     return handleTemplates(request)

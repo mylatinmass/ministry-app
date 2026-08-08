@@ -174,7 +174,7 @@ export const handleTelegramConnection = async (request: Request) => {
         await callTelegram("setWebhook", {
           url: expectedWebhookUrl,
           secret_token: webhookSecret(),
-          allowed_updates: ["message", "callback_query"],
+          allowed_updates: ["message"],
         })
         await audit(identity, "notification.telegram_webhook_configured", {
           automatic: true,
@@ -309,39 +309,6 @@ export const handleTelegramWebhook = async (request: Request) => {
   try {
     update = await request.json()
   } catch {
-    return json({ ok: true })
-  }
-  const callback = update?.callback_query
-  const callbackMatch = callback?.data?.match(
-    /^assignment:(confirm|decline):([A-Za-z0-9_-]{40,64})$/,
-  )
-  if (callback && callbackMatch) {
-    try {
-      const { respondToAssignment } = await import("./assignment-responses")
-      const result = await respondToAssignment(
-        callbackMatch[2],
-        callbackMatch[1],
-        "telegram",
-        callback.from?.id?.toString(),
-      )
-      await callTelegram("answerCallbackQuery", {
-        callback_query_id: callback.id,
-        text: result.message,
-      })
-      if (callback.message?.chat?.id && callback.message?.message_id) {
-        await callTelegram("editMessageReplyMarkup", {
-          chat_id: callback.message.chat.id,
-          message_id: callback.message.message_id,
-          reply_markup: { inline_keyboard: [] },
-        })
-      }
-    } catch (error: any) {
-      await callTelegram("answerCallbackQuery", {
-        callback_query_id: callback.id,
-        text: error?.message || "Unable to record that response",
-        show_alert: true,
-      }).catch(() => {})
-    }
     return json({ ok: true })
   }
   const message = update?.message
@@ -517,7 +484,7 @@ export const handleTelegramSetup = async (request: Request) => {
     await callTelegram("setWebhook", {
       url: expectedUrl,
       secret_token: webhookSecret(),
-      allowed_updates: ["message", "callback_query"],
+      allowed_updates: ["message"],
       drop_pending_updates: false,
     })
   } catch (error: any) {

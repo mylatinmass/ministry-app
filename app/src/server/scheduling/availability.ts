@@ -1,6 +1,7 @@
 import type { PoolClient } from "pg"
 import { getPool } from "../database"
 import { json } from "../request"
+import { sendAssignmentDeclinedNotification } from "../notifications/assignment-responses"
 import {
   getIdentityContext,
   writeSchedulingAudit,
@@ -411,12 +412,24 @@ const cancelBlock = async (
   return { message: "Availability block removed" }
 }
 
-const declineAssignment = async (
+const respondToAssignments = async (
   client: PoolClient,
   context: Awaited<ReturnType<typeof getIdentityContext>>,
   body: any,
 ) => {
-  const assignmentId = cleanText(body.assignmentId, 100)
+  const response = body.response === "confirm" ? "confirmed" :
+    body.response === "decline" ? "declined" : ""
+  if (!response) {
+    throw Object.assign(new Error("Choose confirm or decline"), { status: 400 })
+  }
+  const assignmentIds = Array.from(new Set(
+    (Array.isArray(body.assignmentIds) ? body.assignmentIds : [body.assignmentId])
+      .map((value: unknown) => cleanText(value, 100))
+      .filter(Boolean),
+  )).slice(0, 100)
+  if (!assignmentIds.length) {
+    throw Object.assign(new Error("Choose at least one assignment"), { status: 400 })
+  }
   const assignmentResult = await client.query(
     `
       SELECT
@@ -429,25 +442,31 @@ const declineAssignment = async (
       JOIN event_responsibilities responsibility
         ON responsibility.id = assignment.responsibility_id
       JOIN events event ON event.id = assignment.event_id
-      WHERE assignment.id = $1
+      WHERE assignment.id = ANY($1::UUID[])
         AND assignment.user_id = $2
         AND assignment.status IN ('pending', 'assigned')
         AND event.status = 'published'
-      LIMIT 1
+      ORDER BY event.start_time, assignment.id
       FOR UPDATE
     `,
-    [assignmentId, context.user.id],
+    [assignmentIds, context.user.id],
   )
-  const assignment = assignmentResult.rows[0]
-  if (!assignment) {
+  const assignments = assignmentResult.rows
+  if (!assignments.length) {
     throw Object.assign(
-      new Error("Only an active, unconfirmed assignment can be declined"),
+      new Error("No active assignments are awaiting confirmation"),
       { status: 409 },
     )
   }
   await client.query(
-    `UPDATE responsibility_assignments SET status = 'declined', updated_at = now() WHERE id = $1`,
-    [assignment.id],
+    `
+      UPDATE responsibility_assignments
+      SET status = $2,
+          confirmed_at = CASE WHEN $2 = 'confirmed' THEN now() ELSE NULL END,
+          updated_at = now()
+      WHERE id = ANY($1::UUID[])
+    `,
+    [assignments.map((assignment) => assignment.id), response],
   )
   await client.query(
     `
@@ -463,20 +482,38 @@ const declineAssignment = async (
             ELSE 'open'
           END,
           updated_at = now()
-      WHERE responsibility.id = $1
+      WHERE responsibility.id = ANY($1::UUID[])
     `,
-    [assignment.responsibility_id],
+    [assignments.map((assignment) => assignment.responsibility_id)],
   )
-  await writeSchedulingAudit(client, context, {
-    action: "responsibility_assignment.declined",
-    entityType: "responsibility_assignment",
-    entityId: assignment.id,
-    ministryId: assignment.ministry_id,
-    beforeData: { status: assignment.status },
-    afterData: { status: "declined" },
-    metadata: { eventId: assignment.event_id },
-  })
-  return { message: "Assignment declined" }
+  await client.query(
+    `
+      UPDATE assignment_response_tokens
+      SET used_at = now()
+      WHERE assignment_id = ANY($1::UUID[]) AND used_at IS NULL
+    `,
+    [assignments.map((assignment) => assignment.id)],
+  )
+  for (const assignment of assignments) {
+    await writeSchedulingAudit(client, context, {
+      action: `responsibility_assignment.${response}_in_app`,
+      entityType: "responsibility_assignment",
+      entityId: assignment.id,
+      ministryId: assignment.ministry_id,
+      beforeData: { status: assignment.status },
+      afterData: { status: response },
+      metadata: { eventId: assignment.event_id, bulk: assignmentIds.length > 1 },
+    })
+  }
+  return {
+    message: `${assignments.length} ${assignments.length === 1 ? "assignment" : "assignments"} ${response}`,
+    assignments: assignments.map((assignment) => ({
+      id: assignment.id,
+      status: response,
+    })),
+    declinedAssignmentIds:
+      response === "declined" ? assignments.map((assignment) => assignment.id) : [],
+  }
 }
 
 const requestAssignmentChange = async (
@@ -610,21 +647,35 @@ export const handleAvailability = async (request: Request) => {
     const body = await request.json().catch(() => ({}))
     await client.query("BEGIN")
     try {
-      let result
+      let result: any
       if (body.action === "create_block") {
         result = await createBlock(client, context, body)
       } else if (body.action === "cancel_block") {
         result = await cancelBlock(client, context, body)
       } else if (body.action === "request_change") {
         result = await requestAssignmentChange(client, context, body)
-      } else if (body.action === "decline_assignment") {
-        result = await declineAssignment(client, context, body)
+      } else if (
+        body.action === "decline_assignment" ||
+        body.action === "respond_assignments"
+      ) {
+        result = await respondToAssignments(client, context, {
+          ...body,
+          response:
+            body.action === "decline_assignment" ? "decline" : body.response,
+        })
       } else {
         throw Object.assign(new Error("Unknown availability action"), {
           status: 400,
         })
       }
       await client.query("COMMIT")
+      for (const assignmentId of result.declinedAssignmentIds || []) {
+        await sendAssignmentDeclinedNotification(assignmentId).catch(
+          (error) => {
+            console.error("Unable to notify leaders about a declined assignment:", error)
+          },
+        )
+      }
       return json(result)
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {})

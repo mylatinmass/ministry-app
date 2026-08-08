@@ -6,6 +6,7 @@ import {
   ChatBubbleLeftRightIcon,
   CheckCircleIcon,
   ChevronRightIcon,
+  ExclamationTriangleIcon,
   PlusIcon,
   UserCircleIcon,
   XMarkIcon,
@@ -143,9 +144,17 @@ const MinistryHomeWorkspace = ({ data }) => {
       : "home"
   })
   const [currentUser, setCurrentUser] = React.useState(data.user)
+  const [calendarEvents, setCalendarEvents] = React.useState(
+    data.calendarEvents,
+  )
   const [selectedEvent, setSelectedEvent] = React.useState(null)
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = React.useState(false)
+  const [assignmentAlertOpen, setAssignmentAlertOpen] = React.useState(false)
+  const [savingAssignmentIds, setSavingAssignmentIds] = React.useState(
+    () => new Set(),
+  )
+  const [bulkResponsePending, setBulkResponsePending] = React.useState(false)
   const [familyData, setFamilyData] = React.useState(null)
   const [showCreateEvent, setShowCreateEvent] = React.useState(false)
   const manageableMinistries = React.useMemo(
@@ -163,16 +172,16 @@ const MinistryHomeWorkspace = ({ data }) => {
     availableSections.find((section) => section.id === sectionId) ||
     availableSections[0]
   const myEvents = React.useMemo(
-    () => data.calendarEvents.filter((event) => event.is_assigned),
-    [data.calendarEvents]
+    () => calendarEvents.filter((event) => event.is_assigned),
+    [calendarEvents]
   )
   const upcomingEvents = React.useMemo(() => {
     const now = Date.now()
-    return data.calendarEvents.filter((event) => {
+    return calendarEvents.filter((event) => {
       const endTime = new Date(event.end_time || event.start_time).getTime()
       return !Number.isNaN(endTime) && endTime >= now
     })
-  }, [data.calendarEvents])
+  }, [calendarEvents])
   const upcomingAssignments = React.useMemo(() => {
     const now = Date.now()
     return myEvents
@@ -194,12 +203,22 @@ const MinistryHomeWorkspace = ({ data }) => {
     () =>
       upcomingAssignments.filter((event) =>
         event.visibleProfileAssignments?.some((assignment) =>
-          ["pending", "assigned", "change_requested"].includes(
-            assignment.status
-          )
+          ["pending", "assigned"].includes(assignment.status)
         )
       ),
     [upcomingAssignments]
+  )
+  const pendingAssignmentCount = React.useMemo(
+    () =>
+      actionRequiredEvents.reduce(
+        (count, event) =>
+          count +
+          event.visibleProfileAssignments.filter((assignment) =>
+            ["pending", "assigned"].includes(assignment.status),
+          ).length,
+        0,
+      ),
+    [actionRequiredEvents],
   )
   const today = React.useMemo(() => new Date(), [])
   const todayLabel = React.useMemo(
@@ -240,6 +259,7 @@ const MinistryHomeWorkspace = ({ data }) => {
     if (id === "events") setShowCreateEvent(false)
     setMobileMenuOpen(false)
     setProfileMenuOpen(false)
+    setAssignmentAlertOpen(false)
     window.history.replaceState({}, "", id === "home" ? "/" : `/?section=${id}`)
   }
 
@@ -273,6 +293,88 @@ const MinistryHomeWorkspace = ({ data }) => {
   const returnToGuardian = () => {
     if (data.actor?.id) switchProfile(data.actor.id)
   }
+
+  const applyAssignmentResponses = React.useCallback((responses) => {
+    const statuses = new Map(
+      responses.map((assignment) => [assignment.id, assignment.status]),
+    )
+    const updateEvents = (events) =>
+      events.map((event) => {
+        const visibleProfileAssignments = (
+          event.visibleProfileAssignments || []
+        ).map((assignment) =>
+          statuses.has(assignment.id)
+            ? { ...assignment, status: statuses.get(assignment.id) }
+            : assignment,
+        )
+        return {
+          ...event,
+          visibleProfileAssignments,
+          is_assigned: visibleProfileAssignments.some(
+            (assignment) =>
+              !["declined", "cancelled"].includes(assignment.status),
+          ),
+        }
+      })
+    setCalendarEvents(updateEvents)
+    setSelectedEvent((event) =>
+      event ? updateEvents([event])[0] : event,
+    )
+  }, [])
+
+  const respondToAssignments = React.useCallback(
+    async (assignments, response, bulk = false) => {
+      const selectedAssignments = Array.isArray(assignments)
+        ? assignments
+        : [assignments]
+      if (!selectedAssignments.length) return
+      if (
+        response === "decline" &&
+        !window.confirm(
+          bulk
+            ? `Decline all ${selectedAssignments.length} assignments shown for this calendar month?`
+            : `Decline ${selectedAssignments[0].responsibilityName}?`,
+        )
+      ) return
+
+      const ids = selectedAssignments.map((assignment) => assignment.id)
+      setSavingAssignmentIds((current) => new Set([...current, ...ids]))
+      if (bulk) setBulkResponsePending(true)
+      try {
+        const token = window.sessionStorage.getItem(MINISTRY_SESSION_KEY)
+        const request = await fetch(
+          getFunctionEndpoint("scheduling/availability"),
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              action: "respond_assignments",
+              assignmentIds: ids,
+              response,
+            }),
+          },
+        )
+        const result = await request.json()
+        if (!request.ok) {
+          throw new Error(result.message || "Unable to update assignments")
+        }
+        applyAssignmentResponses(result.assignments || [])
+      } catch (error) {
+        window.alert(error.message || "Unable to update assignments")
+      } finally {
+        setSavingAssignmentIds((current) => {
+          const next = new Set(current)
+          ids.forEach((id) => next.delete(id))
+          return next
+        })
+        if (bulk) setBulkResponsePending(false)
+      }
+    },
+    [applyAssignmentResponses],
+  )
 
   let content
   if (sectionId === "home") {
@@ -311,9 +413,7 @@ const MinistryHomeWorkspace = ({ data }) => {
                     <p className="mt-1 text-xs text-gray-500">
                       {event.visibleProfileAssignments
                         .filter((assignment) =>
-                          ["pending", "assigned", "change_requested"].includes(
-                            assignment.status
-                          )
+                          ["pending", "assigned"].includes(assignment.status)
                         )
                         .map((assignment) => assignment.responsibilityName)
                         .join(" · ")}
@@ -375,8 +475,16 @@ const MinistryHomeWorkspace = ({ data }) => {
   } else if (sectionId === "calendar") {
     content = (
       <MinistryHomeCalendar
-        events={data.calendarEvents}
+        events={calendarEvents}
         onEventSelect={setSelectedEvent}
+        onAssignmentResponse={(assignment, response) =>
+          respondToAssignments(assignment, response)
+        }
+        onBulkAssignmentResponse={(assignments, response) =>
+          respondToAssignments(assignments, response, true)
+        }
+        savingAssignmentIds={savingAssignmentIds}
+        bulkResponsePending={bulkResponsePending}
       />
     )
   } else if (sectionId === "events") {
@@ -552,7 +660,10 @@ const MinistryHomeWorkspace = ({ data }) => {
               </div>
               <button
                 type="button"
-                onClick={() => setProfileMenuOpen((open) => !open)}
+                onClick={() => {
+                  setProfileMenuOpen((open) => !open)
+                  setAssignmentAlertOpen(false)
+                }}
                 aria-label={`Choose profile for ${currentUser?.username || "current user"}`}
                 aria-expanded={profileMenuOpen}
                 className={`rounded-full transition ${
@@ -563,6 +674,91 @@ const MinistryHomeWorkspace = ({ data }) => {
               >
                 <UserCircleIcon className="size-7" />
               </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setAssignmentAlertOpen((open) => !open)
+                  setProfileMenuOpen(false)
+                }}
+                aria-label={
+                  pendingAssignmentCount
+                    ? `${pendingAssignmentCount} assignments awaiting confirmation`
+                    : "No assignments awaiting confirmation"
+                }
+                aria-expanded={assignmentAlertOpen}
+                className={`relative rounded-full p-0.5 transition ${
+                  pendingAssignmentCount
+                    ? "text-orange-500 hover:text-orange-600"
+                    : "text-gray-300 hover:text-gray-400"
+                }`}
+              >
+                <ExclamationTriangleIcon className="size-7" />
+                {pendingAssignmentCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-orange-500 text-[9px] font-bold text-white">
+                    {pendingAssignmentCount > 9
+                      ? "9+"
+                      : pendingAssignmentCount}
+                  </span>
+                )}
+              </button>
+
+              {assignmentAlertOpen && (
+                <div className="absolute right-0 top-full z-50 mt-2 w-80 overflow-hidden rounded-xl border border-gray-200 bg-white text-left shadow-xl">
+                  <div className="border-b border-gray-100 px-4 py-3">
+                    <p className="font-semibold text-gray-900">
+                      Assignment confirmations
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {pendingAssignmentCount
+                        ? `${pendingAssignmentCount} awaiting your response`
+                        : "Nothing is awaiting your response"}
+                    </p>
+                  </div>
+                  {actionRequiredEvents.length > 0 && (
+                    <div className="max-h-80 overflow-y-auto p-2">
+                      {actionRequiredEvents.map((event) => (
+                        <button
+                          key={event.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedEvent(event)
+                            setAssignmentAlertOpen(false)
+                          }}
+                          className="w-full rounded-lg px-3 py-2 text-left hover:bg-orange-50"
+                        >
+                          <p className="text-sm font-semibold text-gray-900">
+                            {event.title}
+                          </p>
+                          <p className="mt-1 text-xs text-gray-500">
+                            {formatAssignmentDate(event.start_time)}
+                          </p>
+                          <p className="mt-1 text-xs font-semibold text-orange-600">
+                            {event.visibleProfileAssignments
+                              .filter((assignment) =>
+                                ["pending", "assigned"].includes(
+                                  assignment.status,
+                                ),
+                              )
+                              .map(
+                                (assignment) =>
+                                  assignment.responsibilityName,
+                              )
+                              .join(" · ")}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => selectSection("calendar")}
+                    className="w-full border-t border-gray-100 px-4 py-3 text-left text-sm font-semibold text-[#896542] hover:bg-[#f7f3ef]"
+                  >
+                    Review in Calendar
+                  </button>
+                </div>
+              )}
 
               {profileMenuOpen && (
                 <div className="absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-xl border border-gray-200 bg-white text-left shadow-xl">

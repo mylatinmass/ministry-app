@@ -22,6 +22,10 @@ const getMonthCells = (month) => {
 const MinistryHomeCalendar = ({
   events = [],
   onEventSelect,
+  onAssignmentResponse,
+  onBulkAssignmentResponse,
+  savingAssignmentIds,
+  bulkResponsePending = false,
 }) => {
   const calendarViewportRef = React.useRef(null)
   const [visibleMonth, setVisibleMonth] = React.useState(() => {
@@ -70,6 +74,12 @@ const MinistryHomeCalendar = ({
   const agendaEvents = selectedKey
     ? eventsByDate[selectedKey] || []
     : visibleMonthEvents
+  const visibleAssignments = visibleMonthEvents.flatMap(
+    (event) => event.visibleProfileAssignments || [],
+  )
+  const pendingAssignments = visibleAssignments.filter((assignment) =>
+    ["pending", "assigned"].includes(assignment.status),
+  )
   const todayKey = toDateKey(new Date())
 
   React.useEffect(() => {
@@ -125,7 +135,7 @@ const MinistryHomeCalendar = ({
 
   return (
     <section className="">
-      <div className="relative mt-4 xl:mx-12">
+      <div className="relative xl:mx-12">
         <button
           type="button"
           aria-label="Previous month"
@@ -186,7 +196,7 @@ const MinistryHomeCalendar = ({
                       <span
                         key={`${monthKey}-${key}`}
                         aria-hidden="true"
-                        className="mx-auto size-10 sm:size-12"
+                        className="mx-auto size-8 sm:size-12"
                       />
                     )
                   }
@@ -204,21 +214,20 @@ const MinistryHomeCalendar = ({
                       type="button"
                       onClick={() => selectDay(date)}
                       aria-pressed={selected}
-                      className={`mx-auto flex size-10 items-center justify-center rounded-2xl text-sm font-semibold text-gray-900 transition sm:size-12 sm:text-base ${
+                      className={`mx-auto flex size-8 items-center justify-center rounded-full text-sm font-semibold text-gray-900 transition sm:size-12 md:text-base ${
                         selected
-                          ? `bg-[#eee2d5] text-[#6f4f34] ring-2 ${
-                              key === todayKey
-                                ? "ring-orange-400"
-                                : "ring-[#C1A387]"
+                          ? `  text-[#6f4f34] ring-2 ${key === todayKey
+                                ? "ring-[#6f4f34] bg-[#eee2d5]"
+                                : "ring-[#6f4f34] bg-[#f0e0d0]"
                             }`
                           : key === todayKey
-                            ? "ring-2 ring-orange-400"
+                            ? "ring-2 bg-orange-500 text-white ring-orange-500"
                           : hasAssignment
-                            ? "ring-2 ring-orange-400"
+                            ? "ring-2 ring-orange-500"
                             : hasEvents
                               ? "ring-2 ring-gray-300"
                               : ""
-                      } hover:bg-gray-50`}
+                      } lg:hover:bg-gray-50`}
                       aria-current={key === todayKey ? "date" : undefined}
                       aria-label={new Intl.DateTimeFormat("en-US", {
                         month: "long",
@@ -242,10 +251,43 @@ const MinistryHomeCalendar = ({
           <span className="size-3 rounded-full ring-2 ring-gray-300" /> Event
         </span>
         <span className="inline-flex items-center gap-2">
-          <span className="size-3 rounded-full ring-2 ring-orange-400" /> My
+          <span className="size-3 rounded-full ring-2 ring-orange-500" /> My
           event
         </span>
       </div> */}
+
+      <div className="mb-5 mt-3 flex flex-col gap-3 border-y border-gray-100 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="font-semibold text-gray-900">
+            {visibleAssignments.length} {visibleAssignments.length === 1 ? "assignment" : "assignments"}
+          </p>
+          <p className="mt-1 text-xs text-gray-500">
+            {pendingAssignments.length} awaiting confirmation in {visibleMonthLabel}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={!pendingAssignments.length || bulkResponsePending}
+            onClick={() =>
+              onBulkAssignmentResponse?.(pendingAssignments, "confirm")
+            }
+            className="rounded-lg border border-green-200 px-4 py-2 text-sm font-semibold text-green-700 disabled:opacity-40"
+          >
+            Accept All
+          </button>
+          <button
+            type="button"
+            disabled={!pendingAssignments.length || bulkResponsePending}
+            onClick={() =>
+              onBulkAssignmentResponse?.(pendingAssignments, "decline")
+            }
+            className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-40"
+          >
+            Decline All
+          </button>
+        </div>
+      </div>
 
       <MinistryEventAgenda
         events={agendaEvents}
@@ -259,6 +301,9 @@ const MinistryHomeCalendar = ({
             : "Published ministry events will appear here."
         }
         onEventSelect={onEventSelect}
+        showAssignmentActions
+        onAssignmentResponse={onAssignmentResponse}
+        savingAssignmentIds={savingAssignmentIds}
       />
     </section>
   )

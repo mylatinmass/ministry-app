@@ -1,0 +1,10 @@
+---
+import AppLayout from "../layouts/AppLayout.astro"
+import AssignmentResponseApp from "../react/pages/AssignmentResponseApp.jsx"
+
+export const prerender = false
+---
+
+<AppLayout title="Respond to Ministry Assignment | MyLatinMass.com" referrer="no-referrer">
+  <AssignmentResponseApp client:only="react" />
+</AppLayout>

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import type { PoolClient } from "pg"
 import { getPool } from "../database"
 import { json } from "../request"
+import { sendAssignmentNotification } from "../notifications/assignment-responses"
 import {
   getIdentityContext,
   getMinistryAccess,
@@ -1860,10 +1861,10 @@ const assignMemberToResponsibility = async (
       eventDate,
       responsibilityName: responsibility.name,
       memberName: `${member.first_name} ${member.last_name}`,
-      notificationStatus: "pending_implementation",
+      notificationStatus: "delivery_requested",
     },
   })
-  return "Member assigned"
+  return { message: "Member assigned", assignmentId: assignment.id }
 }
 
 const validateRequiredMinistryLevel = async (
@@ -2629,10 +2630,26 @@ export const handleEvents = async (request: Request) => {
         )
       }
       if (request.method === "PATCH") {
-        const message = await updateEvent(client, context, body)
+        const result = await updateEvent(client, context, body)
         await client.query("COMMIT")
+        if (
+          body.action === "assign_member" &&
+          typeof result !== "string" &&
+          result?.assignmentId
+        ) {
+          try {
+            await sendAssignmentNotification(
+              result.assignmentId,
+              new URL(request.url).origin,
+            )
+          } catch (error) {
+            console.error("Assignment saved but its notification could not be prepared:", error)
+          }
+        }
         return json({
-          message: message || "Event updated",
+          message:
+            (typeof result === "string" ? result : result?.message) ||
+            "Event updated",
           eventId: body.eventId,
         })
       }

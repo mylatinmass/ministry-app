@@ -241,7 +241,14 @@ always strict and returns an error when the feed or database is unavailable.
   changeable usernames, and lets the member disconnect. A Super Admin can inspect
   the existing webhook before activating or deliberately replacing it. Connected
   accounts receive selected scheduled reminders through Telegram; blocked chats
-  are deactivated and delivery attempts are logged.
+  are deactivated and delivery attempts are logged. New administrative
+  assignments send an immediate notice through each enabled Email and Telegram
+  channel. Email opens a private confirmation page, while Telegram provides
+  inline Confirm and Decline buttons. Both channels share a single-use response
+  token, update the same assignment record, and audit the accepted response.
+  The account Calendar also supports individual and visible-month bulk
+  responses, while Home and the profile alert show assignments still awaiting
+  confirmation. A decline reopens coverage and alerts enabled ministry leaders.
 
 ## Privacy and repository rules
 

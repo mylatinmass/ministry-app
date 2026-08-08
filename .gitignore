@@ -40,3 +40,5 @@ exports/
 backups/
 tmp/
 *.log
+.vercel
+.env*

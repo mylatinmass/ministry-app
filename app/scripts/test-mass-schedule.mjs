@@ -30,6 +30,7 @@ const extracted = extractMassEvents({
     {
       dayYMD: "2026-08-07",
       day: "Friday - Aug 7",
+      eventName: "St. Caietanus (First Friday)",
       masses: [
         { time: "5:30 pm", description: "Confessions | Rosary" },
         { time: "6:30 pm", description: "Low Mass" },
@@ -49,6 +50,7 @@ const extracted = extractMassEvents({
 assert.equal(extracted.sourceRows, 5)
 assert.equal(extracted.events.length, 3)
 assert.equal(extracted.skippedRows, 2)
+assert.equal(extracted.events[0].title, "St. Caietanus (First Friday)")
 assert.deepEqual(
   extracted.events.map((event) => [event.sourceKey, event.eventType]),
   [

@@ -127,6 +127,7 @@ export const extractMassEvents = (
         sourceTime: cleanText(sourceEntry.time, 30),
         eventType,
         title:
+          cleanText(day.eventName, 250) ||
           cleanText(sourceEntry.description, 250) ||
           (eventType === "high_mass" ? "High Mass" : "Low Mass"),
         description:
@@ -136,10 +137,11 @@ export const extractMassEvents = (
         location,
         start,
         end,
-        sourcePayload: {
-          dayYMD: day.dayYMD,
-          day: day.day || null,
-          dayTS: day.dayTS || null,
+          sourcePayload: {
+            dayYMD: day.dayYMD,
+            day: day.day || null,
+            eventName: day.eventName || null,
+            dayTS: day.dayTS || null,
           time: sourceEntry.time || null,
           description: sourceEntry.description || null,
           skip: Boolean(sourceEntry.skip),

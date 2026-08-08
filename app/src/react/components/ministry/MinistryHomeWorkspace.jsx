@@ -166,6 +166,13 @@ const MinistryHomeWorkspace = ({ data }) => {
     () => data.calendarEvents.filter((event) => event.is_assigned),
     [data.calendarEvents]
   )
+  const upcomingEvents = React.useMemo(() => {
+    const now = Date.now()
+    return data.calendarEvents.filter((event) => {
+      const endTime = new Date(event.end_time || event.start_time).getTime()
+      return !Number.isNaN(endTime) && endTime >= now
+    })
+  }, [data.calendarEvents])
   const upcomingAssignments = React.useMemo(() => {
     const now = Date.now()
     return myEvents
@@ -368,7 +375,6 @@ const MinistryHomeWorkspace = ({ data }) => {
   } else if (sectionId === "calendar") {
     content = (
       <MinistryHomeCalendar
-        title="All Events"
         events={data.calendarEvents}
         onEventSelect={setSelectedEvent}
       />
@@ -433,7 +439,7 @@ const MinistryHomeWorkspace = ({ data }) => {
         </div>
         {hasGlobalAccess && <VolunteerEvents />}
         <MinistryEventAgenda
-          events={data.calendarEvents}
+          events={upcomingEvents}
           label="Available events"
           emptyTitle="No available events"
           emptyText="Public events and events for this profile's ministries will appear here."

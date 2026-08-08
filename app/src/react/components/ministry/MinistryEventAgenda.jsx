@@ -1,13 +1,6 @@
 import * as React from "react"
 import { MapPinIcon } from "@heroicons/react/24/outline"
 
-const eventTones = [
-  "bg-[#C1A387]",
-  "bg-rose-400",
-  "bg-violet-400",
-  "bg-teal-400",
-]
-
 const toDateKey = (value) => {
   const date = value instanceof Date ? value : new Date(value)
   const month = `${date.getMonth() + 1}`.padStart(2, "0")
@@ -39,12 +32,11 @@ const MinistryEventAgenda = ({
 
   return (
     <section
-      aria-label={label}
-      className="mt-4 min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-gray-100 bg-white pb-6 pt-4 pr-1"
+      aria-label={label} className="flex-1 overflow-y-auto w-full"
     >
       {dateKeys.length ? (
         <div className="space-y-7">
-          {dateKeys.map((key, groupIndex) => {
+          {dateKeys.map((key) => {
             const date = new Date(`${key}T12:00:00`)
 
             return (
@@ -62,34 +54,61 @@ const MinistryEventAgenda = ({
                   </div>
                 )}
                 <div className="space-y-2">
-                  {groupedEvents[key].map((event, eventIndex) => (
-                    <button
-                      key={event.id}
-                      type="button"
-                      onClick={() => onEventSelect?.(event)}
-                      className={`grid w-full grid-cols-[4.5rem_0.75rem_1fr] items-start gap-3 rounded-xl border-2 px-2 py-3 text-left transition hover:bg-gray-50 sm:grid-cols-[5.5rem_0.75rem_1fr] ${
-                        event.is_assigned
-                          ? "border-orange-400"
-                          : "border-gray-200"
-                      }`}
-                    >
-                      <p className="text-sm leading-relaxed text-gray-400 sm:text-base">
-                        {formatTime(event.start_time)}
-                        <br />
-                        {formatTime(event.end_time)}
-                      </p>
-                      <span
-                        className={`mt-2 size-2.5 rounded-full ${
-                          eventTones[
-                            (groupIndex + eventIndex) % eventTones.length
-                          ]
+                  {groupedEvents[key].map((event) => {
+                    const isMassTemplate = /^(low|high) mass$/i.test(
+                      event.template_name || "",
+                    )
+                    const templateName = isMassTemplate
+                      ? event.template_name
+                      : ""
+                    const ordoName =
+                      event.ordo_celebration || event.ordo_mass_name || ""
+                    const isFirstFriday =
+                      Array.isArray(event.ordo_general_information) &&
+                      event.ordo_general_information.some((item) =>
+                        /first friday/i.test(item),
+                      )
+                    const ordoEventName = ordoName
+                      ? `${ordoName}${
+                          isFirstFriday && !/first friday/i.test(ordoName)
+                            ? " (First Friday)"
+                            : ""
+                        }`
+                      : ""
+                    const eventName = isMassTemplate
+                      ? event.title && event.title !== templateName
+                        ? event.title
+                        : ordoEventName || event.title
+                      : event.title
+
+                    return (
+                      <button
+                        key={event.id}
+                        type="button"
+                        onClick={() => onEventSelect?.(event)}
+                        className={`relative w-full flex flex-col items-center gap-1 border border-l-8 px-4 py-2 transition hover:bg-gray-50 ${
+                          event.is_assigned
+                            ? "border-orange-400"
+                            : "border-gray-200"
                         }`}
-                      />
-                      <div className="min-w-0">
-                        <h6 className="font-semibold text-gray-950 sm:text-lg">
-                          {event.title}
-                        </h6>
-                        {event.visibleProfileAssignments?.length > 0 && (
+                      >
+                        <div className="flex flex-row items-center gap-3 w-full leading-relaxed text-gray-400 text-sm">
+                          {formatTime(event.start_time)}
+                          {templateName && (
+                            <h6 className="font-semibold uppercase">
+                              {templateName}
+                            </h6>
+                          )}
+                        </div>
+                        {eventName && eventName !== templateName && (
+                          <p className="text-xs font-semibold uppercase sm:text-sm text-left w-full max-h-8 overflow-hidden text-ellipsis">
+                            {eventName}
+                          </p>
+                        )}
+                        <div className="min-w-0">
+
+
+                        {/* {event.visibleProfileAssignments?.length > 0 && (
                           <p className="mt-1 text-xs text-gray-500">
                             {event.visibleProfileAssignments
                               .map(
@@ -98,19 +117,20 @@ const MinistryEventAgenda = ({
                               )
                               .join(" · ")}
                           </p>
-                        )}
-                        <p className="mt-0.5 text-sm text-gray-600 sm:text-base">
-                          {event.description || "Ministry event"}
-                        </p>
-                        {event.location && (
+                        )} */}
+                        {/* <p className="mt-0.5 text-sm text-gray-600 sm:text-base">
+                          {event.description || "Parish event"}
+                        </p> */}
+                        {/* {event.location && (
                           <p className="mt-1 flex items-center gap-1 text-xs text-gray-400 sm:text-sm">
                             <MapPinIcon className="size-4" />
                             {event.location}
                           </p>
-                        )}
-                      </div>
-                    </button>
-                  ))}
+                        )} */}
+                        </div>
+                      </button>
+                    )
+                  })}
                 </div>
               </section>
             )

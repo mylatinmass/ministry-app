@@ -9,6 +9,8 @@ const { Client } = pg
 
 const DEFAULT_SOURCE_URL =
   "https://script.google.com/macros/s/AKfycbzTgfDwfVyJNQBkCnE6gVSMwxjDybeoFZiMGSSH-MOmd62HAYgiZ-6emkzwiqUmr7Mkhg/exec"
+const DEFAULT_LITURGICAL_DAYS_URL =
+  "https://drive.google.com/uc?export=download&id=1YoY6iGwzwydIjPqIJmmsYNipHO4lOA0Z"
 
 const buildMode = process.argv.includes("--build")
 const required =
@@ -59,9 +61,27 @@ if (!connectionString) {
   )
 } else {
   const sourceUrl = process.env.MASS_SCHEDULE_URL || DEFAULT_SOURCE_URL
+  const liturgicalDaysUrl =
+    process.env.MASS_SCHEDULE_LITURGICAL_DAYS_URL ||
+    DEFAULT_LITURGICAL_DAYS_URL
   let client
   try {
-    const payload = await fetchSchedulePayload(sourceUrl)
+    const [payload, liturgicalPayload] = await Promise.all([
+      fetchSchedulePayload(sourceUrl),
+      fetchSchedulePayload(liturgicalDaysUrl),
+    ])
+    const liturgicalNamesByDate = new Map(
+      (liturgicalPayload.liturgicalDays || []).map((day) => [
+        String(day.date || "").replaceAll("-", ""),
+        day.name || "",
+      ]),
+    )
+    payload.massDays = (payload.massDays || []).map((day) => ({
+      ...day,
+      eventName:
+        liturgicalNamesByDate.get(String(day.dayYMD || "").replaceAll("-", "")) ||
+        "",
+    }))
     client = new Client({
       connectionString,
       ssl: { rejectUnauthorized: false },

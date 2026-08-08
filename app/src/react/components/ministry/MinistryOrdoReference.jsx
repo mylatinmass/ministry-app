@@ -168,16 +168,13 @@ const MinistryOrdoReference = ({
 
   if (compact) {
     return (
-      <section className="h-full rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+      <section className="h-full">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-[#896542]">
-              Today&apos;s 1962 Ordo
-            </p>
+
             <h2 className="mt-1 century-font text-2xl text-gray-900">
               {day.celebration}
             </h2>
-          </div>
+
           <a
             href={day.sourceUrl}
             target="_blank"
@@ -218,12 +215,9 @@ const MinistryOrdoReference = ({
   }
 
   return (
-    <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+    <section className="lg:rounded-2xl lg:border lg:border-gray-100 bg-white lg:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-[#896542]">
-            1962 Ordo
-          </p>
           <h2 className="mt-1 century-font text-2xl text-gray-900">
             {day.celebration}
           </h2>
@@ -234,7 +228,7 @@ const MinistryOrdoReference = ({
           rel="noreferrer"
           className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-[#6f4f34] hover:border-[#C1A387]"
         >
-          View 1962 Ordo
+          1962 Ordo
           <ArrowTopRightOnSquareIcon className="size-4" />
         </a>
       </div>
@@ -272,40 +266,7 @@ const MinistryOrdoReference = ({
           ))}
         </div>
       )}
-
-      {day.generalInformation.length > 0 && (
-        <div className="mt-4 rounded-xl bg-[#f7f3ef] p-4 text-sm text-[#6f4f34]">
-          {day.generalInformation.map((information) => (
-            <p key={information}>{information}</p>
-          ))}
-        </div>
-      )}
-
-      {day.reminders.length > 0 && (
-        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          <p className="flex items-center gap-2 font-semibold">
-            <ExclamationTriangleIcon className="size-5" />
-            Ordo reminder
-          </p>
-          {day.reminders.map((reminder) => (
-            <p key={reminder} className="mt-1">
-              {reminder}
-            </p>
-          ))}
-        </div>
-      )}
-
-      <div className="mt-5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="font-semibold text-gray-900">Mass</h3>
-          {selectionRequired && (
-            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
-              Selection required
-            </span>
-          )}
-        </div>
-
-        <div className="mt-3 space-y-3">
+  <div className="mt-3 space-y-3">
           {day.massOptions.map((option) => {
             const selected = selectedOptionId === option.id
             return (
@@ -333,25 +294,13 @@ const MinistryOrdoReference = ({
                     />
                   )}
                   <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-gray-900">
+                    {/* <p className="font-semibold text-gray-900">
                       {option.label}
-                    </p>
+                    </p> */}
                     <p className="mt-1 text-sm leading-relaxed text-gray-600">
                       {option.instructions}
                     </p>
-                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-600">
-                      {option.vestmentColor && (
-                        <span>{option.vestmentColor} vestments</span>
-                      )}
-                      {option.gloria !== null && (
-                        <span>
-                          {option.gloria ? "Gloria" : "No Gloria"}
-                        </span>
-                      )}
-                      {option.credo !== null && (
-                        <span>{option.credo ? "Credo" : "No Credo"}</span>
-                      )}
-                    </div>
+                  
                     {selected &&
                       day.massOptions.length > 1 &&
                       !option.vestmentColor && (
@@ -366,7 +315,30 @@ const MinistryOrdoReference = ({
             )
           })}
         </div>
-      </div>
+      {day.generalInformation.length > 0 && (
+        <div className="mt-4 rounded-xl bg-gray-100 p-4 text-sm text-gray-600">
+          {day.generalInformation.map((information) => (
+            <p key={information}>{information}</p>
+          ))}
+        </div>
+      )}
+
+      {day.reminders.length > 0 && (
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <p className="flex items-center gap-2 font-semibold">
+            <ExclamationTriangleIcon className="size-5" />
+            Ordo reminder
+          </p>
+          {day.reminders.map((reminder) => (
+            <p key={reminder} className="mt-1">
+              {reminder}
+            </p>
+          ))}
+        </div>
+      )}
+
+
+      
 
       {eventReference?.sourceChanged && (
         <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">

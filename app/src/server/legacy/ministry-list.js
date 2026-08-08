@@ -140,6 +140,10 @@ const handler = async (event) => {
             e.id,
             e.ministry_id AS coordinator_ministry_id,
             COALESCE(coordinator.name, 'Volunteer Event') AS coordinator_ministry_name,
+            template.name AS template_name,
+            ordo_selection.selected_mass_option_snapshot->>'label' AS ordo_mass_name,
+            ordo_day.celebration AS ordo_celebration,
+            ordo_day.general_information AS ordo_general_information,
             e.title,
             e.description,
             e.location,
@@ -155,6 +159,12 @@ const handler = async (event) => {
             ) AS responsibility_count
           FROM events e
           LEFT JOIN ministries coordinator ON coordinator.id = e.ministry_id
+          LEFT JOIN templates template ON template.id = e.template_id
+          LEFT JOIN event_ordo_selections ordo_selection
+            ON ordo_selection.event_id = e.id
+          LEFT JOIN ordo_days ordo_day
+            ON ordo_day.liturgical_date =
+              (e.start_time AT TIME ZONE 'America/New_York')::DATE
           WHERE e.status IN ('published', 'cancelled', 'completed')
           ORDER BY e.start_time
         `

@@ -48,6 +48,34 @@ const audit = (client, actorId, subjectId, action, entityType, entityId, metadat
     [actorId, subjectId, action, entityType || null, entityId || null, JSON.stringify(metadata)]
   )
 
+const loadUnreadAlertCounts = async (client, actorId) => {
+  try {
+    return await client.query(
+      `
+        SELECT alert.subject_user_id, count(*)::INT AS unread_count
+        FROM ministry_alerts alert
+        WHERE alert.read_at IS NULL
+          AND (
+            alert.subject_user_id = $1
+            OR EXISTS (
+              SELECT 1 FROM managed_profiles profile
+              WHERE profile.guardian_user_id = $1
+                AND profile.child_user_id = alert.subject_user_id
+                AND profile.status IN ('active', 'separation_pending')
+            )
+          )
+        GROUP BY alert.subject_user_id
+      `,
+      [actorId]
+    )
+  } catch (error) {
+    if (error.code === "42P01" || /relation .*ministry_alerts.*does not exist/i.test(error.message)) {
+      return { rows: [] }
+    }
+    throw error
+  }
+}
+
 const listProfiles = async (client, context) => {
   const [childrenResult, ministriesResult, requestsResult, alertsResult] = await Promise.all([
     client.query(
@@ -101,24 +129,7 @@ const listProfiles = async (client, context) => {
       `,
       [context.actor.id]
     ),
-    client.query(
-      `
-        SELECT alert.subject_user_id, count(*)::INT AS unread_count
-        FROM ministry_alerts alert
-        WHERE alert.read_at IS NULL
-          AND (
-            alert.subject_user_id = $1
-            OR EXISTS (
-              SELECT 1 FROM managed_profiles profile
-              WHERE profile.guardian_user_id = $1
-                AND profile.child_user_id = alert.subject_user_id
-                AND profile.status IN ('active', 'separation_pending')
-            )
-          )
-        GROUP BY alert.subject_user_id
-      `,
-      [context.actor.id]
-    ),
+    loadUnreadAlertCounts(client, context.actor.id),
   ])
 
   const unreadCounts = new Map(

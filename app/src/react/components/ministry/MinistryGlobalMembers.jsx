@@ -4,7 +4,6 @@ import {
   ChevronRightIcon,
   EnvelopeIcon,
   MagnifyingGlassIcon,
-  PlusIcon,
   ShieldCheckIcon,
   UserMinusIcon,
   UsersIcon,
@@ -119,8 +118,7 @@ const MinistryGlobalMembers = () => {
     }
   }
 
-  const sendInvitation = async (event) => {
-    event.preventDefault()
+  const sendInvitationRequest = async (email, ministryIds) => {
     setMessage("")
     setErrorMessage("")
     setIsSaving(true)
@@ -129,8 +127,8 @@ const MinistryGlobalMembers = () => {
         method: "POST",
         headers: authHeaders(true),
         body: JSON.stringify({
-          email: inviteEmail,
-          ministryIds: inviteMinistryIds,
+          email,
+          ministryIds,
         }),
       })
       const result = await response.json()
@@ -138,15 +136,30 @@ const MinistryGlobalMembers = () => {
         throw new Error(result.message || "Unable to send invitation")
       }
       setMessage(result.message)
-      setInviteEmail("")
-      setInviteMinistryIds([])
-      setInviteOpen(false)
       await loadMembers()
+      return true
     } catch (error) {
       setErrorMessage(error.message)
+      return false
     } finally {
       setIsSaving(false)
     }
+  }
+
+  const sendInvitation = async (event) => {
+    event.preventDefault()
+    const sent = await sendInvitationRequest(inviteEmail, inviteMinistryIds)
+    if (sent) {
+      setInviteEmail("")
+      setInviteMinistryIds([])
+      setInviteOpen(false)
+    }
+  }
+
+  const inviteExistingMember = async () => {
+    if (!selectedMember?.email || !addMinistryId) return
+    const sent = await sendInvitationRequest(selectedMember.email, [addMinistryId])
+    if (sent) setAddMinistryId("")
   }
 
   if (isLoading && !data) {
@@ -389,7 +402,7 @@ const MinistryGlobalMembers = () => {
                 onChange={(event) => setAddMinistryId(event.target.value)}
                 className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm"
               >
-                <option value="">Add to another ministry...</option>
+                <option value="">Invite to a ministry...</option>
                 {availableMinistries.map((ministry) => (
                   <option key={ministry.id} value={ministry.id}>
                     {ministry.name}
@@ -398,20 +411,19 @@ const MinistryGlobalMembers = () => {
               </select>
               <button
                 type="button"
-                disabled={isSaving || !addMinistryId}
-                onClick={() =>
-                  runMemberAction({
-                    ministryId: addMinistryId,
-                    userId: selectedMember.id,
-                    action: "add_existing_member",
-                  })
-                }
+                disabled={isSaving || !addMinistryId || !selectedMember.email}
+                onClick={inviteExistingMember}
                 className="inline-flex items-center justify-center gap-2 rounded-lg border border-[#d8c7b8] px-3 py-2 text-sm font-semibold text-[#6f4f34] disabled:opacity-50"
               >
-                <PlusIcon className="size-4" />
-                Add membership
+                <EnvelopeIcon className="size-4" />
+                Send invitation
               </button>
             </div>
+          )}
+          {!selectedMember.email && availableMinistries.length > 0 && (
+            <p className="mt-3 text-sm text-gray-500">
+              This managed profile must use its guardian’s ministry-request process.
+            </p>
           )}
         </section>
       </div>

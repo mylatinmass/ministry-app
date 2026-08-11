@@ -57,6 +57,10 @@ export const sendKlaviyoReminderDue = async (context: any) => {
             starts_at_local: localStart(context.start_time),
             time_zone: "America/New_York",
             assignment_url: assignmentUrl,
+            assignment_subject_external_id: `ministry:${context.subject_user_id}`,
+            notification_recipient_external_id: `ministry:${context.recipient_user_id}`,
+            managed_profile_assignment:
+              context.subject_user_id !== context.recipient_user_id,
             notification_text: `Reminder: your ministry assignment begins ${localStart(
               context.start_time,
             )}.`,
@@ -73,6 +77,7 @@ export const sendKlaviyoReminderDue = async (context: any) => {
             data: {
               type: "profile",
               attributes: {
+                external_id: `ministry:${context.recipient_user_id}`,
                 phone_number: phoneNumber,
               },
             },

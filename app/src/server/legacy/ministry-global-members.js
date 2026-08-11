@@ -87,6 +87,31 @@ const handler = async (event) => {
       await Promise.all([
         client.query(
           `
+          WITH eligible_users AS (
+            SELECT DISTINCT
+              user_account.id,
+              user_account.first_name,
+              user_account.last_name,
+              user_account.email,
+              user_account.phone,
+              user_account.username,
+              user_account.global_role,
+              user_account.status
+            FROM users user_account
+            JOIN ministry_members existing_membership
+              ON existing_membership.user_id = user_account.id
+             AND existing_membership.status = 'active'
+            WHERE user_account.status = 'active'
+              AND (
+                $2::BOOL
+                OR NOT EXISTS (
+                  SELECT 1
+                  FROM managed_profiles managed_profile
+                  WHERE managed_profile.child_user_id = user_account.id
+                    AND managed_profile.status IN ('active', 'separation_pending')
+                )
+              )
+          )
           SELECT
             user_account.id AS user_id,
             user_account.first_name,
@@ -106,23 +131,22 @@ const handler = async (event) => {
             ministry.name AS ministry_name,
             ministry.slug AS ministry_slug,
             membership.joined_at
-          FROM ministry_members membership
-          JOIN users user_account
-            ON user_account.id = membership.user_id
-           AND user_account.status = 'active'
-          JOIN ministries ministry
+          FROM eligible_users user_account
+          LEFT JOIN ministry_members membership
+            ON membership.user_id = user_account.id
+           AND membership.status = 'active'
+           AND membership.ministry_id = ANY($1::UUID[])
+          LEFT JOIN ministries ministry
             ON ministry.id = membership.ministry_id
            AND ministry.status = 'active'
           LEFT JOIN ministry_levels ministry_level
             ON ministry_level.id = membership.highest_level_id
-          WHERE membership.status = 'active'
-            AND membership.ministry_id = ANY($1::UUID[])
           ORDER BY
             lower(user_account.last_name),
             lower(user_account.first_name),
-            lower(ministry.name)
+            lower(COALESCE(ministry.name, ''))
         `,
-          [managedMinistryIds]
+          [managedMinistryIds, canManageAll]
         ),
         client.query(
           `
@@ -185,18 +209,20 @@ const handler = async (event) => {
           memberships: [],
         })
       }
-      membersById.get(row.user_id).memberships.push({
-        id: row.membership_id,
-        ministryId: row.ministry_id,
-        ministryName: row.ministry_name,
-        ministrySlug: row.ministry_slug,
-        role: row.membership_role,
-        canServe: Boolean(row.can_serve),
-        highestLevelId: row.highest_level_id,
-        highestLevelName: row.highest_level_name,
-        highestLevelRank: Number(row.highest_level_rank) || null,
-        joinedAt: row.joined_at,
-      })
+      if (row.membership_id) {
+        membersById.get(row.user_id).memberships.push({
+          id: row.membership_id,
+          ministryId: row.ministry_id,
+          ministryName: row.ministry_name,
+          ministrySlug: row.ministry_slug,
+          role: row.membership_role,
+          canServe: Boolean(row.can_serve),
+          highestLevelId: row.highest_level_id,
+          highestLevelName: row.highest_level_name,
+          highestLevelRank: Number(row.highest_level_rank) || null,
+          joinedAt: row.joined_at,
+        })
+      }
     }
 
     return jsonResponse(200, {

@@ -315,6 +315,7 @@ const createInvitation = async (
   client,
   event,
   user,
+  actor,
   managedMinistries,
   body
 ) => {
@@ -444,6 +445,21 @@ const createInvitation = async (
         `,
         [invitationId, ministry.id]
       )
+      await writeLevelAudit(client, {
+        actor,
+        user,
+        action: "ministry_invitation.created",
+        entityType: "ministry_invitation",
+        entityId: invitationId,
+        ministryId: ministry.id,
+        beforeData: null,
+        afterData: {
+          email,
+          invitedUserId: existingUser?.id || null,
+          status: "pending",
+          expiresAt,
+        },
+      })
     }
     await client.query("COMMIT")
   } catch (error) {
@@ -1380,103 +1396,10 @@ const updateMembership = async (
   }
 
   if (action === "add_existing_member") {
-    if (!canManageMinistry(managedMinistries, ministryId)) {
-      return jsonResponse(403, { message: "You cannot manage this ministry" })
-    }
-
-    if (!isGlobalManager(user)) {
-      const visibleMemberResult = await client.query(
-        `
-          SELECT 1
-          FROM ministry_members
-          WHERE user_id = $1
-            AND ministry_id = ANY($2::UUID[])
-            AND status = 'active'
-          LIMIT 1
-        `,
-        [targetUserId, managedMinistries.map((ministry) => ministry.id)]
-      )
-      if (!visibleMemberResult.rowCount) {
-        return jsonResponse(403, {
-          message: "You can only add members visible in ministries you administer",
-        })
-      }
-    }
-
-    await client.query("BEGIN")
-    try {
-      const targetResult = await client.query(
-        `
-          SELECT id, first_name, last_name, email, status
-          FROM users
-          WHERE id = $1
-          FOR UPDATE
-        `,
-        [targetUserId]
-      )
-      const target = targetResult.rows[0]
-      if (!target || target.status !== "active") {
-        await client.query("ROLLBACK")
-        return jsonResponse(404, { message: "Active member not found" })
-      }
-
-      const existingResult = await client.query(
-        `
-          SELECT id, level, status, can_serve, highest_level_id
-          FROM ministry_members
-          WHERE ministry_id = $1 AND user_id = $2
-          FOR UPDATE
-        `,
-        [ministryId, targetUserId]
-      )
-      const existing = existingResult.rows[0] || null
-      if (existing?.status === "active") {
-        await client.query("ROLLBACK")
-        return jsonResponse(409, {
-          message: "This person is already an active member of that ministry",
-        })
-      }
-
-      const result = await client.query(
-        `
-          INSERT INTO ministry_members (
-            ministry_id, user_id, level, status, can_serve,
-            highest_level_id, joined_at, updated_at
-          )
-          VALUES ($1, $2, 'member', 'active', true, NULL, now(), now())
-          ON CONFLICT (ministry_id, user_id)
-          DO UPDATE SET
-            level = 'member',
-            status = 'active',
-            can_serve = true,
-            highest_level_id = NULL,
-            joined_at = now(),
-            updated_at = now()
-          RETURNING id, level, status, can_serve, highest_level_id
-        `,
-        [ministryId, targetUserId]
-      )
-      const membership = result.rows[0]
-      await writeLevelAudit(client, {
-        actor,
-        user,
-        action: "ministry_member.added",
-        entityType: "ministry_member",
-        entityId: membership.id,
-        ministryId,
-        beforeData: existing,
-        afterData: { ...membership, targetUserId },
-      })
-      await queueKlaviyoProfileSync(client, targetUserId)
-      await client.query("COMMIT")
-      return jsonResponse(200, {
-        success: true,
-        message: `${[target.first_name, target.last_name].filter(Boolean).join(" ") || target.email} added to the ministry`,
-      })
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => {})
-      throw error
-    }
+    return jsonResponse(409, {
+      message:
+        "Membership requires an invitation that the person can accept or decline",
+    })
   }
 
   const isLeaving = action === "leave" && targetUserId === user.id
@@ -1749,6 +1672,7 @@ const handler = async (event) => {
         client,
         event,
         user,
+        context.actor,
         managedMinistries,
         body
       )

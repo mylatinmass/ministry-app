@@ -2,11 +2,21 @@ const queueKlaviyoProfileSync = (client, userId) =>
   client.query(
     `
       INSERT INTO klaviyo_profile_syncs (account_user_id)
-      SELECT COALESCE(managed_profile.guardian_user_id, user_account.id)
+      SELECT related_user.id
       FROM users user_account
-      LEFT JOIN managed_profiles managed_profile
-        ON managed_profile.child_user_id = user_account.id
-       AND managed_profile.status IN ('active', 'separation_pending')
+      CROSS JOIN LATERAL (
+        SELECT user_account.id
+        UNION
+        SELECT managed_profile.guardian_user_id
+        FROM managed_profiles managed_profile
+        WHERE managed_profile.child_user_id = user_account.id
+          AND managed_profile.status IN ('active', 'separation_pending')
+        UNION
+        SELECT managed_profile.child_user_id
+        FROM managed_profiles managed_profile
+        WHERE managed_profile.guardian_user_id = user_account.id
+          AND managed_profile.status IN ('active', 'separation_pending')
+      ) related_user
       WHERE user_account.id = $1
       ON CONFLICT (account_user_id)
       DO UPDATE SET

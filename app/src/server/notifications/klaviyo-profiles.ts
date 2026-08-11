@@ -70,19 +70,31 @@ const loadProfile = async (userId: string) => {
         user_account.global_role,
         user_account.status,
         user_account.is_volunteer_profile,
+        COALESCE(guardian.notification_email_enabled,
+          user_account.notification_email_enabled) AS notification_email_enabled,
+        COALESCE(guardian.notification_sms_enabled,
+          user_account.notification_sms_enabled) AS notification_sms_enabled,
+        COALESCE(guardian.notification_push_enabled,
+          user_account.notification_push_enabled) AS notification_push_enabled,
+        COALESCE(guardian.notification_telegram_enabled,
+          user_account.notification_telegram_enabled) AS notification_telegram_enabled,
+        COALESCE(guardian.notification_lead_minutes,
+          user_account.notification_lead_minutes) AS notification_lead_minutes,
+        managed_profile.guardian_user_id,
         EXISTS (
           SELECT 1
           FROM ministry_members membership
           WHERE membership.user_id = user_account.id
             AND membership.status = 'active'
         ) AS has_active_membership,
-        EXISTS (
-          SELECT 1
-          FROM managed_profiles managed_profile
-          WHERE managed_profile.child_user_id = user_account.id
-            AND managed_profile.status IN ('active', 'separation_pending')
-        ) AS is_managed_child
+        managed_profile.child_user_id IS NOT NULL AS is_managed_child
       FROM users user_account
+      LEFT JOIN managed_profiles managed_profile
+        ON managed_profile.child_user_id = user_account.id
+       AND managed_profile.status IN ('active', 'separation_pending')
+      LEFT JOIN users guardian
+        ON guardian.id = managed_profile.guardian_user_id
+       AND guardian.status = 'active'
       WHERE user_account.id = $1
       LIMIT 1
     `,
@@ -92,6 +104,7 @@ const loadProfile = async (userId: string) => {
 }
 
 const accountType = (profile: any) => {
+  if (profile.is_managed_child) return "managed_child"
   if (["owner", "super_admin"].includes(profile.global_role)) {
     return "administrator"
   }
@@ -140,9 +153,9 @@ const syncProfile = async (sync: any) => {
   if (
     !profile ||
     profile.status !== "active" ||
-    profile.is_managed_child ||
     (!profile.has_active_membership &&
       !profile.is_volunteer_profile &&
+      !profile.is_managed_child &&
       !["owner", "super_admin"].includes(profile.global_role))
   ) {
     await updateSync(sync.account_user_id, {
@@ -154,7 +167,7 @@ const syncProfile = async (sync: any) => {
 
   const email = String(profile.email || "").trim().toLowerCase()
   const phoneNumber = normalizePhone(profile.phone)
-  if (!email && !phoneNumber) {
+  if (!profile.is_managed_child && !email && !phoneNumber) {
     await updateSync(sync.account_user_id, {
       status: "skipped",
       error: "profile_has_no_contact_identifier",
@@ -169,10 +182,32 @@ const syncProfile = async (sync: any) => {
     properties: {
       ministry_app_account: true,
       ministry_app_account_type: accountType(profile),
+      ministry_notification_email_enabled: Boolean(
+        profile.notification_email_enabled,
+      ),
+      ministry_notification_sms_enabled: Boolean(
+        profile.notification_sms_enabled,
+      ),
+      ministry_notification_push_enabled: Boolean(
+        profile.notification_push_enabled,
+      ),
+      ministry_notification_telegram_enabled: Boolean(
+        profile.notification_telegram_enabled,
+      ),
+      ministry_notification_lead_minutes:
+        Number(profile.notification_lead_minutes) || 60,
+      ...(profile.guardian_user_id
+        ? {
+            ministry_managed_profile: true,
+            ministry_notification_recipient_external_id: `ministry:${profile.guardian_user_id}`,
+          }
+        : {}),
     },
   }
-  if (email) attributes.email = email
-  if (phoneNumber) attributes.phone_number = phoneNumber
+  if (!profile.is_managed_child && email) attributes.email = email
+  if (!profile.is_managed_child && phoneNumber) {
+    attributes.phone_number = phoneNumber
+  }
 
   const response = await fetch("https://a.klaviyo.com/api/profile-import", {
     method: "POST",

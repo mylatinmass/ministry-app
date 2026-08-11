@@ -20,6 +20,9 @@ const {
   buildMembershipRequestUrl,
   sendMembershipRequestEmail,
 } = require("./helper/managed-profile-membership-email")
+const {
+  queueKlaviyoProfileSync,
+} = require("./helper/klaviyo-profile-sync")
 
 const jsonResponse = (statusCode, body) => ({
   statusCode,
@@ -208,6 +211,7 @@ const createChild = async (client, actor, body) => {
       "managed_profile",
       relationshipResult.rows[0].id
     )
+    await queueKlaviyoProfileSync(client, childId)
     await client.query("COMMIT")
     return jsonResponse(201, { success: true, profileId: childId, message: "Child profile added" })
   } catch (error) {

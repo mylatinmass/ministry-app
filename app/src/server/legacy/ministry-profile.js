@@ -5,6 +5,9 @@ const {
   getMinistryTokenPayload,
   normalizeUsername,
 } = require("./helper/ministry-auth")
+const {
+  queueKlaviyoProfileSync,
+} = require("./helper/klaviyo-profile-sync")
 
 const REMINDER_OPTIONS = new Set([15, 30, 45, 60, 120, 180, 240])
 
@@ -305,6 +308,7 @@ const handler = async (event) => {
           context.user.id,
         ]
       )
+      await queueKlaviyoProfileSync(client, context.user.id)
 
       const before = beforeResult.rows[0]
       await client.query(

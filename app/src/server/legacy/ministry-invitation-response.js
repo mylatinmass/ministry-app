@@ -10,6 +10,9 @@ const {
   getInvitationMinistries,
   toPublicInvitation,
 } = require("./helper/ministry-invitations")
+const {
+  queueKlaviyoProfileSync,
+} = require("./helper/klaviyo-profile-sync")
 
 const jsonResponse = (statusCode, body) => ({
   statusCode,
@@ -337,6 +340,7 @@ const acceptInvitation = async (client, token, body, jwtSecret) => {
       `,
       [userId, invitation.id]
     )
+    await queueKlaviyoProfileSync(client, userId)
 
     if (reactivatedSuppression.rowCount) {
       await client.query(

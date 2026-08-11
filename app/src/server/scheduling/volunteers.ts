@@ -3,6 +3,9 @@ import nodemailer from "nodemailer"
 import type { PoolClient } from "pg"
 import { getPool } from "../database"
 import { json } from "../request"
+import klaviyoProfileSync from "../legacy/helper/klaviyo-profile-sync.js"
+
+const { queueKlaviyoProfileSync } = klaviyoProfileSync
 
 const CODE_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -340,6 +343,7 @@ const createVolunteerSignup = async (
       [user.id, phone],
     )
   }
+  await queueKlaviyoProfileSync(client, user.id)
   let assignmentId
   try {
     const assignmentResult = await client.query(

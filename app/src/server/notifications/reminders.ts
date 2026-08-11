@@ -6,6 +6,7 @@ import { json } from "../request"
 import { verifySchedulerRequest } from "./scheduler-auth"
 import { sendTelegramMessage } from "./telegram"
 import { sendKlaviyoReminderDue } from "./klaviyo"
+import { processKlaviyoProfileSyncs } from "./klaviyo-profiles"
 import {
   processNotificationDigests,
   queueAssignmentReminderAlert,
@@ -568,6 +569,7 @@ export const handleReminderProcessing = async (request: Request) => {
     return json({ message: "Unauthorized" }, 401)
   }
 
+  const klaviyoProfiles = await processKlaviyoProfileSyncs()
   const reconciled = await reconcileReminders()
   const reminders = await claimDueReminders()
 
@@ -578,6 +580,7 @@ export const handleReminderProcessing = async (request: Request) => {
   const processedAlerts = await processNotificationDigests()
 
   return json({
+    klaviyoProfiles,
     reconciledAssignments: reconciled,
     processedReminders: reminders.length,
     processedAlerts,

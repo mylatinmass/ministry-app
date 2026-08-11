@@ -1,5 +1,8 @@
 const { Client } = require("pg")
 const { hashPassword } = require("./passwords")
+const {
+  queueKlaviyoProfileSync,
+} = require("./helper/klaviyo-profile-sync")
 const { createGatsbyHandler } = require("./helper/gatsby-function-adapter")
 const {
   createMinistryToken,
@@ -164,6 +167,7 @@ const handler = async (event) => {
         `,
         [locked.child_user_id, locked.id]
       )
+      await queueKlaviyoProfileSync(client, locked.child_user_id)
       await client.query("COMMIT")
       return jsonResponse(200, {
         success: true,

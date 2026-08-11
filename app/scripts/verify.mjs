@@ -189,6 +189,28 @@ const klaviyo = await read("src/server/notifications/klaviyo.ts")
 assert.match(klaviyo, /Ministry Assignment Reminder Due/)
 assert.match(klaviyo, /unique_id: context\.id/)
 assert.match(klaviyo, /Klaviyo-API-Key/)
+const klaviyoProfileMigration = await read(
+  "migrations/20260811_01_add_klaviyo_profile_syncs.sql",
+)
+const klaviyoProfiles = await read(
+  "src/server/notifications/klaviyo-profiles.ts",
+)
+const klaviyoProfileQueue = await read(
+  "src/server/legacy/helper/klaviyo-profile-sync.js",
+)
+const volunteerSignupProfileSync = await read(
+  "src/server/scheduling/volunteers.ts",
+)
+assert.match(klaviyoProfileMigration, /CREATE TABLE IF NOT EXISTS klaviyo_profile_syncs/)
+assert.match(klaviyoProfileMigration, /managed_profile\.status IN \('active', 'separation_pending'\)/)
+assert.match(klaviyoProfiles, /api\/profile-import/)
+assert.match(klaviyoProfiles, /profiles:write|KLAVIYO_PROFILE_SYNC_ENABLED/)
+assert.match(klaviyoProfiles, /ministry_app_account_type/)
+assert.doesNotMatch(klaviyoProfiles, /ministry_names|ministry_roles/)
+assert.match(klaviyoProfileQueue, /COALESCE\(managed_profile\.guardian_user_id, user_account\.id\)/)
+assert.match(reminders, /processKlaviyoProfileSyncs/)
+assert.match(volunteerSignupProfileSync, /queueKlaviyoProfileSync/)
+assert.match(invitationResponse, /queueKlaviyoProfileSync/)
 assert.match(pushNotificationsComponent, /Send test notification/)
 
 const telegramMigration = await read(

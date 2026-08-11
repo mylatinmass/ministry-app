@@ -241,6 +241,15 @@ always strict and returns an error when the feed or database is unavailable.
   required before a text message can be sent.
   Managed children inherit the guardian account's delivery channels while their
   assignments and history remain attached to the child's profile.
+- Accepted members, registered volunteers, and independent profile updates are
+  queued for durable Klaviyo profile synchronization. Klaviyo receives the
+  independent account's name, email, normalized telephone, stable Ministry
+  account identifier, and broad account type. Managed children are excluded
+  until separation and continue to use their guardian's contact profile. Profile
+  creation does not subscribe anyone to email or SMS; subscription status must
+  come from separately recorded consent. Enable processing only after the
+  Klaviyo private key has `profiles:write` by setting
+  `KLAVIYO_PROFILE_SYNC_ENABLED=true` in production.
 - An enabled device can receive a production-only, rate-limited test Push from
   the profile screen. Test sends are audited, do not expose event information,
   and expire subscriptions rejected permanently by the browser push service.

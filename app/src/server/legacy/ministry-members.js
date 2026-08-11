@@ -15,6 +15,9 @@ const {
 const {
   sendMinistryInvitationEmail,
 } = require("./helper/ministry-invitation-email")
+const {
+  queueKlaviyoProfileSync,
+} = require("./helper/klaviyo-profile-sync")
 
 const jsonResponse = (statusCode, body) => ({
   statusCode,
@@ -1450,6 +1453,7 @@ const updateMembership = async (
         beforeData: existing,
         afterData: { ...membership, targetUserId },
       })
+      await queueKlaviyoProfileSync(client, targetUserId)
       await client.query("COMMIT")
       return jsonResponse(200, {
         success: true,

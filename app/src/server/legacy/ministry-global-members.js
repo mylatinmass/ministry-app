@@ -41,19 +41,49 @@ const handler = async (event) => {
     const context = await getMinistryIdentityContext(client, payload)
     if (!context)
       return jsonResponse(401, { message: "Ministry access is inactive" })
-    if (!["owner", "super_admin"].includes(context.user.global_role)) {
-      return jsonResponse(403, {
-        message: "Global member access is restricted",
-      })
-    }
     if (context.authMethod !== "password") {
       return jsonResponse(403, {
         message:
-          "Sign in with your username and password to manage all members.",
+          "Sign in with your username and password to manage members.",
       })
     }
 
-    const [membershipsResult, ministriesResult, levelsResult, invitationsResult] =
+    const canManageAll = ["owner", "super_admin"].includes(
+      context.user.global_role
+    )
+    const ministriesResult = canManageAll
+      ? await client.query(
+          `
+            SELECT id, name, slug
+            FROM ministries
+            WHERE status = 'active'
+            ORDER BY name
+          `
+        )
+      : await client.query(
+          `
+            SELECT ministry.id, ministry.name, ministry.slug
+            FROM ministry_members membership
+            JOIN ministries ministry ON ministry.id = membership.ministry_id
+            WHERE membership.user_id = $1
+              AND membership.status = 'active'
+              AND membership.level IN ('owner', 'admin')
+              AND ministry.status = 'active'
+            ORDER BY ministry.name
+          `,
+          [context.user.id]
+        )
+
+    if (!ministriesResult.rowCount) {
+      return jsonResponse(403, {
+        message: "Member management is restricted to Ministry Admins",
+      })
+    }
+    const managedMinistryIds = ministriesResult.rows.map(
+      (ministry) => ministry.id
+    )
+
+    const [membershipsResult, levelsResult, invitationsResult] =
       await Promise.all([
         client.query(
           `
@@ -86,27 +116,23 @@ const handler = async (event) => {
           LEFT JOIN ministry_levels ministry_level
             ON ministry_level.id = membership.highest_level_id
           WHERE membership.status = 'active'
+            AND membership.ministry_id = ANY($1::UUID[])
           ORDER BY
             lower(user_account.last_name),
             lower(user_account.first_name),
             lower(ministry.name)
-        `
-        ),
-        client.query(
-          `
-          SELECT id, name, slug
-          FROM ministries
-          WHERE status = 'active'
-          ORDER BY name
-        `
+        `,
+          [managedMinistryIds]
         ),
         client.query(
           `
           SELECT id, ministry_id, name, description, rank_order
           FROM ministry_levels
           WHERE status = 'active'
+            AND ministry_id = ANY($1::UUID[])
           ORDER BY ministry_id, rank_order
-        `
+        `,
+          [managedMinistryIds]
         ),
         client.query(
           `
@@ -126,13 +152,21 @@ const handler = async (event) => {
             JOIN users requester
               ON requester.id = invitation.requested_by
             WHERE invitation.status = 'pending'
+              AND item.ministry_id = ANY($1::UUID[])
+              AND NOT EXISTS (
+                SELECT 1
+                FROM ministry_invitation_items outside_item
+                WHERE outside_item.invitation_id = invitation.id
+                  AND NOT (outside_item.ministry_id = ANY($1::UUID[]))
+              )
             GROUP BY
               invitation.id,
               requester.id,
               requester.first_name,
               requester.last_name
             ORDER BY invitation.created_at DESC
-          `
+          `,
+          [managedMinistryIds]
         ),
       ])
 
@@ -167,6 +201,7 @@ const handler = async (event) => {
 
     return jsonResponse(200, {
       currentUserId: context.user.id,
+      canManageAll,
       members: Array.from(membersById.values()),
       ministries: ministriesResult.rows.map((ministry) => ({
         id: ministry.id,

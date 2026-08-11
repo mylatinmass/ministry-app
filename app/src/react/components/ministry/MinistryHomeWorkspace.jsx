@@ -115,12 +115,17 @@ const MinistryHomeWorkspace = ({ data }) => {
   const hasGlobalAccess = ["owner", "super_admin"].includes(
     data.user.globalRole
   )
+  const canManageMembers =
+    hasGlobalAccess ||
+    data.ministries.some((ministry) =>
+      ["owner", "admin"].includes(ministry.accessLevel),
+    )
   const availableSections = React.useMemo(
     () =>
       accountSections.filter(
-        (section) => !section.globalOnly || hasGlobalAccess,
+        (section) => !section.managerOnly || canManageMembers,
       ),
-    [hasGlobalAccess]
+    [canManageMembers]
   )
   const [sectionId, setSectionId] = React.useState(() => {
     if (typeof window === "undefined") return "home"
@@ -469,7 +474,7 @@ const MinistryHomeWorkspace = ({ data }) => {
         onReturn={returnToGuardian}
       />
     )
-  } else if (sectionId === "members" && hasGlobalAccess) {
+  } else if (sectionId === "members" && canManageMembers) {
     content = <MinistryGlobalMembers />
   } else if (sectionId === "profile") {
     content = (

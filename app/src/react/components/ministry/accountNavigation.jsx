@@ -44,8 +44,8 @@ const accountSections = [
     id: "members",
     label: "Members",
     icon: UserGroupIcon,
-    description: "View and manage every member across all ministries.",
-    globalOnly: true,
+    description: "View and manage members in the ministries you administer.",
+    managerOnly: true,
   },
   {
     id: "profile",

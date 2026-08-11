@@ -1380,13 +1380,27 @@ const updateMembership = async (
   }
 
   if (action === "add_existing_member") {
-    if (!isGlobalManager(user)) {
-      return jsonResponse(403, {
-        message: "Only a global administrator can add an existing member",
-      })
-    }
     if (!canManageMinistry(managedMinistries, ministryId)) {
       return jsonResponse(403, { message: "You cannot manage this ministry" })
+    }
+
+    if (!isGlobalManager(user)) {
+      const visibleMemberResult = await client.query(
+        `
+          SELECT 1
+          FROM ministry_members
+          WHERE user_id = $1
+            AND ministry_id = ANY($2::UUID[])
+            AND status = 'active'
+          LIMIT 1
+        `,
+        [targetUserId, managedMinistries.map((ministry) => ministry.id)]
+      )
+      if (!visibleMemberResult.rowCount) {
+        return jsonResponse(403, {
+          message: "You can only add members visible in ministries you administer",
+        })
+      }
     }
 
     await client.query("BEGIN")

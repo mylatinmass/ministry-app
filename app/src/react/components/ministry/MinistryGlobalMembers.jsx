@@ -218,7 +218,7 @@ const MinistryGlobalMembers = () => {
           </div>
         </header>
 
-        <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+        {data.canManageAll && <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
           <div className="flex items-center gap-3">
             <ShieldCheckIcon className="size-6 text-[#896542]" />
             <div>
@@ -261,9 +261,9 @@ const MinistryGlobalMembers = () => {
               </select>
             </label>
           )}
-        </section>
+        </section>}
 
-        {selectedMember.globalRole !== "owner" && !isCurrentUser && (
+        {data.canManageAll && selectedMember.globalRole !== "owner" && !isCurrentUser && (
           <section className="rounded-2xl border border-red-100 bg-white p-5 shadow-sm">
             <h3 className="font-semibold text-gray-900">Suppress member profile</h3>
             <p className="mt-1 max-w-3xl text-sm text-gray-500">
@@ -446,7 +446,7 @@ const MinistryGlobalMembers = () => {
           <form onSubmit={sendInvitation} className="mt-5 rounded-xl border border-[#e6ddd4] bg-[#faf8f5] p-4">
             <h3 className="font-semibold text-gray-900">Send a private Ministry invitation</h3>
             <p className="mt-1 text-sm text-gray-500">
-              After the person accepts, open their profile here to grant Super Admin or Ministry Admin access.
+              After the person accepts, open their profile here to set their Ministry access and level.
             </p>
             <input
               type="email"

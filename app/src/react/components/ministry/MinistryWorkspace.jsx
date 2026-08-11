@@ -26,8 +26,10 @@ const MinistryWorkspace = ({ data }) => {
   const hasGlobalAccess = ["owner", "super_admin"].includes(
     data.user.globalRole,
   )
+  const canManageMembers =
+    hasGlobalAccess || ["owner", "admin"].includes(data.ministry.accessLevel)
   const accountMenuSections = accountSections.filter(
-    (section) => !section.globalOnly || hasGlobalAccess,
+    (section) => !section.managerOnly || canManageMembers,
   )
   const availableSections = isMember ? memberSections : ministrySections
   const [currentUser, setCurrentUser] = React.useState(data.user)

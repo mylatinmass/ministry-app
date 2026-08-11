@@ -57,6 +57,11 @@ const loadProfile = async (client, context) => {
           contact.notification_telegram_enabled,
           contact.notification_sms_enabled,
           contact.notification_push_enabled,
+          contact.notification_reminders_enabled,
+          contact.notification_schedule_changes_enabled,
+          contact.notification_announcements_enabled,
+          contact.notification_volunteer_opportunities_enabled,
+          contact.sms_transactional_consent_at,
           EXISTS (
             SELECT 1
             FROM telegram_connections telegram_connection
@@ -117,6 +122,20 @@ const loadProfile = async (client, context) => {
       sms: Boolean(profile.notification_sms_enabled),
       push: Boolean(profile.notification_push_enabled),
     },
+    notificationCategories: {
+      reminders: Boolean(profile.notification_reminders_enabled),
+      scheduleChanges: Boolean(
+        profile.notification_schedule_changes_enabled
+      ),
+      announcements: Boolean(profile.notification_announcements_enabled),
+      volunteerOpportunities: Boolean(
+        profile.notification_volunteer_opportunities_enabled
+      ),
+    },
+    smsTransactionalConsentAccepted: Boolean(
+      profile.sms_transactional_consent_at
+    ),
+    smsTransactionalConsentAt: profile.sms_transactional_consent_at || null,
     telegramConnected: Boolean(profile.telegram_connected),
     ministries: ministriesResult.rows.map((ministry) => ({
       id: ministry.id,
@@ -144,6 +163,15 @@ const validateProfile = (body) => {
     sms: body.notificationChannels?.sms === true,
     push: body.notificationChannels?.push === true,
   }
+  const notificationCategories = {
+    reminders: body.notificationCategories?.reminders !== false,
+    scheduleChanges: body.notificationCategories?.scheduleChanges !== false,
+    announcements: body.notificationCategories?.announcements !== false,
+    volunteerOpportunities:
+      body.notificationCategories?.volunteerOpportunities !== false,
+  }
+  const smsTransactionalConsentAccepted =
+    body.smsTransactionalConsentAccepted === true
   const usernameMessage = usernameError(username)
 
   if (!firstName || !lastName) return { error: "First and last name are required" }
@@ -156,6 +184,12 @@ const validateProfile = (body) => {
   }
   if (notificationChannels.sms && !phone) {
     return { error: "Add a telephone number or turn off SMS notifications" }
+  }
+  if (notificationChannels.sms && !smsTransactionalConsentAccepted) {
+    return {
+      error:
+        "Accept the transactional text-message consent before selecting SMS",
+    }
   }
   if (!REMINDER_OPTIONS.has(notificationLeadMinutes)) {
     return { error: "Choose a valid notification time" }
@@ -172,6 +206,8 @@ const validateProfile = (body) => {
     username,
     notificationLeadMinutes,
     notificationChannels,
+    notificationCategories,
+    smsTransactionalConsentAccepted,
   }
 }
 
@@ -268,7 +304,12 @@ const handler = async (event) => {
             notification_email_enabled,
             notification_telegram_enabled,
             notification_sms_enabled,
-            notification_push_enabled
+            notification_push_enabled,
+            notification_reminders_enabled,
+            notification_schedule_changes_enabled,
+            notification_announcements_enabled,
+            notification_volunteer_opportunities_enabled,
+            sms_transactional_consent_at
           FROM users
           WHERE id = $1
           LIMIT 1
@@ -291,8 +332,24 @@ const handler = async (event) => {
             notification_telegram_enabled = $8,
             notification_sms_enabled = $9,
             notification_push_enabled = $10,
+            notification_reminders_enabled = $11,
+            notification_schedule_changes_enabled = $12,
+            notification_announcements_enabled = $13,
+            notification_volunteer_opportunities_enabled = $14,
+            sms_transactional_consent_at = CASE
+              WHEN $9 AND $15 THEN COALESCE(sms_transactional_consent_at, now())
+              ELSE sms_transactional_consent_at
+            END,
+            sms_transactional_consent_source = CASE
+              WHEN $9 AND $15 THEN 'ministry_profile'
+              ELSE sms_transactional_consent_source
+            END,
+            sms_transactional_consent_text_version = CASE
+              WHEN $9 AND $15 THEN '2026-08-11'
+              ELSE sms_transactional_consent_text_version
+            END,
             updated_at = now()
-          WHERE id = $11
+          WHERE id = $16
         `,
         [
           fields.firstName,
@@ -305,6 +362,11 @@ const handler = async (event) => {
           fields.notificationChannels.telegram,
           fields.notificationChannels.sms,
           fields.notificationChannels.push,
+          fields.notificationCategories.reminders,
+          fields.notificationCategories.scheduleChanges,
+          fields.notificationCategories.announcements,
+          fields.notificationCategories.volunteerOpportunities,
+          fields.smsTransactionalConsentAccepted,
           context.user.id,
         ]
       )
@@ -337,10 +399,27 @@ const handler = async (event) => {
               sms: Boolean(before?.notification_sms_enabled),
               push: Boolean(before?.notification_push_enabled),
             },
+            notificationCategories: {
+              reminders: Boolean(before?.notification_reminders_enabled),
+              scheduleChanges: Boolean(
+                before?.notification_schedule_changes_enabled
+              ),
+              announcements: Boolean(
+                before?.notification_announcements_enabled
+              ),
+              volunteerOpportunities: Boolean(
+                before?.notification_volunteer_opportunities_enabled
+              ),
+            },
+            smsTransactionalConsentAt:
+              before?.sms_transactional_consent_at || null,
           }),
           JSON.stringify({
             notificationLeadMinutes: fields.notificationLeadMinutes,
             notificationChannels: fields.notificationChannels,
+            notificationCategories: fields.notificationCategories,
+            smsTransactionalConsentAccepted:
+              fields.smsTransactionalConsentAccepted,
           }),
           JSON.stringify({ authenticationMethod: context.authMethod || "password" }),
         ]

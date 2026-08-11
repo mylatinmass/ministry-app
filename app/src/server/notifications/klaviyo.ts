@@ -99,4 +99,87 @@ export const sendKlaviyoReminderDue = async (context: any) => {
   return { status: response.status, metric: REMINDER_METRIC }
 }
 
+export const sendKlaviyoAlertDue = async (context: any) => {
+  const apiKey = (process.env.KLAVIYO_PRIVATE_API_KEY || "").trim()
+  if (!apiKey) {
+    throw Object.assign(new Error("Klaviyo is not configured"), {
+      code: "klaviyo_not_configured",
+    })
+  }
+  const phoneNumber = normalizePhone(context.recipient_phone)
+  if (!phoneNumber) {
+    throw Object.assign(new Error("The recipient telephone number is invalid"), {
+      code: "invalid_phone_number",
+    })
+  }
+  if (!context.sms_transactional_consent_at) {
+    throw Object.assign(new Error("Transactional SMS consent is required"), {
+      code: "sms_consent_required",
+    })
+  }
+
+  const origin = (process.env.SITE_URL || "https://ministry.mylatinmass.com").replace(
+    /\/$/,
+    "",
+  )
+  const notificationUrl = new URL(
+    context.notification_url || "/",
+    `${origin}/`,
+  ).toString()
+  const response = await fetch("https://a.klaviyo.com/api/events", {
+    method: "POST",
+    headers: {
+      Authorization: `Klaviyo-API-Key ${apiKey}`,
+      Accept: "application/vnd.api+json",
+      "Content-Type": "application/vnd.api+json",
+      revision: KLAVIYO_REVISION,
+    },
+    body: JSON.stringify({
+      data: {
+        type: "event",
+        attributes: {
+          properties: {
+            notification_kind: context.kind,
+            notification_category: context.notification_category,
+            notification_text: context.privacy_safe_message,
+            notification_url: notificationUrl,
+            assignment_subject_external_id: `ministry:${context.subject_user_id}`,
+            notification_recipient_external_id: `ministry:${context.recipient_user_id}`,
+            managed_profile_notification:
+              context.subject_user_id !== context.recipient_user_id,
+          },
+          time: new Date().toISOString(),
+          unique_id: `alert:${context.id}`,
+          metric: {
+            data: {
+              type: "metric",
+              attributes: { name: REMINDER_METRIC },
+            },
+          },
+          profile: {
+            data: {
+              type: "profile",
+              attributes: {
+                external_id: `ministry:${context.recipient_user_id}`,
+                phone_number: phoneNumber,
+              },
+            },
+          },
+        },
+      },
+    }),
+  })
+
+  if (response.status !== 202) {
+    const result: any = await response.json().catch(() => ({}))
+    const detail =
+      result?.errors?.[0]?.detail || `Klaviyo returned ${response.status}`
+    throw Object.assign(new Error(detail), {
+      code: result?.errors?.[0]?.code || "klaviyo_event_rejected",
+      status: response.status,
+    })
+  }
+  return { status: response.status, metric: REMINDER_METRIC }
+}
+
 export { REMINDER_METRIC }

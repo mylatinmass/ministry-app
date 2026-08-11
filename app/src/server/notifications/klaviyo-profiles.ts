@@ -18,6 +18,70 @@ const normalizePhone = (value: unknown) => {
   return ""
 }
 
+const syncTransactionalSmsConsent = async (
+  profile: any,
+  phoneNumber: string,
+) => {
+  if (
+    !phoneNumber ||
+    !profile.notification_sms_enabled ||
+    !profile.sms_transactional_consent_at
+  ) {
+    return false
+  }
+  const consentedAt = new Date(profile.sms_transactional_consent_at)
+  const historicalConsentAt = new Date(
+    Math.min(consentedAt.getTime(), Date.now() - 1000),
+  ).toISOString()
+  const response = await fetch(
+    "https://a.klaviyo.com/api/profile-subscription-bulk-create-jobs",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Klaviyo-API-Key ${process.env.KLAVIYO_PRIVATE_API_KEY}`,
+        Accept: "application/vnd.api+json",
+        "Content-Type": "application/vnd.api+json",
+        revision: KLAVIYO_REVISION,
+      },
+      body: JSON.stringify({
+        data: {
+          type: "profile-subscription-bulk-create-job",
+          attributes: {
+            custom_source: "My Latin Mass Ministry profile",
+            historical_import: true,
+            profiles: {
+              data: [
+                {
+                  type: "profile",
+                  attributes: {
+                    phone_number: phoneNumber,
+                    subscriptions: {
+                      sms: {
+                        transactional: {
+                          consent: "SUBSCRIBED",
+                          consented_at: historicalConsentAt,
+                        },
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    },
+  )
+  if (response.status !== 202) {
+    const result: any = await response.json().catch(() => ({}))
+    const code =
+      result?.errors?.[0]?.code ||
+      `klaviyo_sms_consent_http_${response.status}`
+    throw Object.assign(new Error(code), { status: response.status, code })
+  }
+  return true
+}
+
 const claimProfileSyncs = async () => {
   const client = await getPool().connect()
   try {
@@ -80,6 +144,16 @@ const loadProfile = async (userId: string) => {
           user_account.notification_telegram_enabled) AS notification_telegram_enabled,
         COALESCE(guardian.notification_lead_minutes,
           user_account.notification_lead_minutes) AS notification_lead_minutes,
+        COALESCE(guardian.notification_reminders_enabled,
+          user_account.notification_reminders_enabled) AS notification_reminders_enabled,
+        COALESCE(guardian.notification_schedule_changes_enabled,
+          user_account.notification_schedule_changes_enabled) AS notification_schedule_changes_enabled,
+        COALESCE(guardian.notification_announcements_enabled,
+          user_account.notification_announcements_enabled) AS notification_announcements_enabled,
+        COALESCE(guardian.notification_volunteer_opportunities_enabled,
+          user_account.notification_volunteer_opportunities_enabled) AS notification_volunteer_opportunities_enabled,
+        COALESCE(guardian.sms_transactional_consent_at,
+          user_account.sms_transactional_consent_at) AS sms_transactional_consent_at,
         managed_profile.guardian_user_id,
         EXISTS (
           SELECT 1
@@ -196,6 +270,22 @@ const syncProfile = async (sync: any) => {
       ),
       ministry_notification_lead_minutes:
         Number(profile.notification_lead_minutes) || 60,
+      ministry_notification_reminders_enabled: Boolean(
+        profile.notification_reminders_enabled,
+      ),
+      ministry_notification_schedule_changes_enabled: Boolean(
+        profile.notification_schedule_changes_enabled,
+      ),
+      ministry_notification_announcements_enabled: Boolean(
+        profile.notification_announcements_enabled,
+      ),
+      ministry_notification_volunteer_opportunities_enabled: Boolean(
+        profile.notification_volunteer_opportunities_enabled,
+      ),
+      ministry_sms_transactional_consent_at:
+        profile.sms_transactional_consent_at
+          ? new Date(profile.sms_transactional_consent_at).toISOString()
+          : null,
       ...(profile.guardian_user_id
         ? {
             ministry_managed_profile: true,
@@ -232,6 +322,7 @@ const syncProfile = async (sync: any) => {
   }
 
   const result: any = await response.json().catch(() => ({}))
+  await syncTransactionalSmsConsent(profile, phoneNumber)
   await updateSync(sync.account_user_id, {
     status: "synced",
     profileId: result?.data?.id || null,

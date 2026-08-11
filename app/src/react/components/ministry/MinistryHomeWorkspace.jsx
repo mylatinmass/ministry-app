@@ -366,6 +366,17 @@ const MinistryHomeWorkspace = ({ data }) => {
                     <p className="mt-1 text-sm leading-relaxed text-gray-600">
                       {alert.message}
                     </p>
+                    <p className="mt-2 text-xs text-gray-400">
+                      Delivery: {alert.deliveryStatus.replaceAll("_", " ")}
+                      {alert.deliveries?.length
+                        ? ` · ${alert.deliveries
+                            .map(
+                              (delivery) =>
+                                `${delivery.channel} ${delivery.status}`,
+                            )
+                            .join(" · ")}`
+                        : ""}
+                    </p>
                   </div>
                 ))}
               </div>

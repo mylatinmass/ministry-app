@@ -34,6 +34,7 @@ const initialForm = () => ({
   location: "",
   startTime: "",
   endTime: "",
+  confirmationDeadline: "",
   recurrenceFrequency: "none",
   recurrenceInterval: 1,
   recurrenceCount: 1,
@@ -135,6 +136,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       location: event.location || "",
       startTime: toInputValue(event.start_time),
       endTime: toInputValue(event.end_time),
+      confirmationDeadline: toInputValue(event.confirmation_deadline_at),
       participationType: event.participation_type || "members",
     })
 
@@ -163,6 +165,9 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
         ...form,
         startTime: new Date(form.startTime).toISOString(),
         endTime: new Date(form.endTime).toISOString(),
+        confirmationDeadline: form.confirmationDeadline
+          ? new Date(form.confirmationDeadline).toISOString()
+          : null,
         recurrence: {
           frequency: form.recurrenceFrequency,
           interval: Number(form.recurrenceInterval),
@@ -488,6 +493,22 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                 required
                 className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-4 font-normal"
               />
+            </label>
+            <label className="text-sm font-semibold text-gray-700 sm:col-span-2">
+              Assignment confirmation deadline
+              <input
+                type="datetime-local"
+                value={form.confirmationDeadline}
+                max={form.startTime || undefined}
+                onChange={(event) =>
+                  updateField("confirmationDeadline", event.target.value)
+                }
+                className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-4 font-normal"
+              />
+              <span className="mt-2 block text-xs font-normal text-gray-500">
+                Optional. If left blank, the app chooses a deadline based on
+                the publication date and event date.
+              </span>
             </label>
             <label className="text-sm font-semibold text-gray-700 sm:col-span-2">
               Location

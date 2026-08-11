@@ -29,6 +29,13 @@ const notificationChannelOptions = [
   ["push", "Push notifications", "Send browser notifications to devices you enable below."],
 ]
 
+const notificationCategoryOptions = [
+  ["reminders", "Assignment reminders", "Upcoming duties and confirmation deadlines."],
+  ["scheduleChanges", "Schedule changes", "Assignments, publication, changes, cancellations, and substitutes."],
+  ["announcements", "Announcements", "Messages sent by ministry leaders."],
+  ["volunteerOpportunities", "Volunteer opportunities", "Open responsibilities that match your ministries."],
+]
+
 const membershipLabels = {
   owner: "Owner",
   admin: "Leader",
@@ -200,6 +207,19 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
       ...current,
       notificationChannels: {
         ...current.notificationChannels,
+        [name]: checked,
+      },
+    }))
+    setMessage("")
+    setErrorMessage("")
+  }
+
+  const handleNotificationCategoryChange = (event) => {
+    const { name, checked } = event.target
+    setDraft((current) => ({
+      ...current,
+      notificationCategories: {
+        ...current.notificationCategories,
         [name]: checked,
       },
     }))
@@ -461,11 +481,67 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
                   )
                 })}
               </div>
+              {isEditing &&
+                !profile.isManagedProfile &&
+                draft.notificationChannels?.sms && (
+                  <label className="mt-4 flex items-start gap-3 rounded-xl border border-gray-100 p-4">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(draft.smsTransactionalConsentAccepted)}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          smsTransactionalConsentAccepted: event.target.checked,
+                        }))
+                      }
+                      className="mt-0.5 size-4 accent-[#896542]"
+                    />
+                    <span className="text-xs leading-relaxed text-gray-500">
+                      I agree to receive transactional text messages about my
+                      ministry assignments, schedule changes, and cancellations.
+                      Message and data rates may apply. Reply STOP to opt out.
+                    </span>
+                  </label>
+                )}
               {profile.isManagedProfile && (
                 <p className="mt-3 text-xs leading-relaxed text-gray-500">
                   This managed profile uses its guardian's notification methods.
                 </p>
               )}
+            </div>
+            <div className="mt-5 border-t border-gray-100 pt-5">
+              <p className="text-sm font-semibold text-gray-700">
+                What should notify me
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {notificationCategoryOptions.map(
+                  ([key, label, description]) => (
+                    <label
+                      key={key}
+                      className="flex items-start gap-3 rounded-xl border border-gray-100 p-4"
+                    >
+                      <input
+                        type="checkbox"
+                        name={key}
+                        checked={Boolean(
+                          draft.notificationCategories?.[key],
+                        )}
+                        onChange={handleNotificationCategoryChange}
+                        disabled={!isEditing || profile.isManagedProfile}
+                        className="mt-0.5 size-4 accent-[#896542] disabled:opacity-50"
+                      />
+                      <span>
+                        <span className="block text-sm font-semibold text-gray-900">
+                          {label}
+                        </span>
+                        <span className="mt-1 block text-xs leading-relaxed text-gray-500">
+                          {description}
+                        </span>
+                      </span>
+                    </label>
+                  ),
+                )}
+              </div>
             </div>
             {!profile.isManagedProfile && (
               <>

@@ -232,13 +232,17 @@ always strict and returns an error when the feed or database is unavailable.
   no-referrer, and no-store; this identifier is not an authentication credential
   and cannot authorize account changes. Every public form also offers the normal
   password or one-time-email-link sign-in path.
-- Each independent account chooses one or more reminder channels in its profile:
-  Email, Telegram, SMS, and browser Push. Email and Push delivery honor those
-  choices now. Telegram delivers to connected accounts. When a scheduled
-  reminder becomes due for an SMS-enabled account, the production processor
-  submits a deduplicated `Ministry Assignment Reminder Due` event to Klaviyo;
-  the corresponding transactional SMS flow and explicit SMS consent are still
-  required before a text message can be sent.
+- Each independent account chooses one or more channels and categories in its
+  profile: Email, Telegram, SMS, and browser Push; assignment reminders,
+  schedule changes, announcements, and volunteer opportunities. The durable
+  alert queue retries each enabled channel independently, records its latest
+  provider result, expires invalid Push subscriptions, and can fall back from
+  Gmail to a second SMTP provider. When an SMS-enabled account explicitly
+  accepts the transactional-text disclosure, that dated consent is synchronized
+  to Klaviyo as transactional-only consent. Due reminders and schedule alerts
+  submit a deduplicated `Ministry Assignment Reminder Due` event whose
+  `notification_text` property is used by the metric-triggered transactional SMS
+  flow.
   Managed children inherit the guardian account's delivery channels while their
   assignments and history remain attached to the child's profile.
 - Accepted members, registered volunteers, and independent profile updates are
@@ -246,10 +250,22 @@ always strict and returns an error when the feed or database is unavailable.
   independent account's name, email, normalized telephone, stable Ministry
   account identifier, and broad account type. Managed children are excluded
   until separation and continue to use their guardian's contact profile. Profile
-  creation does not subscribe anyone to email or SMS; subscription status must
-  come from separately recorded consent. Enable processing only after the
-  Klaviyo private key has `profiles:write` by setting
+  creation does not subscribe anyone to email or SMS. Transactional SMS is
+  subscribed only after the account records explicit consent. Enable processing
+  only after the Klaviyo private key has `events:write`, `profiles:write`, and
+  `subscriptions:write` (and `lists:write`, required by Klaviyo's subscription
+  endpoint) by setting
   `KLAVIYO_PROFILE_SYNC_ENABLED=true` in production.
+- Reminder reconciliation creates durable, duplicate-safe stages for the
+  confirmation midpoint, confirmation deadline, overdue confirmation, one week
+  before the event, and the account's configurable event offset. Leaders can
+  set an explicit confirmation deadline on an event; otherwise it is calculated
+  from the publication date and event date.
+- Optional fallback email delivery uses `MINISTRY_FALLBACK_SMTP_HOST`,
+  `MINISTRY_FALLBACK_SMTP_PORT`, `MINISTRY_FALLBACK_SMTP_SECURE`,
+  `MINISTRY_FALLBACK_SMTP_USER`, `MINISTRY_FALLBACK_SMTP_PASS`, and
+  `MINISTRY_FALLBACK_SMTP_FROM`. Successful provider acceptance and failures
+  are visible with each in-app alert.
 - An enabled device can receive a production-only, rate-limited test Push from
   the profile screen. Test sends are audited, do not expose event information,
   and expire subscriptions rejected permanently by the browser push service.

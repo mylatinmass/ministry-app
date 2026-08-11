@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto"
 import type { PoolClient } from "pg"
 import { getPool } from "../database"
 import { json } from "../request"
-import { sendAssignmentNotification } from "../notifications/assignment-notifications"
+import {
+  sendAssignmentNotification,
+  sendEventScheduleNotifications,
+} from "../notifications/assignment-notifications"
 import {
   getIdentityContext,
   getMinistryAccess,
@@ -343,6 +346,7 @@ const createEventFromStructure = async (
     recurrenceGroupId,
     recurrenceRule,
     participationType,
+    confirmationDeadline = null,
     sourceEventId = null,
   }: any,
 ) => {
@@ -362,6 +366,8 @@ const createEventFromStructure = async (
         end_time,
         participation_type,
         status,
+        published_at,
+        confirmation_deadline_at,
         version,
         source_event_id,
         recurrence_group_id,
@@ -370,7 +376,8 @@ const createEventFromStructure = async (
       )
       VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-        1, $11, $12, $13::JSONB, $14
+        CASE WHEN $10 = 'published' THEN now() ELSE NULL END,
+        $11, 1, $12, $13, $14::JSONB, $15
       )
       RETURNING id
     `,
@@ -385,6 +392,7 @@ const createEventFromStructure = async (
       end,
       resolvedParticipationType,
       status,
+      confirmationDeadline,
       sourceEventId,
       recurrenceGroupId,
       recurrenceRule ? JSON.stringify(recurrenceRule) : null,
@@ -509,6 +517,8 @@ const loadEventList = async (
         event.location,
         event.start_time,
         event.end_time,
+        event.confirmation_deadline_at,
+        event.published_at,
         event.participation_type,
         event.signup_code,
         event.signup_open,
@@ -1144,6 +1154,18 @@ const createEvents = async (
     })
   }
   const duration = end.getTime() - start.getTime()
+  const confirmationDeadline = body.confirmationDeadline
+    ? parseDate(body.confirmationDeadline, "Confirmation deadline")
+    : null
+  if (confirmationDeadline && confirmationDeadline >= start) {
+    throw Object.assign(
+      new Error("Confirmation deadline must be before the event starts"),
+      { status: 400 },
+    )
+  }
+  const confirmationOffset = confirmationDeadline
+    ? confirmationDeadline.getTime() - start.getTime()
+    : null
   const occurrenceStarts = getOccurrenceStarts(start, body.recurrence)
   const recurrenceGroupId =
     occurrenceStarts.length > 1 ? randomUUID() : null
@@ -1168,6 +1190,10 @@ const createEvents = async (
         recurrenceRule:
           occurrenceStarts.length > 1 ? body.recurrence : null,
         participationType,
+        confirmationDeadline:
+          confirmationOffset === null
+            ? null
+            : new Date(occurrenceStart.getTime() + confirmationOffset),
       }),
     )
   }
@@ -1358,6 +1384,15 @@ const cloneEvent = async (
       status: 400,
     })
   }
+  const confirmationDeadline = body.confirmationDeadline
+    ? parseDate(body.confirmationDeadline, "Confirmation deadline")
+    : null
+  if (confirmationDeadline && confirmationDeadline >= start) {
+    throw Object.assign(
+      new Error("Confirmation deadline must be before the event starts"),
+      { status: 400 },
+    )
+  }
 
   const structure = {
     template: {
@@ -1403,6 +1438,7 @@ const cloneEvent = async (
     status: "draft",
     recurrenceGroupId: null,
     recurrenceRule: null,
+    confirmationDeadline,
     sourceEventId,
   })
 }
@@ -2337,8 +2373,11 @@ const updateEvent = async (
     }
     await client.query(
       `
-        UPDATE events
-        SET status = $2, version = version + 1, updated_at = now()
+      UPDATE events
+        SET status = $2,
+            published_at = CASE WHEN $2 = 'published' THEN now() ELSE published_at END,
+            version = version + 1,
+            updated_at = now()
         WHERE id = $1
       `,
       [eventId, status],
@@ -2441,6 +2480,15 @@ const updateEvent = async (
       status: 400,
     })
   }
+  const confirmationDeadline = body.confirmationDeadline
+    ? parseDate(body.confirmationDeadline, "Confirmation deadline")
+    : null
+  if (confirmationDeadline && confirmationDeadline >= start) {
+    throw Object.assign(
+      new Error("Confirmation deadline must be before the event starts"),
+      { status: 400 },
+    )
+  }
   const previousOrdoDate = toChapelDateKey(event.start_time)
   const nextOrdoDate = toChapelDateKey(start)
   if (previousOrdoDate !== nextOrdoDate) {
@@ -2471,6 +2519,7 @@ const updateEvent = async (
           start_time = $5,
           end_time = $6,
           participation_type = $7,
+          confirmation_deadline_at = $8,
           signup_open = CASE
             WHEN $7 IN ('volunteers', 'both') THEN signup_open
             ELSE false
@@ -2487,6 +2536,7 @@ const updateEvent = async (
       start,
       end,
       participationType,
+      confirmationDeadline,
     ],
   )
   if (["volunteers", "both"].includes(participationType)) {
@@ -2505,6 +2555,7 @@ const updateEvent = async (
       startTime: start,
       endTime: end,
       participationType,
+      confirmationDeadline,
     },
   })
 }
@@ -2570,6 +2621,49 @@ export const handleEvents = async (request: Request) => {
           } catch (error) {
             console.error("Assignment saved but its notification could not be prepared:", error)
           }
+        }
+        try {
+          if (body.action === "set_status" && body.status === "published") {
+            await sendEventScheduleNotifications(body.eventId, "published")
+          } else if (
+            body.action === "set_status" &&
+            body.status === "cancelled"
+          ) {
+            await sendEventScheduleNotifications(body.eventId, "cancelled")
+          } else if (
+            body.action === "set_schedule_status" &&
+            body.status === "published"
+          ) {
+            await sendEventScheduleNotifications(
+              body.eventId,
+              "published",
+              body.ministryId,
+            )
+          } else if (
+            body.action !== "assign_member" &&
+            body.action !== "record_service_outcome"
+          ) {
+            const current = await getPool().query(
+              `SELECT status FROM events WHERE id = $1 LIMIT 1`,
+              [body.eventId],
+            )
+            if (current.rows[0]?.status === "published") {
+              await sendEventScheduleNotifications(
+                body.eventId,
+                "changed",
+              )
+            }
+          } else if (
+            body.action === "record_service_outcome" &&
+            body.outcome === "substitute_served"
+          ) {
+            await sendEventScheduleNotifications(body.eventId, "substituted")
+          }
+        } catch (error) {
+          console.error(
+            "Event saved but its schedule notifications could not be prepared:",
+            error,
+          )
         }
         return json({
           message:

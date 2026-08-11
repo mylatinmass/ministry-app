@@ -26,7 +26,8 @@ export const handleAlerts = async (request: Request) => {
     const result = await client.query(
       `
         SELECT id, kind, title, message, assignment_id, event_id,
-          ministry_id, read_at, created_at
+          ministry_id, read_at, delivery_status, attempt_count,
+          next_attempt_at, sent_at, last_error, created_at
         FROM ministry_alerts
         WHERE subject_user_id = $1
         ORDER BY (read_at IS NULL) DESC, created_at DESC
@@ -34,6 +35,36 @@ export const handleAlerts = async (request: Request) => {
       `,
       [context.user.id],
     )
+    const alertIds = result.rows.map((alert) => alert.id)
+    const deliveryResult = alertIds.length
+      ? await client.query(
+          `
+            SELECT DISTINCT ON (delivery.alert_id, delivery.channel)
+              delivery.alert_id, delivery.channel, delivery.provider,
+              delivery.status, delivery.provider_status,
+              delivery.provider_message_id, delivery.error_code,
+              delivery.attempted_at
+            FROM ministry_alert_deliveries delivery
+            WHERE delivery.alert_id = ANY($1)
+            ORDER BY delivery.alert_id, delivery.channel, delivery.attempted_at DESC
+          `,
+          [alertIds],
+        )
+      : { rows: [] }
+    const deliveriesByAlert = new Map<string, any[]>()
+    for (const delivery of deliveryResult.rows) {
+      const rows = deliveriesByAlert.get(delivery.alert_id) || []
+      rows.push({
+        channel: delivery.channel,
+        provider: delivery.provider,
+        status: delivery.status,
+        providerStatus: delivery.provider_status,
+        messageId: delivery.provider_message_id,
+        errorCode: delivery.error_code,
+        attemptedAt: delivery.attempted_at,
+      })
+      deliveriesByAlert.set(delivery.alert_id, rows)
+    }
     return json({
       unreadCount: result.rows.filter((alert) => !alert.read_at).length,
       alerts: result.rows.map((alert) => ({
@@ -45,6 +76,12 @@ export const handleAlerts = async (request: Request) => {
         eventId: alert.event_id,
         ministryId: alert.ministry_id,
         read: Boolean(alert.read_at),
+        deliveryStatus: alert.delivery_status,
+        deliveryAttempts: Number(alert.attempt_count || 0),
+        nextAttemptAt: alert.next_attempt_at,
+        sentAt: alert.sent_at,
+        deliveryError: alert.last_error,
+        deliveries: deliveriesByAlert.get(alert.id) || [],
         createdAt: alert.created_at,
       })),
     })

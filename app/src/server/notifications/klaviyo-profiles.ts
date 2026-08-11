@@ -131,7 +131,7 @@ const updateSync = (
           klaviyo_profile_id = COALESCE($3, klaviyo_profile_id),
           synced_at = CASE WHEN $2 = 'synced' THEN now() ELSE synced_at END,
           next_attempt_at = CASE
-            WHEN $2 = 'retry' THEN now() + ($4 * INTERVAL '1 minute')
+            WHEN $2 = 'retry' THEN now() + ($4::INT * INTERVAL '1 minute')
             ELSE NULL
           END,
           claimed_at = NULL,

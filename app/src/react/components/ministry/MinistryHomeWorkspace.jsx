@@ -22,6 +22,7 @@ import MinistrySupport from "./MinistrySupport"
 import MinistryEvents from "./MinistryEvents"
 import MinistryMessages from "./MinistryMessages"
 import VolunteerEvents from "./VolunteerEvents"
+import ChapelSettings from "./ChapelSettings"
 import { accountSections } from "./accountNavigation"
 
 const accessLabels = {
@@ -124,9 +125,11 @@ const MinistryHomeWorkspace = ({ data }) => {
   const availableSections = React.useMemo(
     () =>
       accountSections.filter(
-        (section) => !section.managerOnly || canManageMembers,
+        (section) =>
+          (!section.managerOnly || canManageMembers) &&
+          (!section.globalAdminOnly || hasGlobalAccess),
       ),
-    [canManageMembers]
+    [canManageMembers, hasGlobalAccess]
   )
   const [sectionId, setSectionId] = React.useState(() => {
     if (typeof window === "undefined") return "home"
@@ -601,6 +604,8 @@ const MinistryHomeWorkspace = ({ data }) => {
         onUserUpdate={setCurrentUser}
       />
     )
+  } else if (sectionId === "chapel-settings" && hasGlobalAccess) {
+    content = <ChapelSettings />
   } else {
     content = <MinistrySupport />
   }

@@ -83,6 +83,7 @@ export const sendSubstitutionRequestNotifications = async (
         event.start_time + COALESCE(responsibility.relative_start_minutes, 0)
           * INTERVAL '1 minute' AS duty_start_time,
         responsibility.name AS responsibility_name,
+        responsibility.substitution_allowed,
         ministry.slug AS ministry_slug
       FROM assignment_change_requests request
       JOIN events event ON event.id = request.event_id
@@ -166,7 +167,9 @@ export const sendSubstitutionRequestNotifications = async (
       subjectUserId: leader.id,
       recipientUserId: leader.id,
       kind: "substitution_requested",
-      title: `Substitute requested: ${request.event_title}`,
+      title: request.substitution_allowed === false
+        ? `Assignment change requested: ${request.event_title}`
+        : `Substitute requested: ${request.event_title}`,
       message: `${request.responsibility_name} · ${when}${request.reason ? ` · ${request.reason}` : ""}`,
       assignmentId: request.assignment_id,
       eventId: request.event_id,
@@ -175,7 +178,9 @@ export const sendSubstitutionRequestNotifications = async (
       metadata: {
         notificationCategory: "schedule_changes",
         notificationUrl: `/${request.ministry_slug}?event=${request.event_id}`,
-        privacySafeMessage: "A ministry assignment needs a substitute.",
+        privacySafeMessage: request.substitution_allowed === false
+          ? "A ministry assignment needs administrator attention."
+          : "A ministry assignment needs a substitute.",
         substitutionRequestId: request.id,
       },
       immediate: true,

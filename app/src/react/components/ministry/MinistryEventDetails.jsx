@@ -23,10 +23,19 @@ const blankResponsibility = {
   responsibilityType: "position",
   quantityNeeded: 1,
   approvalRequired: false,
+  substitutionAllowed: true,
   isRequired: true,
   requiredLevelId: "",
   relativeStartMinutes: 0,
   instructions: "",
+}
+
+const servingPreferenceLabels = {
+  prefer: "Always available",
+  sometimes: "Can help sometimes",
+  if_necessary: "Available if necessary",
+  cannot_serve: "Cannot serve",
+  not_specified: "Not specified",
 }
 
 const formatDutyTime = (eventStart, offsetMinutes = 0) =>
@@ -211,6 +220,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
       responsibilityType: responsibility.responsibilityType,
       quantityNeeded: responsibility.quantityNeeded,
       approvalRequired: responsibility.approvalRequired,
+      substitutionAllowed: responsibility.substitutionAllowed !== false,
       isRequired: responsibility.isRequired,
       requiredLevelId: responsibility.requiredLevelId || "",
       relativeStartMinutes: responsibility.relativeStartMinutes,
@@ -1094,6 +1104,34 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                     />
                     Leader approval required
                   </label>
+                  <label className="flex items-center gap-3 text-sm font-semibold text-gray-600">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={responsibilityForm.substitutionAllowed !== false}
+                      aria-label="Allow member substitution"
+                      onClick={() =>
+                        updateResponsibilityField(
+                          "substitutionAllowed",
+                          responsibilityForm.substitutionAllowed === false,
+                        )
+                      }
+                      className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+                        responsibilityForm.substitutionAllowed !== false
+                          ? "bg-orange-500"
+                          : "bg-gray-300"
+                      }`}
+                    >
+                      <span
+                        className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition-transform ${
+                          responsibilityForm.substitutionAllowed !== false
+                            ? "translate-x-5"
+                            : "translate-x-0.5"
+                        }`}
+                      />
+                    </button>
+                    SUB
+                  </label>
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
@@ -1207,7 +1245,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                                           Schedule conflict
                                         </span>
                                       )}
-                                      {assignment.canRequestSubstitute &&
+                                      {(assignment.canRequestSubstitute || assignment.canRequestAdminChange) &&
                                         substitutionForm?.assignmentId !== assignment.id && (
                                           <button
                                             type="button"
@@ -1219,12 +1257,16 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                                             }
                                             className="ml-auto rounded-lg border border-orange-200 bg-white px-3 py-2 font-semibold text-orange-700"
                                           >
-                                            Request substitute
+                                            {assignment.canRequestSubstitute
+                                              ? "Request substitute"
+                                              : "Request change"}
                                           </button>
                                         )}
                                       {assignment.substitutionRequest?.status === "pending" && (
                                         <span className="rounded-full bg-orange-100 px-2 py-1 font-semibold text-orange-700">
-                                          Substitute requested
+                                          {responsibility.substitutionAllowed
+                                            ? "Substitute requested"
+                                            : "Admin change requested"}
                                         </span>
                                       )}
                                       {assignment.substitutionRequest?.reason && (
@@ -1249,7 +1291,9 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                                               }
                                               maxLength={1000}
                                               rows={3}
-                                              placeholder="Tell eligible servers and the ministry admin what they need to know."
+                                              placeholder={assignment.canRequestSubstitute
+                                                ? "Tell eligible members and the ministry admin what they need to know."
+                                                : "Tell the ministry admin what they need to know."}
                                               className="mt-2 w-full rounded-lg border border-gray-200 px-3 py-2 font-normal text-gray-700"
                                             />
                                           </label>
@@ -1339,6 +1383,16 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                                           {member.firstName} {member.lastName}
                                           {member.highestLevelName
                                             ? ` · ${member.highestLevelName}`
+                                            : ""}
+                                          {member.servingPreference &&
+                                          member.servingPreference !== "not_specified"
+                                            ? ` · ${servingPreferenceLabels[member.servingPreference] || member.servingPreference.replaceAll("_", " ")}`
+                                            : ""}
+                                          {member.monthlyFrequencyLimit
+                                            ? ` · ${member.monthlyFrequencyLimit}/month in ministry`
+                                            : ""}
+                                          {member.automaticAssignmentMonthlyLimit
+                                            ? ` · ${member.automaticAssignmentMonthlyLimit}/month overall`
                                             : ""}
                                           {member.sameTimeReliability?.recorded >= 2
                                             ? ` · ${member.sameTimeReliability.percent}% at ${member.sameTimeReliability.time}`

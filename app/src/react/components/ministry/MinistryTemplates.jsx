@@ -21,6 +21,7 @@ const emptyResponsibility = (ministryId = "") => ({
   responsibilityType: "position",
   quantityNeeded: 1,
   approvalRequired: false,
+  substitutionAllowed: true,
   isRequired: true,
   requiredLevelId: "",
   relativeStartMinutes: 0,
@@ -708,6 +709,35 @@ const MinistryTemplates = ({ data, activeAction }) => {
                                 className="size-4 accent-[#896542]"
                               />
                               Required responsibility
+                            </label>
+                            <label className="flex items-center gap-3 text-sm font-semibold text-gray-600 sm:col-span-2">
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={responsibility.substitutionAllowed !== false}
+                                aria-label={`Substitutions for ${responsibility.name || "responsibility"}`}
+                                onClick={() =>
+                                  updateResponsibility(
+                                    responsibility.clientId,
+                                    "substitutionAllowed",
+                                    responsibility.substitutionAllowed === false,
+                                  )
+                                }
+                                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+                                  responsibility.substitutionAllowed !== false
+                                    ? "bg-orange-500"
+                                    : "bg-gray-300"
+                                }`}
+                              >
+                                <span
+                                  className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition-transform ${
+                                    responsibility.substitutionAllowed !== false
+                                      ? "translate-x-5"
+                                      : "translate-x-0.5"
+                                  }`}
+                                />
+                              </button>
+                              SUB
                             </label>
                           </div>
                         </div>

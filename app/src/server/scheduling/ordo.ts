@@ -10,9 +10,20 @@ import {
 
 const ORDO_INDEX_URL = "https://1962ordo.today/get-liturgical-days/"
 const ORDO_HOSTNAME = "1962ordo.today"
+const DIVINUM_FALLBACK_API = "https://www.missalemeum.com/en/api/v5/proper"
+const DIVINUM_FALLBACK_PAGE = "https://www.missalemeum.com/en"
 const DEFAULT_REFRESH_HOURS = 24
 const CHAPEL_TIME_ZONE = "America/New_York"
 const VESTMENT_COLORS = ["White", "Red", "Green", "Violet", "Rose", "Black"]
+const DIVINUM_COLORS: Record<string, string> = {
+  b: "Black",
+  g: "Green",
+  p: "Rose",
+  r: "Red",
+  v: "Violet",
+  w: "White",
+}
+const CLASS_LABELS = ["", "I Class", "II Class", "III Class", "IV Class"]
 
 type MassOption = {
   id: string
@@ -302,6 +313,149 @@ const fetchOrdo = async (url: string) => {
   return response
 }
 
+const firstSectionText = (proper: any, id: string) => {
+  const section = Array.isArray(proper?.sections)
+    ? proper.sections.find((item: any) => item?.id === id)
+    : null
+  const firstBody = Array.isArray(section?.body) ? section.body[0] : null
+  return Array.isArray(firstBody) ? cleanText(firstBody[0], 10000) : ""
+}
+
+const readingReference = (proper: any, id: string, label: string) => {
+  const text = firstSectionText(proper, id)
+  const citation = text.match(/\*([^*]{2,100})\*/)?.[1]
+  return citation ? `${label}: ${citation}` : ""
+}
+
+const divinumColor = (value: unknown) =>
+  typeof value === "string" ? DIVINUM_COLORS[value.toLowerCase()] || null : null
+
+export const parseDivinumFallback = (
+  payload: unknown,
+  liturgicalDate: string,
+) => {
+  const propers = Array.isArray(payload)
+    ? payload.filter((proper: any) => proper?.info?.title)
+    : []
+  if (!propers.length) {
+    throw Object.assign(
+      new Error("Divinum Officium did not return Mass details for this date"),
+      { status: 502 },
+    )
+  }
+
+  const primary = propers[0]
+  const primaryInfo = primary.info || {}
+  const primaryColor = divinumColor(primaryInfo.colors?.[0])
+  const rank = Number(primaryInfo.rank)
+  const normalized = {
+    liturgicalDate,
+    celebration: cleanText(primaryInfo.title) || "Mass details pending verification",
+    classLabel:
+      Number.isInteger(rank) && rank >= 1 && rank <= 4
+        ? CLASS_LABELS[rank]
+        : null,
+    vestmentColor: primaryColor,
+    commemorations: Array.isArray(primaryInfo.commemorations)
+      ? primaryInfo.commemorations
+          .map((item: any) => cleanText(item?.title))
+          .filter(Boolean)
+          .map((title: string) => `Commemoration of ${title}`)
+      : [],
+    generalInformation: [
+      cleanText(primaryInfo.description),
+      cleanText(primaryInfo.tempora),
+    ].filter(Boolean),
+    massOptions: propers.map((proper: any, index: number): MassOption => {
+      const info = proper.info || {}
+      const instructions = [
+        cleanText(info.description),
+        readingReference(proper, "Lectio", "Epistle"),
+        readingReference(proper, "Evangelium", "Gospel"),
+      ].filter(Boolean)
+      const prefaceText = firstSectionText(proper, "Prefatio")
+      return {
+        id: `divinum-mass-${index + 1}`,
+        label: cleanText(info.title) || `Mass option ${index + 1}`,
+        instructions:
+          instructions.join(" · ") || "Mass details require verification.",
+        vestmentColor: divinumColor(info.colors?.[0]),
+        gloria: null,
+        credo: null,
+        preface: prefaceText.match(/\*([^*]{2,100})\*/)?.[1] || null,
+        commemoration: Array.isArray(info.commemorations)
+          ? info.commemorations
+              .map((item: any) => cleanText(item?.title))
+              .filter(Boolean)
+              .join(", ") || null
+          : null,
+      }
+    }),
+    breviary: {},
+    reminders: [],
+    sourceUrl: `${DIVINUM_FALLBACK_PAGE}/${liturgicalDate}`,
+    sourcePublishedAt: null,
+    sourceModifiedAt: null,
+  }
+
+  return {
+    ...normalized,
+    id: null,
+    sourceHash: createHash("sha256")
+      .update(JSON.stringify(normalized))
+      .digest("hex"),
+    fetchedAt: new Date().toISOString(),
+    stale: false,
+    dataSource: "divinum_officium",
+    verificationRequired: true,
+    verificationMessage:
+      "1962 Ordo was unavailable. These details came from a Divinum Officium-based fallback and must be verified before sacristy preparation.",
+  }
+}
+
+const loadDivinumFallback = async (liturgicalDate: string) => {
+  const response = await fetch(
+    `${DIVINUM_FALLBACK_API}/${encodeURIComponent(liturgicalDate)}`,
+    {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "MyLatinMass-Ministry-Ordo-Fallback/1.0",
+      },
+      signal: AbortSignal.timeout(15_000),
+    },
+  )
+  if (!response.ok) {
+    throw Object.assign(
+      new Error(`Divinum Officium fallback returned ${response.status}`),
+      { status: 502 },
+    )
+  }
+  return parseDivinumFallback(await response.json(), liturgicalDate)
+}
+
+const placeholderOrdoDay = (liturgicalDate: string) => ({
+  id: null,
+  liturgicalDate,
+  celebration: "Liturgical details pending verification",
+  classLabel: null,
+  vestmentColor: null,
+  commemorations: [],
+  generalInformation: [],
+  massOptions: [],
+  breviary: {},
+  reminders: [],
+  sourceUrl: null,
+  sourcePublishedAt: null,
+  sourceModifiedAt: null,
+  sourceHash: "",
+  fetchedAt: null,
+  stale: false,
+  dataSource: "placeholder",
+  verificationRequired: true,
+  verificationMessage:
+    "1962 Ordo and the Divinum Officium fallback are unavailable. The readings, Mass, and vestment color must be entered and verified before sacristy preparation.",
+})
+
 const discoverOrdoUrl = async (liturgicalDate: string) => {
   const response = await fetchOrdo(ORDO_INDEX_URL)
   const result = await response.json()
@@ -356,6 +510,9 @@ const rowToOrdoDay = (row: any) => ({
   sourceModifiedAt: row.source_modified_at || null,
   sourceHash: row.source_hash,
   fetchedAt: row.fetched_at,
+  dataSource: "1962ordo",
+  verificationRequired: false,
+  verificationMessage: null,
 })
 
 const storeOrdoDay = async (
@@ -456,7 +613,16 @@ const loadOrdoDay = async (
     return { ...(await storeOrdoDay(client, parsed)), stale: false }
   } catch (error) {
     if (current) return { ...rowToOrdoDay(current), stale: true }
-    throw error
+    console.warn("1962 Ordo unavailable; trying Divinum Officium fallback", error)
+    try {
+      return await loadDivinumFallback(liturgicalDate)
+    } catch (fallbackError) {
+      console.warn(
+        "Divinum Officium fallback unavailable; returning verification placeholder",
+        fallbackError,
+      )
+      return placeholderOrdoDay(liturgicalDate)
+    }
   }
 }
 
@@ -519,6 +685,16 @@ const loadSelection = async (
   day: any,
   access: any,
 ) => {
+  if (!day.id) {
+    return {
+      selectedMassOptionId: null,
+      selectedMassOption: null,
+      sacristyNotes: "",
+      sourceChanged: false,
+      canSelectMass: false,
+      canEditSacristyNotes: false,
+    }
+  }
   const result = await client.query(
     `
       SELECT *
@@ -581,6 +757,14 @@ const updateSelection = async (
 
   const liturgicalDate = toDateKey(access.event.start_time)
   const day = await loadOrdoDay(client, liturgicalDate)
+  if (!day.id || day.verificationRequired) {
+    throw Object.assign(
+      new Error(
+        "Verify the fallback liturgical details before saving an Ordo selection",
+      ),
+      { status: 409 },
+    )
+  }
   const currentResult = await client.query(
     `SELECT * FROM event_ordo_selections WHERE event_id = $1 FOR UPDATE`,
     [eventId],

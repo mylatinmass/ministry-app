@@ -24,6 +24,7 @@ export const requestAssignmentSubstitute = async (
     `
       SELECT assignment.*, responsibility.name AS responsibility_name,
         responsibility.required_ministry_level_id,
+        responsibility.substitution_allowed,
         responsibility.relative_start_minutes,
         COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id,
         event.title AS event_title, event.start_time, event.end_time,
@@ -123,7 +124,9 @@ export const requestAssignmentSubstitute = async (
     ],
   )
   const requestId = requestResult.rows[0].id
-  const offers = await client.query(
+  const offers = assignment.substitution_allowed === false
+    ? { rows: [], rowCount: 0 }
+    : await client.query(
     `
       INSERT INTO assignment_substitution_offers (
         change_request_id, recipient_user_id
@@ -136,6 +139,7 @@ export const requestAssignmentSubstitute = async (
       WHERE membership.ministry_id = $2
         AND membership.status = 'active'
         AND membership.can_serve = true
+        AND membership.serving_preference <> 'cannot_serve'
         AND member.status = 'active'
         AND membership.user_id <> $3
         AND COALESCE(granted_level.rank_order, 0) >= $4
@@ -153,7 +157,9 @@ export const requestAssignmentSubstitute = async (
     [assignment.id],
   )
   await writeSchedulingAudit(client, context, {
-    action: "assignment.substitute_requested",
+    action: assignment.substitution_allowed === false
+      ? "assignment.admin_change_requested"
+      : "assignment.substitute_requested",
     entityType: "responsibility_assignment",
     entityId: assignment.id,
     ministryId: assignment.ministry_id,
@@ -165,11 +171,14 @@ export const requestAssignmentSubstitute = async (
       responsibilityId: assignment.responsibility_id,
       minimumLevelRank,
       eligibleOfferCount: offers.rowCount || 0,
+      adminManaged: assignment.substitution_allowed === false,
       reason,
     },
   })
   return {
-    message: `Substitute requested from ${offers.rowCount || 0} eligible members`,
+    message: assignment.substitution_allowed === false
+      ? "Change requested from the ministry admin"
+      : `Substitute requested from ${offers.rowCount || 0} eligible members`,
     substitutionRequestId: requestId,
     assignmentId: assignment.id,
     eligibleOfferCount: offers.rowCount || 0,
@@ -188,6 +197,7 @@ export const acceptAssignmentSubstitute = async (
       SELECT request.*, assignment.status AS assignment_status,
         assignment.user_id AS original_user_id,
         assignment.quantity, responsibility.name AS responsibility_name,
+        responsibility.substitution_allowed,
         responsibility.relative_start_minutes,
         event.title AS event_title, event.start_time, event.end_time,
         event.status AS event_status
@@ -214,6 +224,12 @@ export const acceptAssignmentSubstitute = async (
   if (request.status !== "pending") {
     throw Object.assign(
       new Error("Another member has already accepted this substitution"),
+      { status: 409 },
+    )
+  }
+  if (request.substitution_allowed === false) {
+    throw Object.assign(
+      new Error("This assignment change must be managed by a ministry admin"),
       { status: 409 },
     )
   }
@@ -263,6 +279,7 @@ export const acceptAssignmentSubstitute = async (
         AND membership.user_id = $2
         AND membership.status = 'active'
         AND membership.can_serve = true
+        AND membership.serving_preference <> 'cannot_serve'
         AND member.status = 'active'
         AND COALESCE(granted_level.rank_order, 0) >= $3
         AND NOT EXISTS (
@@ -492,6 +509,7 @@ export const loadEventSubstitutionState = async (
           AND request.status = 'pending'
           AND request.event_id = $2
           AND request.expires_at > now()
+          AND responsibility.substitution_allowed = true
         ORDER BY request.created_at
       `,
       [context.user.id, eventId],

@@ -25,6 +25,7 @@ type ResponsibilityInput = {
   responsibilityType?: string
   quantityNeeded?: number
   approvalRequired?: boolean
+  substitutionAllowed?: boolean
   isRequired?: boolean
   requiredLevelId?: string
   requiredQualification?: string
@@ -92,6 +93,7 @@ const normalizeTemplateInput = (body: any): TemplateInput => {
         : "position",
       quantityNeeded: positiveInteger(responsibility.quantityNeeded),
       approvalRequired: Boolean(responsibility.approvalRequired),
+      substitutionAllowed: responsibility.substitutionAllowed !== false,
       isRequired: responsibility.isRequired !== false,
       requiredLevelId:
         cleanText(responsibility.requiredLevelId, 100) || undefined,
@@ -256,6 +258,7 @@ const loadTemplates = async (client: PoolClient, ministryId: string) => {
           responsibility.responsibility_type,
           responsibility.quantity_needed,
           responsibility.approval_required,
+          responsibility.substitution_allowed,
           responsibility.is_required,
           responsibility.required_ministry_level_id,
           ministry_level.name AS required_level_name,
@@ -311,6 +314,8 @@ const loadTemplates = async (client: PoolClient, ministryId: string) => {
             approval_required: Boolean(
               responsibility?.approval_required,
             ),
+            substitution_allowed:
+              responsibility?.substitution_allowed !== false,
             is_required: responsibility?.is_required !== false,
             required_ministry_level_id: null,
             required_level_name: null,
@@ -351,6 +356,7 @@ const loadTemplates = async (client: PoolClient, ministryId: string) => {
         responsibilityType: responsibility.responsibility_type,
         quantityNeeded: Number(responsibility.quantity_needed),
         approvalRequired: responsibility.approval_required,
+        substitutionAllowed: responsibility.substitution_allowed !== false,
         isRequired: responsibility.is_required,
         requiredLevelId:
           responsibility.required_ministry_level_id || "",
@@ -470,6 +476,7 @@ const insertTemplateStructure = async (
           responsibility_type,
           quantity_needed,
           approval_required,
+          substitution_allowed,
           is_required,
           required_ministry_level_id,
           required_qualification,
@@ -478,7 +485,7 @@ const insertTemplateStructure = async (
           sort_order
         )
         VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
         )
       `,
       [
@@ -489,6 +496,7 @@ const insertTemplateStructure = async (
         responsibility.responsibilityType || "position",
         responsibility.quantityNeeded || 1,
         Boolean(responsibility.approvalRequired),
+        responsibility.substitutionAllowed !== false,
         responsibility.isRequired !== false,
         responsibility.requiredLevelId || null,
         responsibility.requiredQualification || null,

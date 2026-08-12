@@ -193,6 +193,7 @@ const memberSections = [
     description: "Block dates when this profile cannot be scheduled.",
     actions: [
       action("my-availability", "Availability", ClockIcon),
+      action("service-frequency", "Service Frequency", AdjustmentsHorizontalIcon),
     ],
   },
 ]

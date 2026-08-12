@@ -25,6 +25,7 @@ const MinistryMonthCalendar = ({
   selectedDate,
   onSelectedDateChange,
   onEventSelect,
+  onVisibleRangeChange,
 }) => {
   const [visibleMonth, setVisibleMonth] = React.useState(() => {
     const startingDate = selectedDate || new Date()
@@ -63,6 +64,12 @@ const MinistryMonthCalendar = ({
       new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1),
     )
   }, [selectedDate])
+
+  React.useEffect(() => {
+    const start = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1)
+    const end = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 0)
+    onVisibleRangeChange?.(toDateKey(start), toDateKey(end))
+  }, [onVisibleRangeChange, visibleMonth])
 
   const moveMonth = (amount) => {
     onSelectedDateChange(null)

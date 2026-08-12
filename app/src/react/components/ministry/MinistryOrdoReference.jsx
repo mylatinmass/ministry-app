@@ -4,6 +4,7 @@ import {
   BookOpenIcon,
   CheckIcon,
   ExclamationTriangleIcon,
+  XMarkIcon,
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
@@ -60,6 +61,8 @@ const MinistryOrdoReference = ({
   const [isSaving, setIsSaving] = React.useState(false)
   const [message, setMessage] = React.useState("")
   const [errorMessage, setErrorMessage] = React.useState("")
+  const [showVerificationNotice, setShowVerificationNotice] =
+    React.useState(false)
 
   const loadReference = React.useCallback(async () => {
     if (!liturgicalDate) {
@@ -159,6 +162,65 @@ const MinistryOrdoReference = ({
 
   const { day } = reference
   const eventReference = reference.event
+  const isOrdoSource = day.dataSource === "1962ordo"
+  const sourceLabel = isOrdoSource
+    ? "1962 Ordo"
+    : day.dataSource === "divinum_officium"
+      ? "Fallback source"
+      : ""
+  const verificationNotice = day.verificationRequired ? (
+    <>
+      <button
+        type="button"
+        onClick={() => setShowVerificationNotice(true)}
+        aria-label="These liturgical details require verification"
+        title="Verification required"
+        className="inline-flex size-9 items-center justify-center rounded-full border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+      >
+        <ExclamationTriangleIcon className="size-5" />
+      </button>
+      {showVerificationNotice && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setShowVerificationNotice(false)
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ordo-verification-title"
+            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p
+                  id="ordo-verification-title"
+                  className="font-semibold text-amber-900"
+                >
+                  Liturgical details need verification
+                </p>
+                <p className="mt-2 text-sm leading-relaxed text-gray-600">
+                  {day.verificationMessage}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowVerificationNotice(false)}
+                aria-label="Close verification message"
+                className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100"
+              >
+                <XMarkIcon className="size-5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  ) : null
   const selectionRequired =
     day.massOptions.length > 1 &&
     !eventReference?.selectedMassOptionId
@@ -175,15 +237,20 @@ const MinistryOrdoReference = ({
               {day.celebration}
             </h2>
 
-          <a
-            href={day.sourceUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-[#6f4f34] hover:border-[#C1A387]"
-          >
-            View 1962 Ordo
-            <ArrowTopRightOnSquareIcon className="size-4" />
-          </a>
+          <div className="flex items-center gap-2">
+            {verificationNotice}
+            {day.sourceUrl && (
+              <a
+                href={day.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-[#6f4f34] hover:border-[#C1A387]"
+              >
+                {isOrdoSource ? "View 1962 Ordo" : "View fallback source"}
+                <ArrowTopRightOnSquareIcon className="size-4" />
+              </a>
+            )}
+          </div>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
           {day.classLabel && (
@@ -222,15 +289,20 @@ const MinistryOrdoReference = ({
             {day.celebration}
           </h2>
         </div>
-        <a
-          href={day.sourceUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-[#6f4f34] hover:border-[#C1A387]"
-        >
-          1962 Ordo
-          <ArrowTopRightOnSquareIcon className="size-4" />
-        </a>
+        <div className="flex items-center gap-2">
+          {verificationNotice}
+          {day.sourceUrl && (
+            <a
+              href={day.sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-[#6f4f34] hover:border-[#C1A387]"
+            >
+              {sourceLabel}
+              <ArrowTopRightOnSquareIcon className="size-4" />
+            </a>
+          )}
+        </div>
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">

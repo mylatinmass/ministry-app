@@ -29,7 +29,9 @@ const MinistryWorkspace = ({ data }) => {
   const canManageMembers =
     hasGlobalAccess || ["owner", "admin"].includes(data.ministry.accessLevel)
   const accountMenuSections = accountSections.filter(
-    (section) => !section.managerOnly || canManageMembers,
+    (section) =>
+      (!section.managerOnly || canManageMembers) &&
+      (!section.globalAdminOnly || hasGlobalAccess),
   )
   const availableSections = isMember ? memberSections : ministrySections
   const [currentUser, setCurrentUser] = React.useState(data.user)
@@ -183,9 +185,9 @@ const MinistryWorkspace = ({ data }) => {
   }
 
   return (
-    <div className="h-screen overflow-hidden bg-white text-gray-900">
+    <div className="ministry-workspace-shell h-screen overflow-hidden bg-white text-gray-900">
       <div className="mx-auto flex h-full w-full max-w-[1600px]">
-        <aside className="hidden w-72 shrink-0 border-r border-gray-100 bg-white lg:block">
+        <aside className="ministry-workspace-navigation hidden w-72 shrink-0 border-r border-gray-100 bg-white lg:block">
           <div className="sticky top-0 flex max-h-screen flex-col overflow-y-auto px-4 py-6">
             <div className="mb-5 px-3">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#C1A387]">
@@ -229,7 +231,7 @@ const MinistryWorkspace = ({ data }) => {
         <main
           className="flex h-full min-w-0 flex-1 flex-col overflow-hidden pb-24 lg:pb-0"
         >
-          <header className="flex items-center border-b border-gray-100 px-4 py-2 bg-white">
+          <header className="ministry-workspace-header flex items-center border-b border-gray-100 px-4 py-2 bg-white">
             <div className="contents">
               <div className="order-1 min-w-0">
                 <div className="flex items-center gap-2 lg:hidden">
@@ -395,7 +397,7 @@ const MinistryWorkspace = ({ data }) => {
           </header>
 
           <div
-            className={`min-h-0 flex-1 px-2 ${
+            className={`ministry-workspace-body min-h-0 flex-1 px-2 ${
               isSchedule ? "overflow-hidden" : "overflow-y-auto"
             }`}
           >

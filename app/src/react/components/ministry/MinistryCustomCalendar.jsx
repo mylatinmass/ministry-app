@@ -8,7 +8,11 @@ const getDefaultRange = () => {
   return { start: toDateKey(start), end: toDateKey(end) }
 }
 
-const MinistryCustomCalendar = ({ events, onEventSelect }) => {
+const MinistryCustomCalendar = ({
+  events,
+  onEventSelect,
+  onVisibleRangeChange,
+}) => {
   const defaults = React.useMemo(getDefaultRange, [])
   const [startDate, setStartDate] = React.useState(defaults.start)
   const [endDate, setEndDate] = React.useState(defaults.end)
@@ -16,6 +20,11 @@ const MinistryCustomCalendar = ({ events, onEventSelect }) => {
     const key = toDateKey(event.start_time)
     return startDate && endDate && key >= startDate && key <= endDate
   })
+
+
+  React.useEffect(() => {
+    if (startDate && endDate) onVisibleRangeChange?.(startDate, endDate)
+  }, [endDate, onVisibleRangeChange, startDate])
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-white">

@@ -1,6 +1,7 @@
 import * as React from "react"
 import {
   CheckIcon,
+  DocumentArrowDownIcon,
   DocumentDuplicateIcon,
   NoSymbolIcon,
   PencilSquareIcon,
@@ -9,6 +10,10 @@ import {
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 import MinistryOrdoReference from "./MinistryOrdoReference"
+import {
+  downloadEventSchedulePdf,
+  getEventRange,
+} from "./downloadEventSchedulePdf"
 
 const requestHeaders = () => ({
   "Content-Type": "application/json",
@@ -896,6 +901,22 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
         !form.eventId &&
         !form.sourceEventId && (
           <div className="space-y-3">
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() =>
+                  downloadEventSchedulePdf({
+                    ministryName: data.ministry.name,
+                    events,
+                    ...getEventRange(events),
+                    filterLabel: "All Events",
+                  })
+                }
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-600"
+              >
+                <DocumentArrowDownIcon className="size-4" /> Download PDF
+              </button>
+            </div>
             {events.length ? (
               events.map((event) => (
                 <article

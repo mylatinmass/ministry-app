@@ -22,6 +22,7 @@ import { handleReports } from "../../server/scheduling/reports"
 import { handleVolunteerSignup } from "../../server/scheduling/volunteers"
 import { handleVolunteerEvents } from "../../server/scheduling/volunteer-events"
 import { handleSupport } from "../../server/support"
+import { handleChapelSettings } from "../../server/chapel-settings"
 
 export const prerender = false
 
@@ -78,6 +79,9 @@ const route: APIRoute = async ({ params, request }) => {
   }
   if (path === "support") {
     return handleSupport(request)
+  }
+  if (path === "chapel-settings") {
+    return handleChapelSettings(request)
   }
 
   const legacyResponse = await runLegacyHandler(path, request)

@@ -3,6 +3,7 @@ import {
   ChatBubbleLeftRightIcon,
   CheckCircleIcon,
   ClockIcon,
+  Cog6ToothIcon,
   HomeIcon,
   LifebuoyIcon,
   Squares2X2Icon,
@@ -53,6 +54,13 @@ const accountSections = [
     icon: UserGroupIcon,
     description: "View and manage members in the ministries you administer.",
     managerOnly: true,
+  },
+  {
+    id: "chapel-settings",
+    label: "Chapel Settings",
+    icon: Cog6ToothIcon,
+    description: "Manage chapel information, defaults, and local observances.",
+    globalAdminOnly: true,
   },
   {
     id: "profile",

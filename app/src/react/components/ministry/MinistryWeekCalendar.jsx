@@ -44,6 +44,7 @@ const MinistryWeekCalendar = ({
   onFocusDateChange,
   mode = "week",
   onEventSelect,
+  onVisibleRangeChange,
 }) => {
   const today = new Date()
   const effectiveFocusDate = mode === "today" ? today : focusDate || today
@@ -86,6 +87,12 @@ const MinistryWeekCalendar = ({
     setWeekStart(getWeekStart(effectiveFocusDate))
     setSelectedDate(effectiveFocusDate)
   }, [focusKey, mode])
+
+  React.useEffect(() => {
+    const end = new Date(weekStart)
+    end.setDate(weekStart.getDate() + 6)
+    onVisibleRangeChange?.(toDateKey(weekStart), toDateKey(end))
+  }, [onVisibleRangeChange, weekStart])
 
   const moveWeek = (amount) => {
     const nextSunday = new Date(weekStart)

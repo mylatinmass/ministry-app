@@ -1,12 +1,20 @@
 import * as React from "react"
 import MinistryEventAgenda, { toDateKey } from "./MinistryEventAgenda"
 
-const MinistryTodayCalendar = ({ events, onEventSelect }) => {
+const MinistryTodayCalendar = ({
+  events,
+  onEventSelect,
+  onVisibleRangeChange,
+}) => {
   const today = new Date()
   const todayKey = toDateKey(today)
   const todayEvents = events.filter(
     (event) => toDateKey(event.start_time) === todayKey,
   )
+
+  React.useEffect(() => {
+    onVisibleRangeChange?.(todayKey, todayKey)
+  }, [onVisibleRangeChange, todayKey])
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-white">

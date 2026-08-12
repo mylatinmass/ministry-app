@@ -117,11 +117,15 @@ const listMembers = async (client, user, ministryId) => {
         SELECT
           membership.level,
           membership.can_serve,
+          membership.serving_preference,
+          membership.monthly_frequency_limit,
           membership.highest_level_id,
+          member.automatic_assignment_monthly_limit,
           ministry_level.name AS highest_level_name,
           ministry_level.icon_key AS highest_level_icon_key,
           ministry_level.rank_order AS highest_level_rank
         FROM ministry_members membership
+        JOIN users member ON member.id = membership.user_id
         LEFT JOIN ministry_levels ministry_level
           ON ministry_level.id = membership.highest_level_id
         WHERE membership.ministry_id = $1
@@ -144,6 +148,18 @@ const listMembers = async (client, user, ministryId) => {
       currentMembership: {
         level: membershipResult.rows[0].level,
         canServe: Boolean(membershipResult.rows[0].can_serve),
+        servingPreference:
+          membershipResult.rows[0].serving_preference || "prefer",
+        monthlyFrequencyLimit:
+          membershipResult.rows[0].monthly_frequency_limit == null
+            ? null
+            : Number(membershipResult.rows[0].monthly_frequency_limit),
+        automaticAssignmentMonthlyLimit:
+          membershipResult.rows[0].automatic_assignment_monthly_limit == null
+            ? null
+            : Number(
+                membershipResult.rows[0].automatic_assignment_monthly_limit
+              ),
         highestLevelId: membershipResult.rows[0].highest_level_id,
         highestLevelName: membershipResult.rows[0].highest_level_name,
         highestLevelIconKey: membershipResult.rows[0].highest_level_icon_key,
@@ -170,7 +186,10 @@ const listMembers = async (client, user, ministryId) => {
           mm.level,
           mm.status,
           mm.can_serve,
+          mm.serving_preference,
+          mm.monthly_frequency_limit,
           mm.highest_level_id,
+          u.automatic_assignment_monthly_limit,
           ministry_level.name AS highest_level_name,
           ministry_level.icon_key AS highest_level_icon_key,
           ministry_level.rank_order AS highest_level_rank,
@@ -261,6 +280,16 @@ const listMembers = async (client, user, ministryId) => {
       level: member.level,
       status: member.status,
       canServe: member.can_serve,
+      servingPreference: member.serving_preference || "prefer",
+      monthlyFrequencyLimit:
+        member.monthly_frequency_limit == null
+          ? null
+          : Number(member.monthly_frequency_limit),
+      automaticAssignmentMonthlyLimit:
+        !isGlobalManager(user) ||
+        member.automatic_assignment_monthly_limit == null
+          ? null
+          : Number(member.automatic_assignment_monthly_limit),
       highestLevelId: member.highest_level_id,
       highestLevelName: member.highest_level_name,
       highestLevelIconKey: member.highest_level_icon_key,
@@ -1431,8 +1460,140 @@ const updateMembership = async (
   }
 
   const isLeaving = action === "leave" && targetUserId === user.id
-  if (!isLeaving && !canManageMinistry(managedMinistries, ministryId)) {
+  const isUpdatingOwnPreferences =
+    action === "set_serving_preferences" && targetUserId === user.id
+  if (
+    !isLeaving &&
+    !isUpdatingOwnPreferences &&
+    !canManageMinistry(managedMinistries, ministryId)
+  ) {
     return jsonResponse(403, { message: "You cannot manage this ministry" })
+  }
+
+  if (action === "set_serving_preferences") {
+    const allowedPreferences = new Set([
+      "prefer",
+      "sometimes",
+      "if_necessary",
+      "cannot_serve",
+      "not_specified",
+    ])
+    const servingPreference = cleanText(body.servingPreference, 40)
+    if (!allowedPreferences.has(servingPreference)) {
+      return jsonResponse(400, { message: "Choose a serving preference" })
+    }
+    const parseOptionalLimit = (value) => {
+      if (value == null || value === "") return null
+      const parsed = Number(value)
+      return Number.isInteger(parsed) && parsed >= 1 && parsed <= 100
+        ? parsed
+        : undefined
+    }
+    const monthlyFrequencyLimit = parseOptionalLimit(
+      body.monthlyFrequencyLimit
+    )
+    const automaticAssignmentMonthlyLimit = parseOptionalLimit(
+      body.automaticAssignmentMonthlyLimit
+    )
+    if (
+      monthlyFrequencyLimit === undefined ||
+      automaticAssignmentMonthlyLimit === undefined
+    ) {
+      return jsonResponse(400, {
+        message: "Monthly limits must be blank or between 1 and 100",
+      })
+    }
+
+    await client.query("BEGIN")
+    try {
+      const existingResult = await client.query(
+        `
+          SELECT id, serving_preference, monthly_frequency_limit
+          FROM ministry_members
+          WHERE ministry_id = $1
+            AND user_id = $2
+            AND status = 'active'
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [ministryId, targetUserId]
+      )
+      const existing = existingResult.rows[0]
+      if (!existing) {
+        await client.query("ROLLBACK")
+        return jsonResponse(404, { message: "Member not found" })
+      }
+      const updatedResult = await client.query(
+        `
+          UPDATE ministry_members
+          SET serving_preference = $2,
+              monthly_frequency_limit = $3,
+              updated_at = now()
+          WHERE id = $1
+          RETURNING id, serving_preference, monthly_frequency_limit
+        `,
+        [existing.id, servingPreference, monthlyFrequencyLimit]
+      )
+
+      let accountLimitBefore = null
+      let accountLimitAfter = null
+      if (targetUserId === user.id || isGlobalManager(user)) {
+        const previousAccountResult = await client.query(
+          `
+            SELECT automatic_assignment_monthly_limit
+            FROM users
+            WHERE id = $1
+            FOR UPDATE
+          `,
+          [targetUserId]
+        )
+        accountLimitBefore =
+          previousAccountResult.rows[0]?.automatic_assignment_monthly_limit ??
+          null
+        const accountResult = await client.query(
+          `
+            UPDATE users
+            SET automatic_assignment_monthly_limit = $2,
+                updated_at = now()
+            WHERE id = $1
+            RETURNING automatic_assignment_monthly_limit
+          `,
+          [targetUserId, automaticAssignmentMonthlyLimit]
+        )
+        accountLimitAfter =
+          accountResult.rows[0]?.automatic_assignment_monthly_limit ?? null
+      }
+
+      await writeLevelAudit(client, {
+        actor,
+        user,
+        action: "ministry_member.service_frequency_updated",
+        entityType: "ministry_member",
+        entityId: existing.id,
+        ministryId,
+        beforeData: {
+          servingPreference: existing.serving_preference,
+          monthlyFrequencyLimit: existing.monthly_frequency_limit,
+          automaticAssignmentMonthlyLimit: accountLimitBefore,
+          targetUserId,
+        },
+        afterData: {
+          servingPreference: updatedResult.rows[0].serving_preference,
+          monthlyFrequencyLimit:
+            updatedResult.rows[0].monthly_frequency_limit,
+          automaticAssignmentMonthlyLimit: accountLimitAfter,
+          targetUserId,
+        },
+      })
+      await client.query("COMMIT")
+      return jsonResponse(200, {
+        success: true,
+        message: "Service frequency updated",
+      })
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {})
+      throw error
+    }
   }
 
   if (action === "set_role") {

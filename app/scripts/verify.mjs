@@ -633,7 +633,14 @@ assert.match(schedulingReports, /levelHistory/)
 assert.match(reportsComponent, /Export CSV/)
 assert.match(reportsComponent, /Time patterns/)
 assert.match(workspaceContent, /Internal calendar/)
-assert.match(workspaceContent, /window\.print/)
+assert.match(workspaceContent, /downloadEventSchedulePdf/)
+assert.match(workspaceContent, /Download PDF/)
+const eventSchedulePdf = await read(
+  "src/react/components/ministry/downloadEventSchedulePdf.js",
+)
+assert.match(eventSchedulePdf, /jsPDF/)
+assert.match(eventSchedulePdf, /event\.title/)
+assert.match(eventSchedulePdf, /event\.location/)
 
 const [volunteerConsentMigration, schedulingVolunteers, volunteerSignupPage] =
   await Promise.all([

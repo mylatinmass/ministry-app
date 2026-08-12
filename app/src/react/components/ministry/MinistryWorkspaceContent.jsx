@@ -2,10 +2,10 @@ import * as React from "react"
 import {
   CalendarDaysIcon,
   CheckCircleIcon,
+  DocumentArrowDownIcon,
   DocumentDuplicateIcon,
   FunnelIcon,
   ArrowDownTrayIcon,
-  PrinterIcon,
   UserGroupIcon,
 } from "@heroicons/react/24/outline"
 import MinistryMonthCalendar from "./MinistryMonthCalendar"
@@ -20,6 +20,11 @@ import MinistryTemplates from "./MinistryTemplates"
 import MinistryAvailability from "./MinistryAvailability"
 import MinistrySupport from "./MinistrySupport"
 import MinistryReports from "./MinistryReports"
+import {
+  downloadEventSchedulePdf,
+  eventsWithinRange,
+  getEventRange,
+} from "./downloadEventSchedulePdf"
 
 const formatEventDate = (value) =>
   new Intl.DateTimeFormat("en-US", {
@@ -285,6 +290,20 @@ const MinistryWorkspaceContent = ({
   const [calendarFocusDate, setCalendarFocusDate] = React.useState(null)
   const [selectedEvent, setSelectedEvent] = React.useState(null)
   const [showOnlyMyEvents, setShowOnlyMyEvents] = React.useState(false)
+  const [visibleScheduleRange, setVisibleScheduleRange] = React.useState(() => {
+    const date = new Date()
+    const month = `${date.getMonth() + 1}`.padStart(2, "0")
+    const day = `${date.getDate()}`.padStart(2, "0")
+    const today = `${date.getFullYear()}-${month}-${day}`
+    return { startDate: today, endDate: today }
+  })
+  const updateVisibleScheduleRange = React.useCallback((startDate, endDate) => {
+    setVisibleScheduleRange((current) =>
+      current.startDate === startDate && current.endDate === endDate
+        ? current
+        : { startDate, endDate },
+    )
+  }, [])
   let content
 
   const exportSchedule = (events) => {
@@ -327,6 +346,11 @@ const MinistryWorkspaceContent = ({
           (event) => event.is_assigned,
         )
       : data.calendarEvents || data.events
+    const printableScheduleEvents = eventsWithinRange(
+      calendarEvents,
+      visibleScheduleRange.startDate,
+      visibleScheduleRange.endDate,
+    )
     let calendar
     if (activeAction.id === "month") {
       calendar = (
@@ -335,6 +359,7 @@ const MinistryWorkspaceContent = ({
           selectedDate={calendarFocusDate}
           onSelectedDateChange={setCalendarFocusDate}
           onEventSelect={setSelectedEvent}
+          onVisibleRangeChange={updateVisibleScheduleRange}
         />
       )
     } else if (activeAction.id === "week") {
@@ -344,6 +369,7 @@ const MinistryWorkspaceContent = ({
           focusDate={calendarFocusDate}
           onFocusDateChange={setCalendarFocusDate}
           onEventSelect={setSelectedEvent}
+          onVisibleRangeChange={updateVisibleScheduleRange}
         />
       )
     } else if (activeAction.id === "today") {
@@ -351,6 +377,7 @@ const MinistryWorkspaceContent = ({
         <MinistryTodayCalendar
           events={calendarEvents}
           onEventSelect={setSelectedEvent}
+          onVisibleRangeChange={updateVisibleScheduleRange}
         />
       )
     } else {
@@ -358,6 +385,7 @@ const MinistryWorkspaceContent = ({
         <MinistryCustomCalendar
           events={calendarEvents}
           onEventSelect={setSelectedEvent}
+          onVisibleRangeChange={updateVisibleScheduleRange}
         />
       )
     }
@@ -371,8 +399,19 @@ const MinistryWorkspaceContent = ({
             <p className="text-xs text-gray-500">Visible only to approved ministry members.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => window.print()} className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-600">
-            <PrinterIcon className="size-4" /> Print
+          <button
+            type="button"
+            onClick={() =>
+              downloadEventSchedulePdf({
+                ministryName: data.ministry.name,
+                events: printableScheduleEvents,
+                ...visibleScheduleRange,
+                filterLabel: showOnlyMyEvents ? "My Events" : "All Events",
+              })
+            }
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-600"
+          >
+            <DocumentArrowDownIcon className="size-4" /> Download PDF
           </button>
           <button type="button" onClick={() => exportSchedule(calendarEvents)} className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-600">
             <ArrowDownTrayIcon className="size-4" /> Export
@@ -392,10 +431,6 @@ const MinistryWorkspaceContent = ({
           </button>
           </div>
         </div>
-        <div className="hidden pb-4 print:block">
-          <h1 className="century-font text-3xl">{data.ministry.name} Ministry Schedule</h1>
-          <p>Internal calendar for approved members</p>
-        </div>
         <div className="min-h-0 flex-1">{calendar}</div>
       </div>
     )
@@ -406,8 +441,28 @@ const MinistryWorkspaceContent = ({
         activeAction.id === "my-events"
           ? calendarEvents.filter((event) => event.is_assigned)
           : calendarEvents
+      const eventRange = getEventRange(visibleEvents)
       content = (
-        <EventList events={visibleEvents} onEventSelect={setSelectedEvent} />
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() =>
+                downloadEventSchedulePdf({
+                  ministryName: data.ministry.name,
+                  events: visibleEvents,
+                  ...eventRange,
+                  filterLabel:
+                    activeAction.id === "my-events" ? "My Events" : "All Events",
+                })
+              }
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-600"
+            >
+              <DocumentArrowDownIcon className="size-4" /> Download PDF
+            </button>
+          </div>
+          <EventList events={visibleEvents} onEventSelect={setSelectedEvent} />
+        </div>
       )
     } else {
       content = (
@@ -424,6 +479,11 @@ const MinistryWorkspaceContent = ({
     content = <MinistryTemplates data={data} activeAction={activeAction} />
   } else if (
     section.id === "availability" &&
+    activeAction.id === "service-frequency"
+  ) {
+    content = <MinistryMembers data={data} activeAction={activeAction} />
+  } else if (
+    section.id === "availability" &&
     activeAction.id === "my-availability"
   ) {
     content = <MinistryAvailability />
@@ -437,7 +497,7 @@ const MinistryWorkspaceContent = ({
   } else if (section.id === "support") {
     content = <MinistrySupport ministryName={data.ministry.name} />
   } else if (section.id === "reports") {
-    content = <MinistryReports ministry={data.ministry} activeAction={activeAction} />
+    content = <MinistryReports ministry={data.ministry} activeAction={activeAction} currentUser={currentUser || data.user} />
   } else {
     content = (
       <PlaceholderContent section={section} activeAction={activeAction} />

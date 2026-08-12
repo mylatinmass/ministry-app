@@ -26,6 +26,14 @@ const roleLabels = {
   member: "Member",
 }
 
+const servingPreferenceOptions = [
+  { value: "prefer", label: "Always available (100%)" },
+  { value: "sometimes", label: "Can help sometimes" },
+  { value: "if_necessary", label: "Available if necessary" },
+  { value: "cannot_serve", label: "Cannot serve" },
+  { value: "not_specified", label: "Not specified" },
+]
+
 const badgeIconOptions = [
   { key: "academic-cap", label: "Academic cap", Icon: AcademicCapIcon },
   { key: "hand-raised", label: "Raised hand", Icon: HandRaisedIcon },
@@ -62,6 +70,7 @@ const MinistryMembers = ({ data, activeAction }) => {
   const [newLevelIconKey, setNewLevelIconKey] = React.useState("")
   const [levelDrafts, setLevelDrafts] = React.useState({})
   const [selectedMemberId, setSelectedMemberId] = React.useState("")
+  const [preferenceDrafts, setPreferenceDrafts] = React.useState({})
   const [draggedLevelId, setDraggedLevelId] = React.useState("")
   const [levelDropTargetId, setLevelDropTargetId] = React.useState("")
   const [message, setMessage] = React.useState("")
@@ -89,6 +98,25 @@ const MinistryMembers = ({ data, activeAction }) => {
       const result = await response.json()
       if (!response.ok) throw new Error(result.message || "Unable to load members")
       setMemberData(result)
+      const preferenceRecords = result.canManage
+        ? result.members || []
+        : result.currentMembership
+          ? [{ userId: data.user.id, ...result.currentMembership }]
+          : []
+      setPreferenceDrafts(
+        Object.fromEntries(
+          preferenceRecords.map((member) => [
+            member.userId,
+            {
+              servingPreference:
+                member.servingPreference || "prefer",
+              monthlyFrequencyLimit: member.monthlyFrequencyLimit ?? "",
+              automaticAssignmentMonthlyLimit:
+                member.automaticAssignmentMonthlyLimit ?? "",
+            },
+          ]),
+        ),
+      )
       setLevelDrafts(
         Object.fromEntries(
           (result.levels || []).map((level) => [
@@ -188,6 +216,22 @@ const MinistryMembers = ({ data, activeAction }) => {
     }
   }
 
+  const updatePreferenceDraft = (userId, field, value) =>
+    setPreferenceDrafts((current) => ({
+      ...current,
+      [userId]: {
+        ...current[userId],
+        [field]: value,
+      },
+    }))
+
+  const saveServingPreferences = (userId) =>
+    updateMembership({
+      userId,
+      action: "set_serving_preferences",
+      ...(preferenceDrafts[userId] || {}),
+    })
+
   const manageInvitation = async (action, invitation) => {
     setIsSubmitting(true)
     try {
@@ -273,6 +317,77 @@ const MinistryMembers = ({ data, activeAction }) => {
           {memberData.currentMembership?.highestLevelName ||
             "Not assigned yet"}
         </p>
+        <div className="mt-6 rounded-xl border border-gray-100 bg-[#fcfaf8] p-5">
+          <h4 className="century-font text-xl text-gray-900">
+            Service Frequency
+          </h4>
+          <p className="mt-1 text-sm text-gray-500">
+            Choose how frequently you can serve in this ministry. Everyone starts as always available.
+          </p>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <label className="text-sm font-semibold text-gray-700">
+              Service frequency
+              <select
+                value={preferenceDrafts[data.user.id]?.servingPreference || "prefer"}
+                onChange={(event) =>
+                  updatePreferenceDraft(
+                    data.user.id,
+                    "servingPreference",
+                    event.target.value,
+                  )
+                }
+                className="mt-2 block h-11 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal"
+              >
+                {servingPreferenceOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm font-semibold text-gray-700">
+              Times per month in this ministry
+              <input
+                type="number"
+                min="1"
+                max="100"
+                value={preferenceDrafts[data.user.id]?.monthlyFrequencyLimit ?? ""}
+                onChange={(event) =>
+                  updatePreferenceDraft(
+                    data.user.id,
+                    "monthlyFrequencyLimit",
+                    event.target.value,
+                  )
+                }
+                placeholder="No limit"
+                className="mt-2 block h-11 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal"
+              />
+            </label>
+            <label className="text-sm font-semibold text-gray-700 sm:col-span-2">
+              Automatic assignments per month across all ministries
+              <input
+                type="number"
+                min="1"
+                max="100"
+                value={preferenceDrafts[data.user.id]?.automaticAssignmentMonthlyLimit ?? ""}
+                onChange={(event) =>
+                  updatePreferenceDraft(
+                    data.user.id,
+                    "automaticAssignmentMonthlyLimit",
+                    event.target.value,
+                  )
+                }
+                placeholder="No limit"
+                className="mt-2 block h-11 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal"
+              />
+            </label>
+          </div>
+          <button
+            type="button"
+            onClick={() => saveServingPreferences(data.user.id)}
+            className="mt-4 rounded-lg bg-[#896542] px-4 py-2 text-sm font-semibold text-white hover:bg-[#6f4f34]"
+          >
+            Update frequency
+          </button>
+        </div>
         <button
           type="button"
           onClick={() =>
@@ -618,7 +733,58 @@ const MinistryMembers = ({ data, activeAction }) => {
                         {memberData.levels.map((level) => <option key={level.id} value={level.id}>Level {level.rankOrder} · {level.name}</option>)}
                       </select>
                     </label>
+                    <label className="text-sm font-semibold text-gray-700">
+                      Service frequency
+                      <select
+                        value={preferenceDrafts[member.userId]?.servingPreference || "prefer"}
+                        onChange={(event) =>
+                          updatePreferenceDraft(member.userId, "servingPreference", event.target.value)
+                        }
+                        className="mt-2 block h-11 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal"
+                      >
+                        {servingPreferenceOptions.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-sm font-semibold text-gray-700">
+                      Times per month in this ministry
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        value={preferenceDrafts[member.userId]?.monthlyFrequencyLimit ?? ""}
+                        onChange={(event) =>
+                          updatePreferenceDraft(member.userId, "monthlyFrequencyLimit", event.target.value)
+                        }
+                        placeholder="No limit"
+                        className="mt-2 block h-11 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal"
+                      />
+                    </label>
+                    {memberData.canManageAll && (
+                      <label className="text-sm font-semibold text-gray-700 sm:col-span-2">
+                        Automatic assignments per month across all ministries
+                        <input
+                          type="number"
+                          min="1"
+                          max="100"
+                          value={preferenceDrafts[member.userId]?.automaticAssignmentMonthlyLimit ?? ""}
+                          onChange={(event) =>
+                            updatePreferenceDraft(member.userId, "automaticAssignmentMonthlyLimit", event.target.value)
+                          }
+                          placeholder="No limit"
+                          className="mt-2 block h-11 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal"
+                        />
+                      </label>
+                    )}
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => saveServingPreferences(member.userId)}
+                    className="mt-4 rounded-lg bg-[#896542] px-4 py-2 text-sm font-semibold text-white hover:bg-[#6f4f34]"
+                  >
+                    Update service frequency
+                  </button>
                 </div>
               )
             })()}

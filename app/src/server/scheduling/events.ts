@@ -69,6 +69,16 @@ const chapelDateFormatter = new Intl.DateTimeFormat("en-US", {
   month: "2-digit",
   day: "2-digit",
 })
+const chapelDateTimeFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+})
 
 const cleanText = (value: unknown, maximum = 5000) =>
   typeof value === "string" ? value.trim().slice(0, maximum) : ""
@@ -151,26 +161,149 @@ const addMonths = (source: Date, months: number) => {
   return result
 }
 
-const getOccurrenceStarts = (start: Date, recurrence: any) => {
-  const frequency = ["weekly", "monthly"].includes(recurrence?.frequency)
+const toChapelWallClock = (instant: Date) => {
+  const values = Object.fromEntries(
+    chapelDateTimeFormatter
+      .formatToParts(instant)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, Number(part.value)]),
+  )
+  return new Date(Date.UTC(
+    values.year,
+    values.month - 1,
+    values.day,
+    values.hour,
+    values.minute,
+    values.second,
+    instant.getUTCMilliseconds(),
+  ))
+}
+
+const fromChapelWallClock = (wallClock: Date) => {
+  const target = wallClock.getTime()
+  let candidate = new Date(target)
+  for (let iteration = 0; iteration < 3; iteration += 1) {
+    const observed = toChapelWallClock(candidate).getTime()
+    candidate = new Date(candidate.getTime() + (target - observed))
+  }
+  return candidate
+}
+
+const nthWeekdayOfMonth = (
+  source: Date,
+  months: number,
+  weekday: number,
+  ordinal: number,
+) => {
+  const month = new Date(Date.UTC(
+    source.getUTCFullYear(),
+    source.getUTCMonth() + months,
+    1,
+    source.getUTCHours(),
+    source.getUTCMinutes(),
+    source.getUTCSeconds(),
+    source.getUTCMilliseconds(),
+  ))
+  if (ordinal === -1) {
+    month.setUTCMonth(month.getUTCMonth() + 1)
+    month.setUTCDate(0)
+    month.setUTCDate(month.getUTCDate() - ((month.getUTCDay() - weekday + 7) % 7))
+    return month
+  }
+  month.setUTCDate(1 + ((weekday - month.getUTCDay() + 7) % 7) + (ordinal - 1) * 7)
+  return month
+}
+
+const normalizeRecurrence = (recurrence: any, minimumCount = 2) => {
+  const frequency = [
+    "weekly",
+    "monthly",
+    "monthly_nth_weekday",
+    "first_friday",
+    "first_saturday",
+    "friday_before_first_saturday",
+  ].includes(recurrence?.frequency)
     ? recurrence.frequency
     : "none"
-  const count =
-    frequency === "none"
-      ? 1
-      : Math.min(52, Math.max(1, Number(recurrence?.count) || 1))
-  const interval = Math.min(
-    12,
-    Math.max(1, Number(recurrence?.interval) || 1),
+  return {
+    frequency,
+    interval: Math.min(12, Math.max(1, Number(recurrence?.interval) || 1)),
+    count:
+      frequency === "none"
+        ? 1
+        : Math.min(52, Math.max(minimumCount, Number(recurrence?.count) || 12)),
+    weekday: Math.min(6, Math.max(0, Number(recurrence?.weekday) || 0)),
+    ordinal: [-1, 1, 2, 3, 4].includes(Number(recurrence?.ordinal))
+      ? Number(recurrence.ordinal)
+      : 1,
+  }
+}
+
+const monthlyRuleCandidate = (
+  start: Date,
+  monthOffset: number,
+  recurrence: ReturnType<typeof normalizeRecurrence>,
+) => {
+  if (recurrence.frequency === "first_friday") {
+    return nthWeekdayOfMonth(start, monthOffset, 5, 1)
+  }
+  if (recurrence.frequency === "first_saturday") {
+    return nthWeekdayOfMonth(start, monthOffset, 6, 1)
+  }
+  if (recurrence.frequency === "friday_before_first_saturday") {
+    const firstSaturday = nthWeekdayOfMonth(start, monthOffset, 6, 1)
+    return new Date(firstSaturday.getTime() - 86_400_000)
+  }
+  return nthWeekdayOfMonth(
+    start,
+    monthOffset,
+    recurrence.weekday,
+    recurrence.ordinal,
   )
+}
+
+export const getOccurrenceStarts = (
+  startInstant: Date,
+  recurrence: any,
+  minimumCount = 2,
+) => {
+  const start = toChapelWallClock(startInstant)
+  const normalized = normalizeRecurrence(recurrence, minimumCount)
+  const { frequency, count, interval } = normalized
+  let firstRuleMonthOffset = 0
+  if ([
+    "first_friday",
+    "first_saturday",
+    "friday_before_first_saturday",
+    "monthly_nth_weekday",
+  ].includes(frequency)) {
+    while (
+      firstRuleMonthOffset < 24 &&
+      monthlyRuleCandidate(start, firstRuleMonthOffset, normalized) < start
+    ) {
+      firstRuleMonthOffset += 1
+    }
+  }
 
   return Array.from({ length: count }, (_, index) => {
     if (frequency === "weekly") {
       return new Date(start.getTime() + index * interval * 7 * 86_400_000)
     }
     if (frequency === "monthly") return addMonths(start, index * interval)
+    if ([
+      "first_friday",
+      "first_saturday",
+      "friday_before_first_saturday",
+      "monthly_nth_weekday",
+    ].includes(frequency)) {
+      return monthlyRuleCandidate(
+        start,
+        firstRuleMonthOffset + index * interval,
+        normalized,
+      )
+    }
     return new Date(start)
-  })
+  }).map(fromChapelWallClock)
 }
 
 const loadTemplateStructure = async (
@@ -345,6 +478,8 @@ const createEventFromStructure = async (
     status,
     recurrenceGroupId,
     recurrenceRule,
+    recurrenceAnchorAt = null,
+    recurrenceParentGroupId = null,
     participationType,
     confirmationDeadline = null,
     sourceEventId = null,
@@ -372,12 +507,14 @@ const createEventFromStructure = async (
         source_event_id,
         recurrence_group_id,
         recurrence_rule,
+        recurrence_anchor_at,
+        recurrence_parent_group_id,
         created_by
       )
       VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
         CASE WHEN $10 = 'published' THEN now() ELSE NULL END,
-        $11, 1, $12, $13, $14::JSONB, $15
+        $11, 1, $12, $13, $14::JSONB, $15, $16, $17
       )
       RETURNING id
     `,
@@ -396,6 +533,8 @@ const createEventFromStructure = async (
       sourceEventId,
       recurrenceGroupId,
       recurrenceRule ? JSON.stringify(recurrenceRule) : null,
+      recurrenceAnchorAt,
+      recurrenceParentGroupId,
       context.user.id,
     ],
   )
@@ -526,6 +665,8 @@ const loadEventList = async (
         event.version,
         event.recurrence_group_id,
         event.recurrence_rule,
+        event.recurrence_anchor_at,
+        event.recurrence_parent_group_id,
         event.updated_at,
         (
           SELECT count(*)
@@ -1155,8 +1296,21 @@ const createEvents = async (
     ? confirmationDeadline.getTime() - start.getTime()
     : null
   const occurrenceStarts = getOccurrenceStarts(start, body.recurrence)
+  if (
+    occurrenceStarts.length > 1 &&
+    !["owner", "super_admin"].includes(context.user.global_role)
+  ) {
+    throw Object.assign(
+      new Error("Only a Super Admin can create repeating events"),
+      { status: 403 },
+    )
+  }
   const recurrenceGroupId =
     occurrenceStarts.length > 1 ? randomUUID() : null
+  const recurrenceRule =
+    occurrenceStarts.length > 1
+      ? { ...normalizeRecurrence(body.recurrence), effectiveFrom: start.toISOString() }
+      : null
   const status = body.status === "published" ? "published" : "draft"
   const participationType = PARTICIPATION_TYPES.has(body.participationType)
     ? body.participationType
@@ -1175,8 +1329,9 @@ const createEvents = async (
         end: occurrenceEnd,
         status,
         recurrenceGroupId,
-        recurrenceRule:
-          occurrenceStarts.length > 1 ? body.recurrence : null,
+        recurrenceRule,
+        recurrenceAnchorAt:
+          occurrenceStarts.length > 1 ? occurrenceStart : null,
         participationType,
         confirmationDeadline:
           confirmationOffset === null
@@ -1435,15 +1590,62 @@ const previewTemplateReplacement = async (
   client: PoolClient,
   context: any,
   body: any,
-) => {
+): Promise<any> => {
   const eventId = cleanText(body.eventId, 100)
   const templateId = cleanText(body.templateId, 100)
   const eventResult = await client.query(
-    `SELECT id, ministry_id, template_id, template_version FROM events WHERE id = $1`,
+    `SELECT id, ministry_id, template_id, template_version, recurrence_group_id,
+      recurrence_anchor_at, start_time FROM events WHERE id = $1`,
     [eventId],
   )
   const event = eventResult.rows[0]
   if (!event) throw Object.assign(new Error("Event not found"), { status: 404 })
+  if (body.updateScope === "this_and_future") {
+    if (!event.recurrence_group_id) {
+      throw Object.assign(new Error("This event is not part of a repeating series"), {
+        status: 409,
+      })
+    }
+    if (!["owner", "super_admin"].includes(context.user.global_role)) {
+      throw Object.assign(
+        new Error("Only a Super Admin can change a repeating-event rule"),
+        { status: 403 },
+      )
+    }
+    const futureEvents = await client.query(
+      `
+        SELECT id, recurrence_rule
+        FROM events
+        WHERE recurrence_group_id = $1
+          AND COALESCE(recurrence_anchor_at, start_time) >= $2
+          AND status <> 'archived'
+        ORDER BY COALESCE(recurrence_anchor_at, start_time), id
+      `,
+      [event.recurrence_group_id, event.recurrence_anchor_at || event.start_time],
+    )
+    const previews: any[] = []
+    for (const futureEvent of futureEvents.rows) {
+      previews.push(
+        await previewTemplateReplacement(client, context, {
+          ...body,
+          eventId: futureEvent.id,
+          updateScope: "this_event",
+        }),
+      )
+    }
+    const first = previews[0]
+    return {
+      ...first,
+      affectedEvents: previews.length,
+      preserved: previews.flatMap((preview) => preview.preserved),
+      added: previews.flatMap((preview) => preview.added),
+      removed: previews.flatMap((preview) => preview.removed),
+      affectedAssignments: previews.reduce(
+        (total, preview) => total + Number(preview.affectedAssignments || 0),
+        0,
+      ),
+    }
+  }
   await requireMinistryAccess(client, context.user, event.ministry_id, true)
   const structure = await loadTemplateStructure(client, templateId)
   await requireMinistryAccess(
@@ -2104,6 +2306,72 @@ const updateEvent = async (
   const event = eventResult.rows[0]
   if (!event) throw Object.assign(new Error("Event not found"), { status: 404 })
 
+  if (
+    body.action === "replace_template" &&
+    body.updateScope === "this_and_future"
+  ) {
+    if (!event.recurrence_group_id) {
+      throw Object.assign(new Error("This event is not part of a repeating series"), {
+        status: 409,
+      })
+    }
+    if (!["owner", "super_admin"].includes(context.user.global_role)) {
+      throw Object.assign(
+        new Error("Only a Super Admin can change a repeating-event rule"),
+        { status: 403 },
+      )
+    }
+    const futureEvents = await client.query(
+      `
+        SELECT id
+        FROM events
+        WHERE recurrence_group_id = $1
+          AND COALESCE(recurrence_anchor_at, start_time) >= $2
+          AND status <> 'archived'
+        ORDER BY COALESCE(recurrence_anchor_at, start_time), id
+      `,
+      [
+        event.recurrence_group_id,
+        event.recurrence_anchor_at || event.start_time,
+      ],
+    )
+    const nextGroupId = randomUUID()
+    const nextRule = {
+      ...(event.recurrence_rule || {}),
+      effectiveFrom: new Date(event.start_time).toISOString(),
+      previousGroupId: event.recurrence_group_id,
+    }
+    if (futureEvents.rowCount) {
+      await client.query(
+        `
+          UPDATE events
+          SET recurrence_group_id = $2,
+              recurrence_rule = $3::JSONB,
+              recurrence_parent_group_id = $1,
+              updated_at = now()
+          WHERE id = ANY($4::UUID[])
+        `,
+        [
+          event.recurrence_group_id,
+          nextGroupId,
+          JSON.stringify(nextRule),
+          futureEvents.rows.map((futureEvent) => futureEvent.id),
+        ],
+      )
+    }
+    for (const futureEvent of futureEvents.rows) {
+      await updateEvent(client, context, {
+        ...body,
+        eventId: futureEvent.id,
+        updateScope: "this_event",
+      })
+    }
+    return {
+      message: `Template applied to ${futureEvents.rowCount || 0} future events`,
+      eventIds: futureEvents.rows.map((futureEvent) => futureEvent.id),
+    }
+  }
+
   if (body.action === "assign_member") {
     return assignMemberToResponsibility(client, context, event, body)
   }
@@ -2478,6 +2746,136 @@ const updateEvent = async (
       { status: 400 },
     )
   }
+  const updateScope = body.updateScope === "this_and_future"
+    ? "this_and_future"
+    : "this_event"
+  if (updateScope === "this_and_future") {
+    if (!event.recurrence_group_id) {
+      throw Object.assign(new Error("This event is not part of a repeating series"), {
+        status: 409,
+      })
+    }
+    if (!["owner", "super_admin"].includes(context.user.global_role)) {
+      throw Object.assign(
+        new Error("Only a Super Admin can change a repeating-event rule"),
+        { status: 403 },
+      )
+    }
+    const anchor = event.recurrence_anchor_at || event.start_time
+    const affectedResult = await client.query(
+      `
+        SELECT *
+        FROM events
+        WHERE recurrence_group_id = $1
+          AND COALESCE(recurrence_anchor_at, start_time) >= $2
+          AND status <> 'archived'
+        ORDER BY COALESCE(recurrence_anchor_at, start_time), id
+        FOR UPDATE
+      `,
+      [event.recurrence_group_id, anchor],
+    )
+    const affected = affectedResult.rows
+    const normalizedRule = normalizeRecurrence({
+      ...(event.recurrence_rule || {}),
+      ...(body.recurrence || {}),
+      count: affected.length,
+    }, 1)
+    if (normalizedRule.frequency === "none") {
+      throw Object.assign(new Error("Choose a repeating-event rule"), {
+        status: 400,
+      })
+    }
+    const occurrenceStarts = getOccurrenceStarts(start, normalizedRule, 1)
+    const duration = end.getTime() - start.getTime()
+    const confirmationOffset = confirmationDeadline
+      ? confirmationDeadline.getTime() - start.getTime()
+      : null
+    const nextGroupId = randomUUID()
+    const nextRule = {
+      ...normalizedRule,
+      effectiveFrom: start.toISOString(),
+      previousGroupId: event.recurrence_group_id,
+    }
+    const changedEventIds: string[] = []
+    for (const [index, affectedEvent] of affected.entries()) {
+      const occurrenceStart = occurrenceStarts[index]
+      const occurrenceEnd = new Date(occurrenceStart.getTime() + duration)
+      const nextConfirmationDeadline = confirmationOffset === null
+        ? null
+        : new Date(occurrenceStart.getTime() + confirmationOffset)
+      await client.query(
+        `
+          UPDATE events
+          SET title = $2,
+              description = $3,
+              location = $4,
+              start_time = $5,
+              end_time = $6,
+              participation_type = $7,
+              confirmation_deadline_at = $8,
+              recurrence_group_id = $9,
+              recurrence_rule = $10::JSONB,
+              recurrence_anchor_at = $5,
+              recurrence_parent_group_id = $11,
+              signup_open = CASE
+                WHEN $7 IN ('volunteers', 'both') THEN signup_open
+                ELSE false
+              END,
+              version = version + 1,
+              updated_at = now()
+          WHERE id = $1
+        `,
+        [
+          affectedEvent.id,
+          title,
+          cleanText(body.description) || null,
+          cleanText(body.location, 500) || null,
+          occurrenceStart,
+          occurrenceEnd,
+          participationType,
+          nextConfirmationDeadline,
+          nextGroupId,
+          JSON.stringify(nextRule),
+          event.recurrence_group_id,
+        ],
+      )
+      if (
+        toChapelDateKey(affectedEvent.start_time) !==
+        toChapelDateKey(occurrenceStart)
+      ) {
+        await client.query(
+          `DELETE FROM event_ordo_selections WHERE event_id = $1`,
+          [affectedEvent.id],
+        )
+      }
+      if (["volunteers", "both"].includes(participationType)) {
+        await ensureDefaultGeneralVolunteer(client, affectedEvent.id)
+      }
+      await writeSchedulingAudit(client, context, {
+        action: "event.recurrence_rule_changed",
+        entityType: "event",
+        entityId: affectedEvent.id,
+        ministryId: affectedEvent.ministry_id,
+        beforeData: affectedEvent,
+        afterData: {
+          title,
+          startTime: occurrenceStart,
+          endTime: occurrenceEnd,
+          recurrenceGroupId: nextGroupId,
+          recurrenceRule: nextRule,
+        },
+        metadata: {
+          effectiveFromEventId: eventId,
+          previousRecurrenceGroupId: event.recurrence_group_id,
+        },
+      })
+      changedEventIds.push(affectedEvent.id)
+    }
+    return {
+      message: `${changedEventIds.length} future events updated with the new rule`,
+      eventIds: changedEventIds,
+    }
+  }
   const previousOrdoDate = toChapelDateKey(event.start_time)
   const nextOrdoDate = toChapelDateKey(start)
   if (previousOrdoDate !== nextOrdoDate) {
@@ -2547,6 +2945,115 @@ const updateEvent = async (
       confirmationDeadline,
     },
   })
+  return { message: "Event updated", eventIds: [eventId] }
+}
+
+const previewRecurrenceChange = async (
+  client: PoolClient,
+  context: any,
+  body: any,
+) => {
+  if (!["owner", "super_admin"].includes(context.user.global_role)) {
+    throw Object.assign(
+      new Error("Only a Super Admin can change a repeating-event rule"),
+      { status: 403 },
+    )
+  }
+  const eventId = cleanText(body.eventId, 100)
+  const result = await client.query(
+    `SELECT * FROM events WHERE id = $1 LIMIT 1`,
+    [eventId],
+  )
+  const event = result.rows[0]
+  if (!event?.recurrence_group_id) {
+    throw Object.assign(new Error("This event is not part of a repeating series"), {
+      status: 409,
+    })
+  }
+  await requireMinistryAccess(client, context.user, event.ministry_id, true)
+  const start = parseDate(body.startTime, "Start time")
+  const affected = await client.query(
+    `
+      SELECT event.id, event.title, event.start_time,
+        (SELECT count(*) FROM responsibility_assignments assignment
+          WHERE assignment.event_id = event.id
+            AND assignment.status NOT IN ('declined', 'cancelled'))::INT
+          AS assignment_count
+      FROM events event
+      WHERE event.recurrence_group_id = $1
+        AND COALESCE(event.recurrence_anchor_at, event.start_time) >= $2
+        AND event.status <> 'archived'
+      ORDER BY COALESCE(event.recurrence_anchor_at, event.start_time), event.id
+    `,
+    [event.recurrence_group_id, event.recurrence_anchor_at || event.start_time],
+  )
+  const rule = normalizeRecurrence({
+    ...(event.recurrence_rule || {}),
+    ...(body.recurrence || {}),
+    count: affected.rowCount || 1,
+  }, 1)
+  const dates = getOccurrenceStarts(start, rule, 1)
+  const end = parseDate(body.endTime, "End time")
+  if (end <= start) {
+    throw Object.assign(new Error("End time must be after start time"), {
+      status: 400,
+    })
+  }
+  const duration = end.getTime() - start.getTime()
+  const affectedIds = affected.rows.map((row) => row.id)
+  const conflicts: any[] = []
+  for (const date of dates) {
+    const proposedEnd = new Date(date.getTime() + duration)
+    const conflictResult = await client.query(
+      `
+        SELECT id, title, start_time, end_time
+        FROM events
+        WHERE ministry_id = $1
+          AND id <> ALL($2::UUID[])
+          AND status IN ('draft', 'published')
+          AND start_time < $4
+          AND end_time > $3
+        ORDER BY start_time
+        LIMIT 5
+      `,
+      [event.ministry_id, affectedIds, date, proposedEnd],
+    )
+    for (const conflict of conflictResult.rows) {
+      conflicts.push({
+        id: conflict.id,
+        title: conflict.title,
+        startTime: conflict.start_time,
+      })
+    }
+  }
+  const recipients = affectedIds.length
+    ? await client.query(
+        `
+          SELECT count(DISTINCT COALESCE(guardian.guardian_user_id, assignment.user_id))::INT
+            AS recipient_count
+          FROM responsibility_assignments assignment
+          LEFT JOIN managed_profiles guardian
+            ON guardian.child_user_id = assignment.user_id
+           AND guardian.status IN ('active', 'separation_pending')
+          WHERE assignment.event_id = ANY($1::UUID[])
+            AND assignment.user_id IS NOT NULL
+            AND assignment.status NOT IN ('declined', 'cancelled')
+        `,
+        [affectedIds],
+      )
+    : { rows: [{ recipient_count: 0 }] }
+  return {
+    affectedEvents: affected.rowCount || 0,
+    affectedAssignments: affected.rows.reduce(
+      (total, row) => total + Number(row.assignment_count || 0),
+      0,
+    ),
+    dates: dates.slice(0, 8).map((date) => date.toISOString()),
+    remainingDates: Math.max(0, dates.length - 8),
+    conflicts,
+    peopleToNotify: Number(recipients.rows[0]?.recipient_count || 0),
+    rule,
+  }
 }
 
 export const handleEvents = async (request: Request) => {
@@ -2567,6 +3074,11 @@ export const handleEvents = async (request: Request) => {
     await client.query("BEGIN")
     try {
       if (request.method === "POST") {
+        if (body.action === "preview_recurrence_change") {
+          const preview = await previewRecurrenceChange(client, context, body)
+          await client.query("COMMIT")
+          return json(preview)
+        }
         if (body.action === "preview_template_change") {
           const preview = await previewTemplateReplacement(
             client,
@@ -2595,7 +3107,7 @@ export const handleEvents = async (request: Request) => {
         )
       }
       if (request.method === "PATCH") {
-        const result = await updateEvent(client, context, body)
+        const result: any = await updateEvent(client, context, body)
         await client.query("COMMIT")
         if (
           body.action === "assign_member" &&
@@ -2632,15 +3144,21 @@ export const handleEvents = async (request: Request) => {
             body.action !== "assign_member" &&
             body.action !== "record_service_outcome"
           ) {
-            const current = await getPool().query(
-              `SELECT status FROM events WHERE id = $1 LIMIT 1`,
-              [body.eventId],
-            )
-            if (current.rows[0]?.status === "published") {
-              await sendEventScheduleNotifications(
-                body.eventId,
-                "changed",
+            const changedEventIds =
+              typeof result !== "string" && Array.isArray(result?.eventIds)
+                ? result.eventIds
+                : [body.eventId]
+            for (const changedEventId of changedEventIds) {
+              const current = await getPool().query(
+                `SELECT status FROM events WHERE id = $1 LIMIT 1`,
+                [changedEventId],
               )
+              if (current.rows[0]?.status === "published") {
+                await sendEventScheduleNotifications(
+                  changedEventId,
+                  "changed",
+                )
+              }
             }
           } else if (
             body.action === "record_service_outcome" &&

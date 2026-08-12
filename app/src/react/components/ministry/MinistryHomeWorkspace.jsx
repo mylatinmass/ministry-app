@@ -539,7 +539,7 @@ const MinistryHomeWorkspace = ({ data }) => {
         </div>
         <MinistryEvents
           key={createMinistry.id}
-          data={{ ministry: createMinistry }}
+          data={{ ministry: createMinistry, user: currentUser }}
           activeAction={{ id: "add-event", label: "Create event" }}
           onEventSelect={setSelectedEvent}
         />

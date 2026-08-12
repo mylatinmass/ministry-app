@@ -37,7 +37,10 @@ const initialForm = () => ({
   confirmationDeadline: "",
   recurrenceFrequency: "none",
   recurrenceInterval: 1,
-  recurrenceCount: 1,
+  recurrenceCount: 12,
+  recurrenceWeekday: 5,
+  recurrenceOrdinal: 1,
+  updateScope: "this_event",
   participationType: "members",
 })
 
@@ -50,15 +53,84 @@ const formatEventDate = (value) =>
     minute: "2-digit",
   }).format(new Date(value))
 
+const previewRepeatingDates = (form) => {
+  if (!form.startTime || form.recurrenceFrequency === "none") return []
+  const start = new Date(form.startTime)
+  if (Number.isNaN(start.getTime())) return []
+  const count = Math.min(8, Math.max(2, Number(form.recurrenceCount) || 12))
+  const interval = Math.min(12, Math.max(1, Number(form.recurrenceInterval) || 1))
+  const nthWeekday = (monthOffset, weekday, ordinal) => {
+    const candidate = new Date(start)
+    candidate.setDate(1)
+    candidate.setMonth(candidate.getMonth() + monthOffset)
+    if (ordinal === -1) {
+      candidate.setMonth(candidate.getMonth() + 1)
+      candidate.setDate(0)
+      candidate.setDate(candidate.getDate() - ((candidate.getDay() - weekday + 7) % 7))
+    } else {
+      candidate.setDate(1 + ((weekday - candidate.getDay() + 7) % 7) + (ordinal - 1) * 7)
+    }
+    return candidate
+  }
+  const monthlyRuleCandidate = (monthOffset) => {
+    if (form.recurrenceFrequency === "first_friday") return nthWeekday(monthOffset, 5, 1)
+    if (form.recurrenceFrequency === "first_saturday") return nthWeekday(monthOffset, 6, 1)
+    if (form.recurrenceFrequency === "friday_before_first_saturday") {
+      const saturday = nthWeekday(monthOffset, 6, 1)
+      saturday.setDate(saturday.getDate() - 1)
+      return saturday
+    }
+    return nthWeekday(
+      monthOffset,
+      Number(form.recurrenceWeekday),
+      Number(form.recurrenceOrdinal),
+    )
+  }
+  let firstRuleMonthOffset = 0
+  const usesMonthlyWeekday = [
+    "first_friday",
+    "first_saturday",
+    "friday_before_first_saturday",
+    "monthly_nth_weekday",
+  ].includes(form.recurrenceFrequency)
+  while (
+    usesMonthlyWeekday &&
+    firstRuleMonthOffset < 24 &&
+    monthlyRuleCandidate(firstRuleMonthOffset) < start
+  ) {
+    firstRuleMonthOffset += 1
+  }
+  return Array.from({ length: count }, (_, index) => {
+    if (form.recurrenceFrequency === "weekly") {
+      return new Date(start.getTime() + index * interval * 7 * 86_400_000)
+    }
+    if (form.recurrenceFrequency === "monthly") {
+      const candidate = new Date(start)
+      candidate.setMonth(candidate.getMonth() + index * interval)
+      return candidate
+    }
+    return monthlyRuleCandidate(firstRuleMonthOffset + index * interval)
+  })
+}
+
 const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
+  const canManageRecurrence = ["owner", "super_admin"].includes(
+    data.user?.globalRole,
+  )
   const [templates, setTemplates] = React.useState([])
   const [events, setEvents] = React.useState([])
   const [form, setForm] = React.useState(initialForm)
   const [isLoading, setIsLoading] = React.useState(true)
   const [isSaving, setIsSaving] = React.useState(false)
   const [templatePreview, setTemplatePreview] = React.useState(null)
+  const [recurrencePreview, setRecurrencePreview] = React.useState(null)
+  const [creatingRepeatingEvent, setCreatingRepeatingEvent] = React.useState(false)
   const [message, setMessage] = React.useState("")
   const [errorMessage, setErrorMessage] = React.useState("")
+  const repeatingDatePreview = React.useMemo(
+    () => previewRepeatingDates(form),
+    [form],
+  )
 
   const loadData = React.useCallback(async () => {
     setIsLoading(true)
@@ -111,8 +183,11 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
     setErrorMessage("")
   }, [activeAction.id])
 
-  const updateField = (field, value) =>
+  const updateField = (field, value) => {
+    setRecurrencePreview(null)
+    if (field !== "templateId") setTemplatePreview(null)
     setForm((current) => ({ ...current, [field]: value }))
+  }
 
   const selectTemplate = (templateId) => {
     const template = templates.find((item) => item.id === templateId)
@@ -125,7 +200,10 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
     }))
   }
 
-  const editEvent = (event) =>
+  const editEvent = (event) => {
+    const recurrence = event.recurrence_rule || {}
+    setRecurrencePreview(null)
+    setCreatingRepeatingEvent(false)
     setForm({
       ...initialForm(),
       eventId: event.id,
@@ -137,8 +215,15 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       startTime: toInputValue(event.start_time),
       endTime: toInputValue(event.end_time),
       confirmationDeadline: toInputValue(event.confirmation_deadline_at),
+      recurrenceFrequency: recurrence.frequency || "none",
+      recurrenceInterval: Number(recurrence.interval || 1),
+      recurrenceCount: Number(recurrence.count || 12),
+      recurrenceWeekday: Number(recurrence.weekday ?? 5),
+      recurrenceOrdinal: Number(recurrence.ordinal || 1),
+      updateScope: "this_event",
       participationType: event.participation_type || "members",
     })
+  }
 
   const prepareClone = (event) =>
     setForm({
@@ -172,8 +257,36 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
           frequency: form.recurrenceFrequency,
           interval: Number(form.recurrenceInterval),
           count: Number(form.recurrenceCount),
+          weekday: Number(form.recurrenceWeekday),
+          ordinal: Number(form.recurrenceOrdinal),
         },
+        updateScope: form.updateScope,
         action: cloning ? "clone" : undefined,
+      }
+      if (
+        editing &&
+        form.updateScope === "this_and_future" &&
+        !recurrencePreview
+      ) {
+        const previewResponse = await fetch(
+          getFunctionEndpoint("scheduling/events"),
+          {
+            method: "POST",
+            headers: requestHeaders(),
+            body: JSON.stringify({
+              ...body,
+              action: "preview_recurrence_change",
+            }),
+          },
+        )
+        const previewResult = await previewResponse.json()
+        if (!previewResponse.ok) {
+          throw new Error(
+            previewResult.message || "Unable to preview repeating-event changes",
+          )
+        }
+        setRecurrencePreview(previewResult)
+        return
       }
       const response = await fetch(
         getFunctionEndpoint("scheduling/events"),
@@ -189,6 +302,8 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       }
       setMessage(result.message)
       setForm(initialForm())
+      setRecurrencePreview(null)
+      setCreatingRepeatingEvent(false)
       await loadData()
     } catch (error) {
       setErrorMessage(error.message)
@@ -212,6 +327,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
             action: "preview_template_change",
             eventId: form.eventId,
             templateId,
+            updateScope: form.updateScope,
           }),
         },
       )
@@ -241,6 +357,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
             action: "replace_template",
             eventId: form.eventId,
             templateId: form.templateId,
+            updateScope: form.updateScope,
           }),
         },
       )
@@ -350,6 +467,39 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
             )}
           </div>
 
+          {!form.eventId && !form.sourceEventId && canManageRecurrence && (
+            <div className="mt-5 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setCreatingRepeatingEvent(false)
+                  updateField("recurrenceFrequency", "none")
+                }}
+                className={`rounded-lg px-4 py-2 text-sm font-semibold ${
+                  !creatingRepeatingEvent
+                    ? "bg-[#896542] text-white"
+                    : "border border-gray-200 bg-white text-gray-600"
+                }`}
+              >
+                Create one-time event
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCreatingRepeatingEvent(true)
+                  updateField("recurrenceFrequency", "weekly")
+                }}
+                className={`rounded-lg px-4 py-2 text-sm font-semibold ${
+                  creatingRepeatingEvent
+                    ? "bg-[#896542] text-white"
+                    : "border border-gray-200 bg-white text-gray-600"
+                }`}
+              >
+                Create repeating event
+              </button>
+            </div>
+          )}
+
           {!form.eventId && !form.sourceEventId && (
             <label className="mt-6 block text-sm font-semibold text-gray-700">
               Event template
@@ -395,6 +545,11 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                   <p className="font-semibold text-[#6f4f34]">
                     Change to {templatePreview.nextTemplateName}
                   </p>
+                  {templatePreview.affectedEvents > 1 && (
+                    <p className="mt-1 text-xs text-gray-600">
+                      Previewing {templatePreview.affectedEvents} events in this and future occurrences.
+                    </p>
+                  )}
                   <div className="mt-2 grid grid-cols-3 gap-2 text-center">
                     <div>
                       <p className="text-lg font-semibold text-gray-900">
@@ -539,14 +694,38 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
             </div>
           )}
 
-          {!form.eventId && !form.sourceEventId && (
+          {canManageRecurrence &&
+            ((creatingRepeatingEvent && !form.eventId && !form.sourceEventId) ||
+              (form.eventId && form.recurrenceFrequency !== "none")) && (
             <fieldset className="mt-5 rounded-xl border border-gray-100 p-4">
               <legend className="px-2 text-sm font-semibold text-gray-700">
-                Repeating event
+                Repeating-event rule
               </legend>
+              {form.eventId && (
+                <div className="mb-4 grid gap-2 sm:grid-cols-2">
+                  <label className="flex items-center gap-2 rounded-lg border border-gray-200 p-3 text-sm text-gray-700">
+                    <input
+                      type="radio"
+                      name="updateScope"
+                      checked={form.updateScope === "this_event"}
+                      onChange={() => updateField("updateScope", "this_event")}
+                    />
+                    This event only
+                  </label>
+                  <label className="flex items-center gap-2 rounded-lg border border-gray-200 p-3 text-sm text-gray-700">
+                    <input
+                      type="radio"
+                      name="updateScope"
+                      checked={form.updateScope === "this_and_future"}
+                      onChange={() => updateField("updateScope", "this_and_future")}
+                    />
+                    This and future events
+                  </label>
+                </div>
+              )}
               <div className="grid gap-3 sm:grid-cols-3">
                 <label className="text-sm text-gray-600">
-                  Repeats
+                  Rule
                   <select
                     value={form.recurrenceFrequency}
                     onChange={(event) =>
@@ -557,13 +736,15 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                     }
                     className="mt-2 h-10 w-full rounded-lg border border-gray-200 bg-white px-3"
                   >
-                    <option value="none">One time</option>
                     <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly</option>
+                    <option value="monthly">Monthly on this date</option>
+                    <option value="first_friday">First Friday</option>
+                    <option value="friday_before_first_saturday">Friday before First Saturday</option>
+                    <option value="first_saturday">First Saturday</option>
+                    <option value="monthly_nth_weekday">Monthly weekday rule</option>
                   </select>
                 </label>
-                {form.recurrenceFrequency !== "none" && (
-                  <>
+                <>
                     <label className="text-sm text-gray-600">
                       Every
                       <div className="mt-2 flex items-center gap-2">
@@ -581,31 +762,101 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                           className="h-10 w-full rounded-lg border border-gray-200 px-3"
                         />
                         <span>
-                          {form.recurrenceFrequency === "weekly"
-                            ? "week(s)"
-                            : "month(s)"}
+                          {form.recurrenceFrequency === "weekly" ? "week(s)" : "month(s)"}
                         </span>
                       </div>
                     </label>
-                    <label className="text-sm text-gray-600">
-                      Number of events
-                      <input
-                        type="number"
-                        min="1"
-                        max="52"
-                        value={form.recurrenceCount}
-                        onChange={(event) =>
-                          updateField(
-                            "recurrenceCount",
-                            Number(event.target.value),
-                          )
-                        }
-                        className="mt-2 h-10 w-full rounded-lg border border-gray-200 px-3"
-                      />
-                    </label>
+                    {!form.eventId && (
+                      <label className="text-sm text-gray-600">
+                        Number of events
+                        <input
+                          type="number"
+                          min="2"
+                          max="52"
+                          value={form.recurrenceCount}
+                          onChange={(event) =>
+                            updateField("recurrenceCount", Number(event.target.value))
+                          }
+                          className="mt-2 h-10 w-full rounded-lg border border-gray-200 px-3"
+                        />
+                      </label>
+                    )}
                   </>
-                )}
               </div>
+              {form.recurrenceFrequency === "monthly_nth_weekday" && (
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label className="text-sm text-gray-600">
+                    Occurrence
+                    <select
+                      value={form.recurrenceOrdinal}
+                      onChange={(event) => updateField("recurrenceOrdinal", Number(event.target.value))}
+                      className="mt-2 h-10 w-full rounded-lg border border-gray-200 bg-white px-3"
+                    >
+                      <option value="1">First</option>
+                      <option value="2">Second</option>
+                      <option value="3">Third</option>
+                      <option value="4">Fourth</option>
+                      <option value="-1">Last</option>
+                    </select>
+                  </label>
+                  <label className="text-sm text-gray-600">
+                    Weekday
+                    <select
+                      value={form.recurrenceWeekday}
+                      onChange={(event) => updateField("recurrenceWeekday", Number(event.target.value))}
+                      className="mt-2 h-10 w-full rounded-lg border border-gray-200 bg-white px-3"
+                    >
+                      {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day, index) => (
+                        <option key={day} value={index}>{day}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              )}
+              {form.eventId && form.updateScope === "this_and_future" && (
+                <p className="mt-3 text-xs leading-relaxed text-gray-500">
+                  The existing rule ends before this event. A new effective-dated rule begins here; earlier events and history remain unchanged.
+                </p>
+              )}
+              {!form.eventId && repeatingDatePreview.length > 0 && (
+                <div className="mt-4 rounded-xl bg-[#f7f3ef] p-4 text-sm text-gray-700">
+                  <p className="font-semibold text-[#6f4f34]">Date preview</p>
+                  <ul className="mt-2 grid gap-1 text-xs text-gray-600 sm:grid-cols-2">
+                    {repeatingDatePreview.map((date) => (
+                      <li key={date.toISOString()}>{formatEventDate(date)}</li>
+                    ))}
+                  </ul>
+                  {Number(form.recurrenceCount) > repeatingDatePreview.length && (
+                    <p className="mt-2 text-xs text-gray-500">
+                      + {Number(form.recurrenceCount) - repeatingDatePreview.length} more dates
+                    </p>
+                  )}
+                </div>
+              )}
+              {recurrencePreview && (
+                <div className="mt-4 rounded-xl bg-[#f7f3ef] p-4 text-sm text-gray-700">
+                  <p className="font-semibold text-[#6f4f34]">Change preview</p>
+                  <p className="mt-1">
+                    {recurrencePreview.affectedEvents} events and {recurrencePreview.affectedAssignments} assignments will be affected.
+                  </p>
+                  <p className="mt-1">
+                    {recurrencePreview.peopleToNotify} people will receive change notices after published events are updated.
+                  </p>
+                  {recurrencePreview.conflicts?.length > 0 && (
+                    <p className="mt-2 font-semibold text-amber-800">
+                      {recurrencePreview.conflicts.length} schedule {recurrencePreview.conflicts.length === 1 ? "conflict needs" : "conflicts need"} review.
+                    </p>
+                  )}
+                  <ul className="mt-2 space-y-1 text-xs text-gray-600">
+                    {recurrencePreview.dates.map((date) => (
+                      <li key={date}>{formatEventDate(date)}</li>
+                    ))}
+                    {recurrencePreview.remainingDates > 0 && (
+                      <li>+ {recurrencePreview.remainingDates} more dates</li>
+                    )}
+                  </ul>
+                </div>
+              )}
             </fieldset>
           )}
 
@@ -629,7 +880,11 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
             {isSaving
               ? "Saving..."
               : form.eventId
-                ? "Update event"
+                ? form.updateScope === "this_and_future" && !recurrencePreview
+                  ? "Preview changes"
+                  : form.updateScope === "this_and_future"
+                    ? "Apply to this and future events"
+                    : "Update event"
                 : form.sourceEventId
                   ? "Create draft copy"
                   : "Create event"}
@@ -662,6 +917,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                       <p className="mt-1 text-sm text-gray-500">
                         {event.template_name || "Copied event"} ·{" "}
                         {event.responsibility_count} responsibilities
+                        {event.recurrence_group_id ? " · Repeating" : ""}
                       </p>
                     </button>
                     <span className="self-start rounded-full bg-gray-100 px-2 py-1 text-xs uppercase text-gray-500 sm:self-auto">

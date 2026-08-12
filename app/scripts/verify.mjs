@@ -270,6 +270,9 @@ const messageComponent = await read(
 const completedAssignmentNotificationsMigration = await read(
   "migrations/20260812_02_complete_assignment_notification_workflows.sql",
 )
+const effectiveDatedRecurrenceMigration = await read(
+  "migrations/20260812_03_add_effective_dated_event_recurrence.sql",
+)
 assert.match(messageMigration, /CREATE TABLE IF NOT EXISTS ministry_messages/)
 assert.match(messageMigration, /CREATE TABLE IF NOT EXISTS ministry_message_recipients/)
 assert.match(messageMigration, /channel IN \('email', 'telegram'\)/)
@@ -292,6 +295,14 @@ assert.match(
   /acknowledgment_deadline_at TIMESTAMPTZ/,
 )
 assert.match(homeWorkspace, />\s*Acknowledge\s*</)
+assert.match(effectiveDatedRecurrenceMigration, /recurrence_anchor_at TIMESTAMPTZ/)
+assert.match(effectiveDatedRecurrenceMigration, /recurrence_parent_group_id UUID/)
+assert.match(schedulingEvents, /Only a Super Admin can create repeating events/)
+assert.match(schedulingEvents, /friday_before_first_saturday/)
+assert.match(schedulingEvents, /previewRecurrenceChange/)
+assert.match(schedulingEvents, /event\.recurrence_rule_changed/)
+assert.match(schedulingEvents, /body\.updateScope === "this_and_future"/)
+assert.match(homeWorkspace, /user: currentUser/)
 
 assert.match(authHelper, /activeProfileUserId/)
 assert.match(authHelper, /authMethod: options\.authMethod \|\| "password"/)

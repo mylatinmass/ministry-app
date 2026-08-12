@@ -28,7 +28,7 @@ const MinistryPendingInvitations = ({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <p className="break-words font-semibold text-gray-900">
-                {invitation.email}
+                Private email invitation
               </p>
               <p className="mt-1 text-xs leading-relaxed text-gray-500">
                 {invitation.ministryNames.join(", ")}
@@ -69,7 +69,7 @@ const MinistryPendingInvitations = ({
                 onClick={() => {
                   if (
                     window.confirm(
-                      `Cancel the invitation for ${invitation.email}? The existing invitation link will stop working.`,
+                      "Cancel this invitation? The existing invitation link will stop working.",
                     )
                   ) {
                     onAction("cancel_invitation", invitation)

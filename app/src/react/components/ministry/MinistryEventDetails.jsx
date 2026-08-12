@@ -1055,9 +1055,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                                       <span>· {assignment.status.replaceAll("_", " ")}</span>
                                       {assignment.isVolunteer && canManage && (
                                         <span className="w-full text-[11px] text-gray-600">
-                                          Volunteer · {assignment.volunteerEmail} · {assignment.volunteerPhone}
-                                          {assignment.notifyEmail ? " · Email updates allowed" : ""}
-                                          {assignment.notifySms ? " · SMS updates allowed" : ""}
+                                          Volunteer
                                         </span>
                                       )}
                                       {assignment.conflictCount > 0 && (

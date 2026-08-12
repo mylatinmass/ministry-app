@@ -79,7 +79,6 @@ const handler = async (event) => {
         separation: {
           firstName: separation.first_name,
           lastName: separation.last_name,
-          email: separation.new_email,
           status: separation.status,
           expired,
           expiresAt: separation.expires_at,

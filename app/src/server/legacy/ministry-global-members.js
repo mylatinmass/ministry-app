@@ -92,9 +92,6 @@ const handler = async (event) => {
               user_account.id,
               user_account.first_name,
               user_account.last_name,
-              user_account.email,
-              user_account.phone,
-              user_account.username,
               user_account.global_role,
               user_account.status
             FROM users user_account
@@ -116,9 +113,6 @@ const handler = async (event) => {
             user_account.id AS user_id,
             user_account.first_name,
             user_account.last_name,
-            user_account.email,
-            user_account.phone,
-            user_account.username,
             user_account.global_role,
             user_account.status AS user_status,
             membership.id AS membership_id,
@@ -162,7 +156,6 @@ const handler = async (event) => {
           `
             SELECT
               invitation.id,
-              invitation.email,
               invitation.status,
               invitation.expires_at,
               invitation.created_at,
@@ -201,9 +194,6 @@ const handler = async (event) => {
           id: row.user_id,
           firstName: row.first_name,
           lastName: row.last_name,
-          email: row.email,
-          phone: row.phone || "",
-          username: row.username,
           globalRole: row.global_role,
           status: row.user_status,
           memberships: [],
@@ -243,7 +233,6 @@ const handler = async (event) => {
       })),
       invitations: invitationsResult.rows.map((invitation) => ({
         id: invitation.id,
-        email: invitation.email,
         status: invitation.status,
         expiresAt: invitation.expires_at,
         createdAt: invitation.created_at,

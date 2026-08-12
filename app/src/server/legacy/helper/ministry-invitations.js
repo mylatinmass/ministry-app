@@ -87,13 +87,11 @@ const getInvitationMinistries = async (client, invitationId) => {
 }
 
 const toPublicInvitation = (invitation, ministries) => ({
-  email: invitation.email,
   status: invitation.status,
   expired:
     invitation.status === "pending" &&
     new Date(invitation.expires_at).getTime() <= Date.now(),
   accountRequired: Boolean(invitation.account_required),
-  username: invitation.username || null,
   expiresAt: invitation.expires_at,
   respondedAt: invitation.responded_at,
   ministries: ministries.map(({ id, name, slug }) => ({ id, name, slug })),

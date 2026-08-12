@@ -726,11 +726,7 @@ const loadEventDetails = async (
             assignment.outcome_recorded_at,
             assignment.outcome_note,
             assignment.volunteer_name,
-            assignment.volunteer_email,
-            assignment.volunteer_phone,
             assignment.signup_source,
-            assignment.notify_email,
-            assignment.notify_sms,
             assignment.created_at,
             (
               SELECT count(*)
@@ -851,7 +847,7 @@ const loadEventDetails = async (
       responsibility?.is_public_assignment
         ? null
         : responsibility?.ministry_id || event.ministry_id
-    const canSeePrivateAssignmentDetails = responsibilityMinistryId
+    const canManageAssignment = responsibilityMinistryId
       ? Boolean(
           responsibilityAccessByMinistry.get(responsibilityMinistryId)
             ?.canManage,
@@ -867,23 +863,13 @@ const loadEventDetails = async (
         Boolean(assignment.is_volunteer_profile),
       firstName: assignment.first_name,
       lastName: assignment.last_name || "",
-      volunteerEmail: canSeePrivateAssignmentDetails
-        ? assignment.volunteer_email || ""
-        : "",
-      volunteerPhone: canSeePrivateAssignmentDetails
-        ? assignment.volunteer_phone || ""
-        : "",
-      notifyEmail:
-        canSeePrivateAssignmentDetails && Boolean(assignment.notify_email),
-      notifySms:
-        canSeePrivateAssignmentDetails && Boolean(assignment.notify_sms),
       status: assignment.status,
       quantity: Number(assignment.quantity),
       confirmedAt: assignment.confirmed_at,
       serviceOutcome: assignment.service_outcome || "",
       outcomeRecordedAt: assignment.outcome_recorded_at,
       outcomeNote: assignment.outcome_note || "",
-      conflictCount: canSeePrivateAssignmentDetails
+      conflictCount: canManageAssignment
         ? Number(assignment.conflict_count)
         : 0,
       createdAt: assignment.created_at,

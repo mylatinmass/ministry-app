@@ -209,10 +209,6 @@ const MinistryInvitePage = ({ location }) => {
                 </div>
               ) : invitation.accountRequired ? (
                 <div className="mt-8">
-                  <div className="rounded-xl border border-[#e6ddd4] bg-[#faf8f5] p-4">
-                    <p className="text-sm font-semibold text-gray-700">Verified email</p>
-                    <p className="mt-1 text-gray-900">{invitation.email}</p>
-                  </div>
                   <h2 className="mt-6 century-font text-2xl text-gray-900">Create your account</h2>
                   <p className="mt-1 text-sm text-gray-500">Every field is required. Your username must be unique and at least 4 characters.</p>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -227,7 +223,7 @@ const MinistryInvitePage = ({ location }) => {
                 </div>
               ) : (
                 <div className="mt-8 text-center">
-                  <p className="text-sm leading-relaxed text-gray-600">Accepting will add these ministries to your existing account <strong>{invitation.username}</strong>.</p>
+                  <p className="text-sm leading-relaxed text-gray-600">Accepting will add these ministries to your existing account.</p>
                   <div className="mt-5 flex flex-col justify-center gap-3 sm:flex-row">
                     <button type="submit" disabled={isSubmitting} className="rounded-xl bg-[#896542] px-6 py-3 font-semibold text-white disabled:opacity-50">{isSubmitting ? "Accepting..." : "Accept invitation"}</button>
                     <button type="button" onClick={() => setIntent("decline")} className="rounded-xl border border-gray-300 px-6 py-3 font-semibold text-gray-600">Decline</button>

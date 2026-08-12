@@ -104,7 +104,6 @@ const MinistryProfileSeparatePage = ({ location }) => {
           {status === "ready" && separation && (
             <form onSubmit={activate} className="mt-6 space-y-4">
               <p className="text-gray-600">Welcome, {separation.firstName} {separation.lastName}. Your ministries and complete service history will stay with this account.</p>
-              <div className="rounded-xl border border-[#e6ddd4] bg-[#faf8f5] p-4"><p className="text-xs font-semibold uppercase text-gray-500">Verified email</p><p className="mt-1">{separation.email}</p></div>
               <label className="block text-sm font-semibold text-gray-700">Username<input name="username" value={form.username} onChange={updateField} onBlur={checkUsername} required minLength={4} className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-3 font-normal" /><span className="mt-1 block min-h-5 text-xs font-normal text-gray-500">{usernameMessage}</span></label>
               <label className="block text-sm font-semibold text-gray-700">Phone (optional)<input name="phone" type="tel" value={form.phone} onChange={updateField} className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-3 font-normal" /></label>
               <label className="block text-sm font-semibold text-gray-700">Password<input name="password" type="password" value={form.password} onChange={updateField} required minLength={8} className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-3 font-normal" /></label>

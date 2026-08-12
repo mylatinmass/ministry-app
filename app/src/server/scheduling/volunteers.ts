@@ -92,7 +92,6 @@ const sendAccountInvitation = async (request: Request, invitation: any) => {
 const loadPublicEvent = async (
   client: PoolClient,
   code: string,
-  publicProfileId = "",
 ) => {
   if (!CODE_PATTERN.test(code)) return null
   const eventResult = await client.query(
@@ -159,23 +158,6 @@ const loadPublicEvent = async (
     [event.id, ACTIVE_ASSIGNMENT_STATUSES],
   )
 
-  let prefill = null
-  if (/^[0-9a-f-]{36}$/i.test(publicProfileId)) {
-    const profileResult = await client.query(
-      `SELECT first_name, last_name, email, COALESCE(NULLIF(phone, ''), telephone) AS phone
-       FROM users WHERE public_profile_id = $1 AND status = 'active' LIMIT 1`,
-      [publicProfileId],
-    )
-    const profile = profileResult.rows[0]
-    if (profile) {
-      prefill = {
-        name: [profile.first_name, profile.last_name].filter(Boolean).join(" "),
-        email: profile.email || "",
-        phone: profile.phone || "",
-      }
-    }
-  }
-
   return {
     code,
     title: event.title,
@@ -184,7 +166,6 @@ const loadPublicEvent = async (
     startTime: event.start_time,
     endTime: event.end_time,
     ministryName: event.ministry_name,
-    prefill,
     responsibilities: responsibilityResult.rows
       .map((responsibility) => ({
         id: responsibility.id,
@@ -463,8 +444,7 @@ export const handleVolunteerSignup = async (request: Request) => {
     if (request.method === "GET") {
       const url = new URL(request.url)
       const code = normalizeCode(url.searchParams.get("code"))
-      const profile = cleanText(url.searchParams.get("profile"), 100)
-      const event = await loadPublicEvent(client, code, profile)
+      const event = await loadPublicEvent(client, code)
       return event
         ? json(event)
         : json({ message: "This volunteer signup is closed or unavailable" }, 404)

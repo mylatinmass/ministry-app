@@ -39,16 +39,11 @@ const VolunteerSignupApp = ({ code }) => {
       try {
         const url = new URL(getFunctionEndpoint("volunteer-signup"), window.location.origin)
         url.searchParams.set("code", code)
-        const profile = new URLSearchParams(window.location.search).get("profile")
-        if (profile) url.searchParams.set("profile", profile)
         const response = await fetch(url)
         const result = await response.json()
         if (!response.ok) throw new Error(result.message || "Volunteer signup unavailable")
         if (!active) return
         setEvent(result)
-        if (result.prefill) {
-          setForm((current) => ({ ...current, ...result.prefill }))
-        }
         setStatus("ready")
       } catch (error) {
         if (!active) return

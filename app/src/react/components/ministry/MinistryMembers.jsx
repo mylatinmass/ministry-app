@@ -574,9 +574,6 @@ const MinistryMembers = ({ data, activeAction }) => {
                     <p className="font-semibold text-gray-900">
                       {member.firstName} {member.lastName}
                     </p>
-                    <p className="truncate text-sm text-gray-500">
-                      {member.email} · {member.username || "Account pending"}
-                    </p>
                   </div>
                   <span className="inline-flex items-center gap-2 rounded-full bg-[#f4ede6] px-3 py-2 text-sm font-semibold text-[#896542]">
                     {member.highestLevelName && <LevelBadge iconKey={member.highestLevelIconKey} label={member.highestLevelRank || ""} className="bg-white" />}
@@ -599,7 +596,6 @@ const MinistryMembers = ({ data, activeAction }) => {
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wide text-[#896542]">Member details</p>
                       <h4 className="mt-1 century-font text-2xl text-gray-900">{member.firstName} {member.lastName}</h4>
-                      <p className="mt-1 text-sm text-gray-500">{member.email}</p>
                     </div>
                     <button type="button" onClick={() => setSelectedMemberId("")} className="text-sm font-semibold text-[#6f4f34] hover:underline">Close</button>
                   </div>
@@ -640,7 +636,6 @@ const MinistryMembers = ({ data, activeAction }) => {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h4 className="font-semibold text-gray-900">{member.firstName} {member.lastName}</h4>
-                      <p className="mt-1 text-sm text-gray-500">{member.email}</p>
                       <p className="mt-1 text-xs font-semibold text-[#896542]">
                         {member.highestLevelName || "No ministry level assigned"}
                       </p>
@@ -680,9 +675,6 @@ const MinistryMembers = ({ data, activeAction }) => {
                   {memberData.accessRequests?.length ? memberData.accessRequests.map((request) => (
                     <article key={request.id} className="rounded-xl border border-[#e6ddd4] bg-[#faf8f5] p-4">
                       <p className="font-semibold text-gray-900">{request.firstName} {request.lastName}</p>
-                      <p className="mt-1 text-xs text-gray-600">{request.email}</p>
-                      {request.phone && <p className="mt-1 text-xs text-gray-500">{request.phone}</p>}
-                      {request.message && <p className="mt-2 text-sm leading-relaxed text-gray-600">{request.message}</p>}
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button type="button" onClick={() => updateMembership({ action: "approve_access_request", requestId: request.id })} className="rounded-lg bg-[#896542] px-3 py-2 text-xs font-semibold text-white">Approve for this ministry</button>
                         <button type="button" onClick={() => updateMembership({ action: "decline_access_request", requestId: request.id })} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-600">Decline</button>

@@ -82,8 +82,6 @@ const MinistryGlobalMembers = () => {
       [
         member.firstName,
         member.lastName,
-        member.email,
-        member.username,
         globalRoleLabel(member.globalRole),
         ...member.memberships.map((membership) => membership.ministryName),
       ]
@@ -118,7 +116,7 @@ const MinistryGlobalMembers = () => {
     }
   }
 
-  const sendInvitationRequest = async (email, ministryIds) => {
+  const sendInvitationRequest = async ({ email, userId, ministryIds }) => {
     setMessage("")
     setErrorMessage("")
     setIsSaving(true)
@@ -128,6 +126,7 @@ const MinistryGlobalMembers = () => {
         headers: authHeaders(true),
         body: JSON.stringify({
           email,
+          userId,
           ministryIds,
         }),
       })
@@ -148,7 +147,10 @@ const MinistryGlobalMembers = () => {
 
   const sendInvitation = async (event) => {
     event.preventDefault()
-    const sent = await sendInvitationRequest(inviteEmail, inviteMinistryIds)
+    const sent = await sendInvitationRequest({
+      email: inviteEmail,
+      ministryIds: inviteMinistryIds,
+    })
     if (sent) {
       setInviteEmail("")
       setInviteMinistryIds([])
@@ -157,8 +159,11 @@ const MinistryGlobalMembers = () => {
   }
 
   const inviteExistingMember = async () => {
-    if (!selectedMember?.email || !addMinistryId) return
-    const sent = await sendInvitationRequest(selectedMember.email, [addMinistryId])
+    if (!selectedMember?.id || !addMinistryId) return
+    const sent = await sendInvitationRequest({
+      userId: selectedMember.id,
+      ministryIds: [addMinistryId],
+    })
     if (sent) setAddMinistryId("")
   }
 
@@ -218,12 +223,6 @@ const MinistryGlobalMembers = () => {
               <h2 className="century-font text-3xl text-gray-950">
                 {selectedMember.firstName} {selectedMember.lastName}
               </h2>
-              <p className="mt-1 text-sm text-gray-500">
-                {selectedMember.email || "No email"} · {selectedMember.username || "Account setup pending"}
-              </p>
-              {selectedMember.phone && (
-                <p className="mt-1 text-sm text-gray-500">{selectedMember.phone}</p>
-              )}
             </div>
             <span className="self-start rounded-full bg-[#f4ede6] px-3 py-1 text-xs font-semibold text-[#896542]">
               {globalRoleLabel(selectedMember.globalRole)}
@@ -411,7 +410,7 @@ const MinistryGlobalMembers = () => {
               </select>
               <button
                 type="button"
-                disabled={isSaving || !addMinistryId || !selectedMember.email}
+                disabled={isSaving || !addMinistryId}
                 onClick={inviteExistingMember}
                 className="inline-flex items-center justify-center gap-2 rounded-lg border border-[#d8c7b8] px-3 py-2 text-sm font-semibold text-[#6f4f34] disabled:opacity-50"
               >
@@ -419,11 +418,6 @@ const MinistryGlobalMembers = () => {
                 Send invitation
               </button>
             </div>
-          )}
-          {!selectedMember.email && availableMinistries.length > 0 && (
-            <p className="mt-3 text-sm text-gray-500">
-              This managed profile must use its guardian’s ministry-request process.
-            </p>
           )}
         </section>
       </div>
@@ -504,7 +498,7 @@ const MinistryGlobalMembers = () => {
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search name, email, username, ministry, or access"
+            placeholder="Search name, ministry, or access"
             className="h-12 w-full rounded-xl border border-gray-200 pl-10 pr-3 text-sm outline-none focus:border-[#896542]"
           />
         </label>
@@ -551,7 +545,6 @@ const MinistryGlobalMembers = () => {
                 <span className="block font-semibold text-gray-900">
                   {member.firstName} {member.lastName}
                 </span>
-                <span className="block text-sm text-gray-500">{member.email || member.username}</span>
               </span>
               <span className="text-sm font-semibold text-[#6f4f34]">
                 {globalRoleLabel(member.globalRole)}

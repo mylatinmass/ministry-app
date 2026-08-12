@@ -167,8 +167,6 @@ const listMembers = async (client, user, ministryId) => {
           u.id AS user_id,
           u.first_name,
           u.last_name,
-          u.email,
-          u.username,
           mm.level,
           mm.status,
           mm.can_serve,
@@ -194,7 +192,6 @@ const listMembers = async (client, user, ministryId) => {
       `
         SELECT
           invitation.id,
-          invitation.email,
           invitation.status,
           invitation.expires_at,
           invitation.created_at,
@@ -243,7 +240,7 @@ const listMembers = async (client, user, ministryId) => {
     isGlobalManager(user)
       ? client.query(
           `
-            SELECT id, first_name, last_name, email, phone, message, created_at
+            SELECT id, first_name, last_name, created_at
             FROM ministry_access_requests
             WHERE status = 'pending'
             ORDER BY created_at
@@ -261,8 +258,6 @@ const listMembers = async (client, user, ministryId) => {
       userId: member.user_id,
       firstName: member.first_name,
       lastName: member.last_name,
-      email: member.email,
-      username: member.username,
       level: member.level,
       status: member.status,
       canServe: member.can_serve,
@@ -282,7 +277,6 @@ const listMembers = async (client, user, ministryId) => {
     })),
     invitations: invitationsResult.rows.map((invitation) => ({
       id: invitation.id,
-      email: invitation.email,
       status: invitation.status,
       expiresAt: invitation.expires_at,
       createdAt: invitation.created_at,
@@ -303,9 +297,6 @@ const listMembers = async (client, user, ministryId) => {
       id: request.id,
       firstName: request.first_name,
       lastName: request.last_name,
-      email: request.email,
-      phone: request.phone || "",
-      message: request.message || "",
       requestedAt: request.created_at,
     })),
   })
@@ -319,7 +310,8 @@ const createInvitation = async (
   managedMinistries,
   body
 ) => {
-  const email = normalizeEmail(body.email)
+  const requestedUserId = body.userId?.toString().trim() || ""
+  let email = normalizeEmail(body.email)
   const requestedIds = Array.from(
     new Set(
       (Array.isArray(body.ministryIds) ? body.ministryIds : [])
@@ -328,7 +320,7 @@ const createInvitation = async (
     )
   )
 
-  if (!isValidEmail(email)) {
+  if (!requestedUserId && !isValidEmail(email)) {
     return jsonResponse(400, { message: "Enter a valid email address" })
   }
   if (!requestedIds.length) {
@@ -343,20 +335,55 @@ const createInvitation = async (
   const selectedMinistries = managedMinistries.filter((ministry) =>
     requestedIds.includes(ministry.id)
   )
-  const userResult = await client.query(
-    `
-      SELECT id, username, password_hash, status
-      FROM users
-      WHERE lower(btrim(email)) = $1
-      ORDER BY
-        CASE WHEN status = 'active' THEN 0 ELSE 1 END,
-        CASE WHEN username IS NOT NULL AND password_hash IS NOT NULL THEN 0 ELSE 1 END,
-        created_at
-      LIMIT 1
-    `,
-    [email]
-  )
+  const userResult = requestedUserId
+    ? await client.query(
+        `
+          SELECT target.id, target.email, target.username, target.password_hash, target.status
+          FROM users target
+          WHERE target.id = $1
+            AND target.status = 'active'
+            AND EXISTS (
+              SELECT 1
+              FROM ministry_members membership
+              WHERE membership.user_id = target.id
+                AND membership.status = 'active'
+            )
+            AND (
+              $2::BOOL
+              OR NOT EXISTS (
+                SELECT 1
+                FROM managed_profiles managed_profile
+                WHERE managed_profile.child_user_id = target.id
+                  AND managed_profile.status IN ('active', 'separation_pending')
+              )
+            )
+          LIMIT 1
+        `,
+        [requestedUserId, isGlobalManager(user)]
+      )
+    : await client.query(
+        `
+          SELECT id, email, username, password_hash, status
+          FROM users
+          WHERE lower(btrim(email)) = $1
+          ORDER BY
+            CASE WHEN status = 'active' THEN 0 ELSE 1 END,
+            CASE WHEN username IS NOT NULL AND password_hash IS NOT NULL THEN 0 ELSE 1 END,
+            created_at
+          LIMIT 1
+        `,
+        [email]
+      )
   const existingUser = userResult.rows[0] || null
+  if (requestedUserId && !existingUser) {
+    return jsonResponse(404, { message: "Active Ministry member not found" })
+  }
+  if (requestedUserId) email = normalizeEmail(existingUser.email)
+  if (!isValidEmail(email)) {
+    return jsonResponse(409, {
+      message: "This managed profile must use its guardian's ministry-request process",
+    })
+  }
   if (existingUser?.status === "inactive") {
     return jsonResponse(409, {
       message: "This account is inactive and cannot be invited",
@@ -454,7 +481,6 @@ const createInvitation = async (
         ministryId: ministry.id,
         beforeData: null,
         afterData: {
-          email,
           invitedUserId: existingUser?.id || null,
           status: "pending",
           expiresAt,
@@ -578,7 +604,6 @@ const manageInvitation = async (
         entityId: invitationId,
         ministryId: ministries[0].id,
         beforeData: {
-          email: invitation.email,
           status: invitation.status,
           expiresAt: invitation.expires_at,
         },
@@ -620,7 +645,6 @@ const manageInvitation = async (
       entityId: invitationId,
       ministryId: ministries[0].id,
       beforeData: {
-        email: invitation.email,
         status: invitation.status,
         expiresAt: invitation.expires_at,
       },
@@ -629,7 +653,7 @@ const manageInvitation = async (
     await client.query("COMMIT")
     return jsonResponse(200, {
       success: true,
-      message: `Invitation resent to ${invitation.email}`,
+      message: "Invitation resent",
     })
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {})
@@ -1259,6 +1283,7 @@ const updateMembership = async (
         client,
         event,
         user,
+        actor,
         managedMinistries,
         {
           email: accessRequest.email,
@@ -1300,7 +1325,10 @@ const updateMembership = async (
       entityType: "ministry_access_request",
       entityId: requestId,
       ministryId,
-      beforeData: accessRequest,
+      beforeData: {
+        status: accessRequest.status,
+        createdAt: accessRequest.created_at,
+      },
       afterData: {
         status: nextStatus,
         assignedMinistryId: nextStatus === "approved" ? ministryId : null,

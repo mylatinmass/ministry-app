@@ -93,7 +93,6 @@ const VolunteerAccountApp = () => {
             <form onSubmit={submit} className="mt-8 space-y-5">
               <div className="rounded-xl border border-[#e6ddd4] bg-[#faf8f5] p-4 text-sm">
                 <p><strong>{invitation.firstName} {invitation.lastName}</strong></p>
-                <p className="mt-1 text-gray-600">{invitation.email}</p>
                 <p className="mt-3 text-gray-600">{invitation.responsibilityName} · {invitation.eventTitle}</p>
               </div>
               <p className="text-sm leading-relaxed text-gray-600">We already collected your profile information when you volunteered. Add a password to finish setting up your account.</p>

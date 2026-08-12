@@ -25,7 +25,7 @@ const handler = async (event) => {
     const load = (forUpdate = false) => client.query(
       `SELECT invitation.id, invitation.user_id, invitation.status,
               invitation.expires_at, invitation.consumed_at, invitation.revoked_at,
-              users.first_name, users.last_name, users.email, users.username,
+              users.first_name, users.last_name, users.username,
               users.password_hash, users.global_role, users.status AS user_status,
               event.title AS event_title, responsibility.name AS responsibility_name
        FROM volunteer_account_invitations invitation
@@ -43,7 +43,6 @@ const handler = async (event) => {
         invitation: {
           firstName: row.first_name || "",
           lastName: row.last_name || "",
-          email: row.email,
           eventTitle: row.event_title,
           responsibilityName: row.responsibility_name,
           status: row.status,

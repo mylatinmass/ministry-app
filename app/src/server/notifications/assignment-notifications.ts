@@ -386,7 +386,7 @@ export const sendAssignmentNotification = async (
       SELECT assignment.id, assignment.user_id, assignment.updated_at,
         event.id AS event_id,
         event.title AS event_title, event.start_time,
-        event.start_time - COALESCE(responsibility.relative_start_minutes, 0)
+        event.start_time + COALESCE(responsibility.relative_start_minutes, 0)
           * INTERVAL '1 minute' AS duty_start_time,
         event.location,
         responsibility.name AS responsibility_name,
@@ -437,7 +437,7 @@ export const sendAssignmentChangeRequestedNotification = async (
     `
       SELECT assignment.user_id, assignment.updated_at, event.id AS event_id,
         event.title AS event_title, event.start_time,
-        event.start_time - COALESCE(responsibility.relative_start_minutes, 0)
+        event.start_time + COALESCE(responsibility.relative_start_minutes, 0)
           * INTERVAL '1 minute' AS duty_start_time,
         responsibility.name AS responsibility_name,
         COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id,
@@ -514,7 +514,7 @@ export const sendEventScheduleNotifications = async (
         event.id AS event_id,
         event.title AS event_title,
         event.start_time,
-        event.start_time - COALESCE(responsibility.relative_start_minutes, 0)
+        event.start_time + COALESCE(responsibility.relative_start_minutes, 0)
           * INTERVAL '1 minute' AS duty_start_time,
         event.location,
         GREATEST(
@@ -666,7 +666,7 @@ export const queueAssignmentReminderAlert = async (reminderId: string) => {
         reminder.recipient_user_id,
         reminder.event_id, reminder.assignment_id, event.title AS event_title,
         event.start_time,
-        event.start_time - COALESCE(responsibility.relative_start_minutes, 0)
+        event.start_time + COALESCE(responsibility.relative_start_minutes, 0)
           * INTERVAL '1 minute' AS duty_start_time,
         event.location, responsibility.name AS responsibility_name,
         COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id,

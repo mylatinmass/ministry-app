@@ -114,13 +114,9 @@ const normalizeEventResponsibility = (body: any) => {
       { status: 400 },
     )
   }
-  if (
-    !Number.isInteger(relativeStartMinutes) ||
-    relativeStartMinutes < 0 ||
-    relativeStartMinutes > 10_080
-  ) {
+  if (![0, -15, -30, -45, -60, -120].includes(relativeStartMinutes)) {
     throw Object.assign(
-      new Error("Duty start time must be 0 to 10,080 minutes before the event"),
+      new Error("Choose a valid responsibility time offset"),
       { status: 400 },
     )
   }

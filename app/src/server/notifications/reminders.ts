@@ -36,7 +36,7 @@ const reconcileReminders = async () => {
         ra.user_id AS subject_user_id,
         COALESCE(mp.guardian_user_id, ra.user_id) AS recipient_user_id,
         e.start_time,
-        e.start_time - COALESCE(responsibility.relative_start_minutes, 0)
+        e.start_time + COALESCE(responsibility.relative_start_minutes, 0)
           * INTERVAL '1 minute' AS duty_start_time,
         e.published_at,
         e.confirmation_deadline_at,
@@ -54,9 +54,9 @@ const reconcileReminders = async () => {
       WHERE ra.user_id IS NOT NULL
         AND ra.status = ANY($1)
         AND e.status = 'published'
-        AND e.start_time - COALESCE(responsibility.relative_start_minutes, 0)
+        AND e.start_time + COALESCE(responsibility.relative_start_minutes, 0)
           * INTERVAL '1 minute' > now() - INTERVAL '4 hours'
-        AND e.start_time - COALESCE(responsibility.relative_start_minutes, 0)
+        AND e.start_time + COALESCE(responsibility.relative_start_minutes, 0)
           * INTERVAL '1 minute' < now() + INTERVAL '31 days'
         AND recipient.status = 'active'
     `,

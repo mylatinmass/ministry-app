@@ -29,7 +29,7 @@ const blankResponsibility = {
   instructions: "",
 }
 
-const formatDutyTime = (eventStart, minutesBefore = 0) =>
+const formatDutyTime = (eventStart, offsetMinutes = 0) =>
   new Intl.DateTimeFormat("en-US", {
     weekday: "short",
     month: "short",
@@ -38,7 +38,7 @@ const formatDutyTime = (eventStart, minutesBefore = 0) =>
     minute: "2-digit",
   }).format(
     new Date(
-      new Date(eventStart).getTime() - Number(minutesBefore || 0) * 60_000,
+      new Date(eventStart).getTime() + Number(offsetMinutes || 0) * 60_000,
     ),
   )
 
@@ -916,11 +916,8 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                   </select>
                 </label>
                 <label className="text-sm font-semibold text-gray-700">
-                  Duty begins (minutes before event)
-                  <input
-                    type="number"
-                    min="0"
-                    max="10080"
+                  Time offset
+                  <select
                     value={responsibilityForm.relativeStartMinutes}
                     onChange={(event) =>
                       updateResponsibilityField(
@@ -929,7 +926,14 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                       )
                     }
                     className="mt-2 h-10 w-full rounded-lg border border-gray-200 px-3 font-normal"
-                  />
+                  >
+                    <option value="0">At event start</option>
+                    <option value="-15">-15m</option>
+                    <option value="-30">-30m</option>
+                    <option value="-45">-45m</option>
+                    <option value="-60">-1h</option>
+                    <option value="-120">-2h</option>
+                  </select>
                 </label>
                 <label className="text-sm font-semibold text-gray-700 sm:col-span-2">
                   Instructions

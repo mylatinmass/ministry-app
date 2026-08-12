@@ -153,13 +153,13 @@ const validateTemplateInput = (input: TemplateInput) => {
   if (
     input.responsibilities?.some(
       (responsibility) =>
-        !Number.isInteger(responsibility.relativeStartMinutes) ||
-        Number(responsibility.relativeStartMinutes) < 0 ||
-        Number(responsibility.relativeStartMinutes) > 10_080,
+        ![0, -15, -30, -45, -60, -120].includes(
+          Number(responsibility.relativeStartMinutes),
+        ),
     )
   ) {
     throw Object.assign(
-      new Error("Responsibility start time must be 0 to 10,080 minutes before the event"),
+      new Error("Choose a valid responsibility time offset"),
       { status: 400 },
     )
   }

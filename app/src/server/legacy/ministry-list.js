@@ -205,7 +205,7 @@ const handler = async (event) => {
         status: assignment.status,
         responsibilityName: assignment.responsibility_name,
         dutyStartTime: new Date(
-          new Date(event.start_time).getTime() -
+          new Date(event.start_time).getTime() +
             Number(assignment.relative_start_minutes || 0) * 60_000
         ).toISOString(),
       }))

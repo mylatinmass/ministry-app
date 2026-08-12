@@ -657,8 +657,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
                                   </option>
                                 ))}
                             </select>
-                            <input
-                              type="number"
+                            <select
                               value={responsibility.relativeStartMinutes}
                               onChange={(event) =>
                                 updateResponsibility(
@@ -667,14 +666,18 @@ const MinistryTemplates = ({ data, activeAction }) => {
                                   Number(event.target.value),
                                 )
                               }
-                              min="0"
-                              max="10080"
-                              placeholder="Minutes before event"
-                              aria-label="Duty begins this many minutes before the event"
+                              aria-label="Responsibility time offset"
                               className="h-10 rounded-lg border border-gray-200 px-3 text-sm"
-                            />
+                            >
+                              <option value="0">At event start</option>
+                              <option value="-15">-15m</option>
+                              <option value="-30">-30m</option>
+                              <option value="-45">-45m</option>
+                              <option value="-60">-1h</option>
+                              <option value="-120">-2h</option>
+                            </select>
                             <span className="text-xs text-gray-500 sm:col-span-2">
-                              Duty begins this many minutes before the event. Use 0 for the event start time.
+                              Time offset from the event start. Negative values mean the responsibility begins earlier.
                             </span>
                             <label className="flex items-center gap-2 text-sm text-gray-600">
                               <input

@@ -5,6 +5,8 @@ import { json } from "../request"
 import {
   sendAssignmentNotification,
   sendEventScheduleNotifications,
+  sendSubstitutionAcceptedNotifications,
+  sendSubstitutionRequestNotifications,
 } from "../notifications/assignment-notifications"
 import {
   getIdentityContext,
@@ -12,6 +14,11 @@ import {
   requireMinistryAccess,
   writeSchedulingAudit,
 } from "./authorization"
+import {
+  acceptAssignmentSubstitute,
+  loadEventSubstitutionState,
+  requestAssignmentSubstitute,
+} from "./substitutions"
 
 const EVENT_STATUSES = new Set([
   "draft",
@@ -896,6 +903,11 @@ const loadEventDetails = async (
         `,
         [eventId, event.start_time, event.end_time, ACTIVE_ASSIGNMENT_STATUSES],
       )
+  const substitutionState = await loadEventSubstitutionState(
+    client,
+    context,
+    eventId,
+  )
   const candidateResult = manageableMinistryIds.length
     ? await client.query(
         `
@@ -1001,6 +1013,11 @@ const loadEventDetails = async (
       : canManageEvent
     const assignments =
       assignmentsByResponsibility.get(assignment.responsibility_id) || []
+    const substitutionRequest = substitutionState.requests.find(
+      (request) => request.assignment_id === assignment.id,
+    )
+    const canSeeSubstitutionRequest =
+      assignment.user_id === context.user.id || canManageAssignment
     assignments.push({
       id: assignment.id,
       userId: assignment.user_id,
@@ -1019,6 +1036,28 @@ const loadEventDetails = async (
       conflictCount: canManageAssignment
         ? Number(assignment.conflict_count)
         : 0,
+      canRequestSubstitute:
+        assignment.user_id === context.user.id &&
+        ["pending", "assigned", "confirmed"].includes(assignment.status) &&
+        event.status === "published" &&
+        new Date(event.start_time).getTime() > Date.now() &&
+        !substitutionRequest,
+      substitutionRequest: canSeeSubstitutionRequest && substitutionRequest
+        ? {
+            id: substitutionRequest.id,
+            reason: substitutionRequest.reason || "",
+            status: substitutionRequest.status,
+            expiresAt: substitutionRequest.expires_at,
+            minimumLevelRank: Number(
+              substitutionRequest.minimum_level_rank || 0,
+            ),
+            acceptedByUserId:
+              substitutionRequest.accepted_by_user_id || null,
+            replacementAssignmentId:
+              substitutionRequest.replacement_assignment_id || null,
+            createdAt: substitutionRequest.created_at,
+          }
+        : null,
       createdAt: assignment.created_at,
     })
     assignmentsByResponsibility.set(
@@ -1178,6 +1217,20 @@ const loadEventDetails = async (
     isPublicView: publicView,
     assignmentVisibilityRestricted:
       visibleResponsibilities.length < responsibilityResult.rows.length,
+    currentUserId: context.user.id,
+    substitutionOffers: substitutionState.offers.map((offer) => ({
+      requestId: offer.request_id,
+      assignmentId: offer.assignment_id,
+      responsibilityId: offer.responsibility_id,
+      responsibilityName: offer.responsibility_name,
+      reason: offer.reason || "",
+      expiresAt: offer.expires_at,
+      minimumLevelRank: Number(offer.minimum_level_rank || 0),
+      relativeStartMinutes: Number(offer.relative_start_minutes || 0),
+      eventStartTime: offer.start_time,
+      requesterFirstName: offer.first_name,
+      requesterLastName: offer.last_name || "",
+    })),
   }
 }
 
@@ -2376,6 +2429,14 @@ const updateEvent = async (
     }
   }
 
+  if (body.action === "request_substitute") {
+    return requestAssignmentSubstitute(client, context, event, body)
+  }
+
+  if (body.action === "accept_substitute") {
+    return acceptAssignmentSubstitute(client, context, event, body)
+  }
+
   if (body.action === "assign_member") {
     return assignMemberToResponsibility(client, context, event, body)
   }
@@ -3127,6 +3188,31 @@ export const handleEvents = async (request: Request) => {
             console.error("Assignment saved but its notification could not be prepared:", error)
           }
         }
+        if (
+          body.action === "request_substitute" &&
+          result?.substitutionRequestId
+        ) {
+          await sendSubstitutionRequestNotifications(
+            result.substitutionRequestId,
+          ).catch((error) => {
+            console.error(
+              "Substitute requested but notifications could not be prepared:",
+              error,
+            )
+          })
+        } else if (
+          body.action === "accept_substitute" &&
+          result?.substitutionRequestId
+        ) {
+          await sendSubstitutionAcceptedNotifications(
+            result.substitutionRequestId,
+          ).catch((error) => {
+            console.error(
+              "Substitute accepted but notifications could not be prepared:",
+              error,
+            )
+          })
+        }
         try {
           if (body.action === "set_status" && body.status === "published") {
             await sendEventScheduleNotifications(body.eventId, "published")
@@ -3146,7 +3232,9 @@ export const handleEvents = async (request: Request) => {
             )
           } else if (
             body.action !== "assign_member" &&
-            body.action !== "record_service_outcome"
+            body.action !== "record_service_outcome" &&
+            body.action !== "request_substitute" &&
+            body.action !== "accept_substitute"
           ) {
             const changedEventIds =
               typeof result !== "string" && Array.isArray(result?.eventIds)

@@ -30,6 +30,7 @@ const tables = [
   "member_availability",
   "availability_blocks",
   "assignment_change_requests",
+  "assignment_substitution_offers",
   "managed_profiles",
   "managed_profile_membership_requests",
   "managed_profile_membership_request_recipients",

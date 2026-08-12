@@ -108,6 +108,13 @@ const [
   read("src/react/components/ministry/MinistryPendingInvitations.jsx"),
 ])
 
+const substitutionMigration = await read(
+  "migrations/20260812_04_add_assignment_substitution_offers.sql",
+)
+const substitutionScheduling = await read(
+  "src/server/scheduling/substitutions.ts",
+)
+
 const [
   massScheduleMigration,
   massScheduleSync,
@@ -304,6 +311,15 @@ assert.match(schedulingEvents, /event\.recurrence_rule_changed/)
 assert.match(schedulingEvents, /body\.updateScope === "this_and_future"/)
 assert.match(reminders, /AS duty_start_time/)
 assert.match(reminders, /dutyStart\.getTime\(\) - Number\(candidate\.lead_minutes\)/)
+assert.match(substitutionMigration, /assignment_substitution_offers/)
+assert.match(substitutionMigration, /'replaced'/)
+assert.match(substitutionScheduling, /minimum_level_rank/)
+assert.match(substitutionScheduling, /FOR UPDATE OF request, assignment/)
+assert.match(substitutionScheduling, /conflicting assignment and cannot accept/)
+assert.match(substitutionScheduling, /status = 'accepted'/)
+assert.match(substitutionScheduling, /status = 'expired'/)
+assert.match(eventDetails, /Request substitute/)
+assert.match(eventDetails, /Accept substitution/)
 assert.match(homeWorkspace, /user: currentUser/)
 
 assert.match(authHelper, /activeProfileUserId/)

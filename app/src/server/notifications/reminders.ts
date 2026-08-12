@@ -11,6 +11,7 @@ import {
   queueWeeklyAssignmentReviews,
 } from "./assignment-notifications"
 import { processMinistryMessageDeliveries } from "./messages"
+import { expireAssignmentSubstitutionRequests } from "../scheduling/substitutions"
 
 const ASSIGNMENT_STATUSES = [
   "pending",
@@ -283,6 +284,8 @@ export const handleReminderProcessing = async (request: Request) => {
   }
 
   const klaviyoProfiles = await processKlaviyoProfileSyncs()
+  const expiredSubstitutionRequests =
+    await expireAssignmentSubstitutionRequests()
   const reconciled = await reconcileReminders()
   const reminders = await claimDueReminders()
 
@@ -298,6 +301,7 @@ export const handleReminderProcessing = async (request: Request) => {
 
   return json({
     klaviyoProfiles,
+    expiredSubstitutionRequests,
     reconciledAssignments: reconciled,
     processedReminders: reminders.length,
     weeklyReviews,

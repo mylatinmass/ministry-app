@@ -58,6 +58,8 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
     React.useState(true)
   const [generalVolunteerLimit, setGeneralVolunteerLimit] = React.useState(10)
   const [isSavingSignup, setIsSavingSignup] = React.useState(false)
+  const [substitutionForm, setSubstitutionForm] = React.useState(null)
+  const [savingSubstitutionId, setSavingSubstitutionId] = React.useState("")
   const [isPresented, setIsPresented] = React.useState(false)
   const [message, setMessage] = React.useState("")
   const [errorMessage, setErrorMessage] = React.useState("")
@@ -222,6 +224,80 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
       [field]: value,
       ...(field === "ministryId" ? { requiredLevelId: "" } : {}),
     }))
+
+  const submitSubstitutionRequest = async (submitEvent) => {
+    submitEvent.preventDefault()
+    if (!substitutionForm?.assignmentId) return
+    setSavingSubstitutionId(substitutionForm.assignmentId)
+    setMessage("")
+    setErrorMessage("")
+    try {
+      const response = await fetch(
+        getFunctionEndpoint("scheduling/events"),
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${window.sessionStorage.getItem(
+              MINISTRY_SESSION_KEY,
+            )}`,
+          },
+          body: JSON.stringify({
+            action: "request_substitute",
+            eventId: displayedEvent.id,
+            assignmentId: substitutionForm.assignmentId,
+            reason: substitutionForm.reason,
+          }),
+        },
+      )
+      const result = await response.json()
+      if (!response.ok) {
+        throw new Error(result.message || "Unable to request a substitute")
+      }
+      setMessage(result.message)
+      setSubstitutionForm(null)
+      await loadDetails()
+    } catch (error) {
+      setErrorMessage(error.message)
+    } finally {
+      setSavingSubstitutionId("")
+    }
+  }
+
+  const acceptSubstitution = async (offer) => {
+    setSavingSubstitutionId(offer.requestId)
+    setMessage("")
+    setErrorMessage("")
+    try {
+      const response = await fetch(
+        getFunctionEndpoint("scheduling/events"),
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${window.sessionStorage.getItem(
+              MINISTRY_SESSION_KEY,
+            )}`,
+          },
+          body: JSON.stringify({
+            action: "accept_substitute",
+            eventId: displayedEvent.id,
+            substitutionRequestId: offer.requestId,
+          }),
+        },
+      )
+      const result = await response.json()
+      if (!response.ok) {
+        throw new Error(result.message || "Unable to accept this substitution")
+      }
+      setMessage(result.message)
+      await loadDetails()
+    } catch (error) {
+      setErrorMessage(error.message)
+    } finally {
+      setSavingSubstitutionId("")
+    }
+  }
 
   const saveResponsibility = async (submitEvent) => {
     submitEvent.preventDefault()
@@ -688,6 +764,47 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
           </div>
         </div>
 
+        {details?.substitutionOffers?.length > 0 && (
+          <section className="mt-10 rounded-2xl border border-orange-200 bg-orange-50 p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-orange-700">
+              Substitute requested
+            </p>
+            <div className="mt-4 space-y-3">
+              {details.substitutionOffers.map((offer) => (
+                <article
+                  key={offer.requestId}
+                  className="rounded-xl border border-orange-200 bg-white p-4"
+                >
+                  <p className="font-semibold text-gray-900">
+                    {offer.responsibilityName}
+                  </p>
+                  <p className="mt-1 text-sm text-gray-600">
+                    {offer.requesterFirstName} {offer.requesterLastName} needs a substitute · {formatDutyTime(
+                      offer.eventStartTime,
+                      offer.relativeStartMinutes,
+                    )}
+                  </p>
+                  {offer.reason && (
+                    <p className="mt-2 text-sm text-gray-600">
+                      {offer.reason}
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    disabled={savingSubstitutionId === offer.requestId}
+                    onClick={() => acceptSubstitution(offer)}
+                    className="mt-3 rounded-lg bg-[#896542] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    {savingSubstitutionId === offer.requestId
+                      ? "Checking schedule…"
+                      : "Accept substitution"}
+                  </button>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
         <section className="mt-10 border-t border-gray-100 pt-8">
           {details?.canManageEvent && (
             <div className="mb-7 rounded-2xl border border-[#d8c7b8] bg-[#fbf8f4] p-5">
@@ -1089,6 +1206,73 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                                         <span className="rounded-full bg-red-100 px-2 py-1 text-red-700">
                                           Schedule conflict
                                         </span>
+                                      )}
+                                      {assignment.canRequestSubstitute &&
+                                        substitutionForm?.assignmentId !== assignment.id && (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setSubstitutionForm({
+                                                assignmentId: assignment.id,
+                                                reason: "",
+                                              })
+                                            }
+                                            className="ml-auto rounded-lg border border-orange-200 bg-white px-3 py-2 font-semibold text-orange-700"
+                                          >
+                                            Request substitute
+                                          </button>
+                                        )}
+                                      {assignment.substitutionRequest?.status === "pending" && (
+                                        <span className="rounded-full bg-orange-100 px-2 py-1 font-semibold text-orange-700">
+                                          Substitute requested
+                                        </span>
+                                      )}
+                                      {assignment.substitutionRequest?.reason && (
+                                        <span className="w-full text-gray-600">
+                                          Comment: {assignment.substitutionRequest.reason}
+                                        </span>
+                                      )}
+                                      {substitutionForm?.assignmentId === assignment.id && (
+                                        <form
+                                          onSubmit={submitSubstitutionRequest}
+                                          className="w-full rounded-xl border border-orange-200 bg-white p-3"
+                                        >
+                                          <label className="block font-semibold text-gray-700">
+                                            Comment
+                                            <textarea
+                                              value={substitutionForm.reason}
+                                              onChange={(event) =>
+                                                setSubstitutionForm((current) => ({
+                                                  ...current,
+                                                  reason: event.target.value,
+                                                }))
+                                              }
+                                              maxLength={1000}
+                                              rows={3}
+                                              placeholder="Tell eligible servers and the ministry admin what they need to know."
+                                              className="mt-2 w-full rounded-lg border border-gray-200 px-3 py-2 font-normal text-gray-700"
+                                            />
+                                          </label>
+                                          <div className="mt-3 flex gap-2">
+                                            <button
+                                              type="submit"
+                                              disabled={savingSubstitutionId === assignment.id}
+                                              className="rounded-lg bg-[#896542] px-3 py-2 font-semibold text-white disabled:opacity-50"
+                                            >
+                                              {savingSubstitutionId === assignment.id
+                                                ? "Sending…"
+                                                : "Send request"}
+                                            </button>
+                                            <button
+                                              type="button"
+                                              disabled={savingSubstitutionId === assignment.id}
+                                              onClick={() => setSubstitutionForm(null)}
+                                              className="rounded-lg border border-gray-200 px-3 py-2 font-semibold text-gray-600"
+                                            >
+                                              Cancel
+                                            </button>
+                                          </div>
+                                        </form>
                                       )}
                                       {assignment.serviceOutcome && (
                                         <span className="rounded-full bg-white px-2 py-1">

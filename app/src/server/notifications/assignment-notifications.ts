@@ -26,7 +26,7 @@ const formatAssignmentDate = (value: string | Date) =>
     timeZone: "America/New_York",
   }).format(new Date(value))
 
-const enqueueAlert = async ({
+export const enqueueAlert = async ({
   subjectUserId,
   recipientUserId,
   kind,
@@ -70,6 +70,215 @@ const enqueueAlert = async ({
       acknowledgmentDeadline,
     ],
   )
+}
+
+export const sendSubstitutionRequestNotifications = async (
+  substitutionRequestId: string,
+) => {
+  const requestResult = await getPool().query(
+    `
+      SELECT request.id, request.reason, request.subject_user_id,
+        request.event_id, request.assignment_id, request.ministry_id,
+        event.title AS event_title,
+        event.start_time + COALESCE(responsibility.relative_start_minutes, 0)
+          * INTERVAL '1 minute' AS duty_start_time,
+        responsibility.name AS responsibility_name,
+        ministry.slug AS ministry_slug
+      FROM assignment_change_requests request
+      JOIN events event ON event.id = request.event_id
+      JOIN event_responsibilities responsibility
+        ON responsibility.id = request.responsibility_id
+      JOIN ministries ministry ON ministry.id = request.ministry_id
+      WHERE request.id = $1
+        AND request.request_type = 'substitute'
+        AND request.status = 'pending'
+      LIMIT 1
+    `,
+    [substitutionRequestId],
+  )
+  const request = requestResult.rows[0]
+  if (!request) return { offered: 0, leaders: 0 }
+  const offers = await getPool().query(
+    `
+      SELECT offer.id, offer.recipient_user_id AS subject_user_id,
+        COALESCE(guardian.guardian_user_id, offer.recipient_user_id)
+          AS recipient_user_id
+      FROM assignment_substitution_offers offer
+      LEFT JOIN managed_profiles guardian
+        ON guardian.child_user_id = offer.recipient_user_id
+       AND guardian.status IN ('active', 'separation_pending')
+      WHERE offer.change_request_id = $1
+        AND offer.status = 'offered'
+    `,
+    [request.id],
+  )
+  const leaders = await getPool().query(
+    `
+      SELECT DISTINCT leader.id
+      FROM users leader
+      WHERE leader.status = 'active'
+        AND (
+          leader.global_role IN ('owner', 'super_admin')
+          OR EXISTS (
+            SELECT 1
+            FROM ministry_members membership
+            WHERE membership.user_id = leader.id
+              AND membership.ministry_id = $1
+              AND membership.status = 'active'
+              AND membership.level IN ('owner', 'admin')
+          )
+        )
+    `,
+    [request.ministry_id],
+  )
+  const when = formatAssignmentDate(request.duty_start_time)
+  for (const offer of offers.rows) {
+    await enqueueAlert({
+      subjectUserId: offer.subject_user_id,
+      recipientUserId: offer.recipient_user_id,
+      kind: "substitution_available",
+      title: `Substitute needed: ${request.event_title}`,
+      message: `${request.responsibility_name} · ${when}${request.reason ? ` · ${request.reason}` : ""}`,
+      eventId: request.event_id,
+      ministryId: request.ministry_id,
+      dedupeKey: `substitution-offer:${request.id}:${offer.subject_user_id}`,
+      metadata: {
+        notificationCategory: "schedule_changes",
+        notificationUrl: `/${request.ministry_slug}?event=${request.event_id}`,
+        privacySafeMessage: "An eligible ministry assignment needs a substitute.",
+        substitutionRequestId: request.id,
+      },
+      immediate: true,
+    })
+  }
+  if (offers.rowCount) {
+    await getPool().query(
+      `UPDATE assignment_substitution_offers SET notified_at = now(), updated_at = now() WHERE change_request_id = $1 AND status = 'offered'`,
+      [request.id],
+    )
+  }
+  const offeredUserIds = new Set(
+    offers.rows.map((offer) => offer.subject_user_id),
+  )
+  for (const leader of leaders.rows) {
+    if (offeredUserIds.has(leader.id)) continue
+    await enqueueAlert({
+      subjectUserId: leader.id,
+      recipientUserId: leader.id,
+      kind: "substitution_requested",
+      title: `Substitute requested: ${request.event_title}`,
+      message: `${request.responsibility_name} · ${when}${request.reason ? ` · ${request.reason}` : ""}`,
+      assignmentId: request.assignment_id,
+      eventId: request.event_id,
+      ministryId: request.ministry_id,
+      dedupeKey: `substitution-leader:${request.id}:${leader.id}`,
+      metadata: {
+        notificationCategory: "schedule_changes",
+        notificationUrl: `/${request.ministry_slug}?event=${request.event_id}`,
+        privacySafeMessage: "A ministry assignment needs a substitute.",
+        substitutionRequestId: request.id,
+      },
+      immediate: true,
+    })
+  }
+  return { offered: offers.rowCount || 0, leaders: leaders.rowCount || 0 }
+}
+
+export const sendSubstitutionAcceptedNotifications = async (
+  substitutionRequestId: string,
+) => {
+  const result = await getPool().query(
+    `
+      SELECT request.id, request.subject_user_id,
+        request.accepted_by_user_id, request.event_id, request.ministry_id,
+        request.assignment_id, request.replacement_assignment_id,
+        event.title AS event_title,
+        event.start_time + COALESCE(responsibility.relative_start_minutes, 0)
+          * INTERVAL '1 minute' AS duty_start_time,
+        responsibility.name AS responsibility_name,
+        ministry.slug AS ministry_slug,
+        COALESCE(original_guardian.guardian_user_id, request.subject_user_id)
+          AS original_recipient_user_id,
+        COALESCE(replacement_guardian.guardian_user_id, request.accepted_by_user_id)
+          AS replacement_recipient_user_id
+      FROM assignment_change_requests request
+      JOIN events event ON event.id = request.event_id
+      JOIN event_responsibilities responsibility
+        ON responsibility.id = request.responsibility_id
+      JOIN ministries ministry ON ministry.id = request.ministry_id
+      LEFT JOIN managed_profiles original_guardian
+        ON original_guardian.child_user_id = request.subject_user_id
+       AND original_guardian.status IN ('active', 'separation_pending')
+      LEFT JOIN managed_profiles replacement_guardian
+        ON replacement_guardian.child_user_id = request.accepted_by_user_id
+       AND replacement_guardian.status IN ('active', 'separation_pending')
+      WHERE request.id = $1
+        AND request.status = 'accepted'
+      LIMIT 1
+    `,
+    [substitutionRequestId],
+  )
+  const request = result.rows[0]
+  if (!request) return { queued: 0 }
+  const leaders = await getPool().query(
+    `
+      SELECT DISTINCT leader.id
+      FROM users leader
+      WHERE leader.status = 'active'
+        AND (
+          leader.global_role IN ('owner', 'super_admin')
+          OR EXISTS (
+            SELECT 1 FROM ministry_members membership
+            WHERE membership.user_id = leader.id
+              AND membership.ministry_id = $1
+              AND membership.status = 'active'
+              AND membership.level IN ('owner', 'admin')
+          )
+        )
+    `,
+    [request.ministry_id],
+  )
+  const when = formatAssignmentDate(request.duty_start_time)
+  const recipients = new Map<string, any>([
+    [request.subject_user_id, {
+      subjectUserId: request.subject_user_id,
+      recipientUserId: request.original_recipient_user_id,
+      assignmentId: request.assignment_id,
+    }],
+    [request.accepted_by_user_id, {
+      subjectUserId: request.accepted_by_user_id,
+      recipientUserId: request.replacement_recipient_user_id,
+      assignmentId: request.replacement_assignment_id,
+    }],
+  ])
+  for (const leader of leaders.rows) {
+    if (!recipients.has(leader.id)) {
+      recipients.set(leader.id, {
+        subjectUserId: leader.id,
+        recipientUserId: leader.id,
+        assignmentId: request.replacement_assignment_id,
+      })
+    }
+  }
+  for (const recipient of recipients.values()) {
+    await enqueueAlert({
+      ...recipient,
+      kind: "substitution_accepted",
+      title: `Substitute assigned: ${request.event_title}`,
+      message: `${request.responsibility_name} · ${when} · substitution filled`,
+      eventId: request.event_id,
+      ministryId: request.ministry_id,
+      dedupeKey: `substitution-accepted:${request.id}:${recipient.subjectUserId}`,
+      metadata: {
+        notificationCategory: "schedule_changes",
+        notificationUrl: `/${request.ministry_slug}?event=${request.event_id}`,
+        privacySafeMessage: "A ministry substitution has been filled.",
+        substitutionRequestId: request.id,
+      },
+      immediate: true,
+    })
+  }
+  return { queued: recipients.size }
 }
 
 const newYorkWeek = () => {

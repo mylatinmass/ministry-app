@@ -38,6 +38,8 @@ const enqueueAlert = async ({
   dedupeKey,
   metadata = {},
   immediate = false,
+  acknowledgmentRequired = false,
+  acknowledgmentDeadline = null,
 }: Record<string, any>) => {
   const digestAfter = immediate
     ? new Date()
@@ -47,9 +49,9 @@ const enqueueAlert = async ({
       INSERT INTO ministry_alerts (
         subject_user_id, recipient_user_id, kind, title, message,
         assignment_id, event_id, ministry_id, dedupe_key, metadata,
-        digest_after
+        digest_after, acknowledgment_required, acknowledgment_deadline_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::JSONB, $11)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::JSONB, $11, $12, $13)
       ON CONFLICT (dedupe_key) DO NOTHING
     `,
     [
@@ -64,8 +66,315 @@ const enqueueAlert = async ({
       dedupeKey,
       JSON.stringify(metadata),
       digestAfter,
+      acknowledgmentRequired,
+      acknowledgmentDeadline,
     ],
   )
+}
+
+const newYorkWeek = () => {
+  const values = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      weekday: "short",
+      hour: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date())
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  )
+  const weekdayIndex = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(
+    values.weekday,
+  )
+  const localDate = new Date(
+    Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day)),
+  )
+  const daysSinceMonday = (weekdayIndex + 6) % 7
+  localDate.setUTCDate(localDate.getUTCDate() - daysSinceMonday)
+  return {
+    hour: Number(values.hour),
+    weekdayIndex,
+    weekStart: localDate.toISOString().slice(0, 10),
+  }
+}
+
+export const queueWeeklyAssignmentReviews = async () => {
+  const week = newYorkWeek()
+  if (week.weekdayIndex === 1 && week.hour < 9) return 0
+
+  const result = await getPool().query(
+    `
+      SELECT assignment.id AS assignment_id, assignment.status,
+        assignment.user_id AS subject_user_id,
+        COALESCE(guardian.guardian_user_id, assignment.user_id) AS recipient_user_id,
+        subject.first_name, subject.last_name,
+        event.id AS event_id, event.title AS event_title, event.start_time,
+        responsibility.name AS responsibility_name,
+        COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id,
+        ministry.name AS ministry_name,
+        GREATEST(assignment.created_at, assignment.updated_at,
+          event.updated_at, responsibility.updated_at) AS changed_at
+      FROM responsibility_assignments assignment
+      JOIN users subject ON subject.id = assignment.user_id
+      JOIN events event ON event.id = assignment.event_id
+      JOIN event_responsibilities responsibility
+        ON responsibility.id = assignment.responsibility_id
+      JOIN ministries ministry
+        ON ministry.id = COALESCE(responsibility.ministry_id, event.ministry_id)
+      LEFT JOIN managed_profiles guardian
+        ON guardian.child_user_id = assignment.user_id
+       AND guardian.status IN ('active', 'separation_pending')
+      WHERE assignment.user_id IS NOT NULL
+        AND assignment.status IN ('pending', 'assigned', 'confirmed', 'change_requested')
+        AND event.status = 'published'
+        AND event.start_time > now()
+        AND GREATEST(assignment.created_at, assignment.updated_at,
+          event.updated_at, responsibility.updated_at) >= now() - INTERVAL '7 days'
+      ORDER BY recipient_user_id, event.start_time, responsibility.name
+    `,
+  )
+  const byRecipient = new Map<string, any[]>()
+  for (const assignment of result.rows) {
+    const assignments = byRecipient.get(assignment.recipient_user_id) || []
+    assignments.push(assignment)
+    byRecipient.set(assignment.recipient_user_id, assignments)
+  }
+  let queued = 0
+  for (const [recipientUserId, assignments] of byRecipient) {
+    const reviewAssignments = assignments.slice(0, 50)
+    const lines = reviewAssignments.map((assignment) => {
+      const profileName = [assignment.first_name, assignment.last_name]
+        .filter(Boolean)
+        .join(" ")
+      return `• ${profileName}: ${assignment.responsibility_name} · ${assignment.event_title} · ${formatAssignmentDate(assignment.start_time)} · ${String(assignment.status).replaceAll("_", " ")}`
+    })
+    if (assignments.length > reviewAssignments.length) {
+      lines.push(`• ${assignments.length - reviewAssignments.length} more assignments are available in the app.`)
+    }
+    await enqueueAlert({
+      subjectUserId: recipientUserId,
+      recipientUserId,
+      kind: "assignment_weekly_review",
+      title: "Weekly assignment review",
+      message: `Review ${assignments.length} new or changed ${assignments.length === 1 ? "assignment" : "assignments"}:\n${lines.join("\n")}`,
+      dedupeKey: `assignment-weekly-review:${recipientUserId}:${week.weekStart}`,
+      metadata: {
+        notificationCategory: "reminders",
+        notificationUrl: "/?section=events",
+        privacySafeMessage: "Your weekly ministry assignment review is ready.",
+        weekStart: week.weekStart,
+        assignmentIds: reviewAssignments.map((assignment) => assignment.assignment_id),
+      },
+      immediate: true,
+    })
+    queued += 1
+  }
+  return queued
+}
+
+export const processUrgentStaffingShortages = async () => {
+  const result = await getPool().query(
+    `
+      SELECT event.id AS event_id, event.title AS event_title,
+        event.start_time, event.updated_at AS event_updated_at,
+        responsibility.id AS responsibility_id,
+        responsibility.name AS responsibility_name,
+        COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id,
+        ministry.slug AS ministry_slug,
+        responsibility.quantity_needed,
+        COALESCE(sum(
+          CASE
+            WHEN assignment.status IN ('pending', 'assigned', 'confirmed', 'change_requested')
+              THEN assignment.quantity
+            ELSE 0
+          END
+        ), 0)::INT AS assigned_quantity,
+        COALESCE(max(assignment.updated_at), event.updated_at) AS staffing_updated_at
+      FROM events event
+      JOIN event_responsibilities responsibility
+        ON responsibility.event_id = event.id
+       AND responsibility.status <> 'cancelled'
+       AND responsibility.unlimited_capacity = false
+      JOIN ministries ministry
+        ON ministry.id = COALESCE(responsibility.ministry_id, event.ministry_id)
+      LEFT JOIN responsibility_assignments assignment
+        ON assignment.responsibility_id = responsibility.id
+      WHERE event.status = 'published'
+        AND event.start_time > now()
+        AND event.start_time <= now() + INTERVAL '3 hours'
+      GROUP BY event.id, event.title, event.start_time, event.updated_at,
+        responsibility.id, responsibility.name, responsibility.quantity_needed,
+        responsibility.ministry_id, event.ministry_id, ministry.slug
+      HAVING COALESCE(sum(
+        CASE
+          WHEN assignment.status IN ('pending', 'assigned', 'confirmed', 'change_requested')
+            THEN assignment.quantity
+          ELSE 0
+        END
+      ), 0) < responsibility.quantity_needed
+      ORDER BY event.start_time, ministry_id, responsibility.name
+    `,
+  )
+  const shortages = new Map<string, any[]>()
+  for (const row of result.rows) {
+    const key = `${row.event_id}:${row.ministry_id}`
+    const rows = shortages.get(key) || []
+    rows.push(row)
+    shortages.set(key, rows)
+  }
+  let queued = 0
+  for (const rows of shortages.values()) {
+    const first = rows[0]
+    const minutesUntilEvent = Math.max(
+      0,
+      (new Date(first.start_time).getTime() - Date.now()) / 60_000,
+    )
+    const acknowledgmentMinutes = minutesUntilEvent <= 60 ? 5 : 15
+    const acknowledgmentDeadline = new Date(
+      Date.now() + acknowledgmentMinutes * 60_000,
+    )
+    const shortageFingerprint = crypto
+      .createHash("sha256")
+      .update(
+        rows
+          .map(
+            (row) =>
+              `${row.responsibility_id}:${row.assigned_quantity}:${row.quantity_needed}:${new Date(row.staffing_updated_at).toISOString()}`,
+          )
+          .sort()
+          .join("|"),
+      )
+      .digest("hex")
+    const acknowledgmentGroupKey = `urgent-shortage:${first.event_id}:${first.ministry_id}:${shortageFingerprint}`
+    const leaders = await getPool().query(
+      `
+        SELECT DISTINCT leader.id
+        FROM users leader
+        WHERE leader.status = 'active'
+          AND (
+            leader.global_role IN ('owner', 'super_admin')
+            OR EXISTS (
+              SELECT 1
+              FROM ministry_members membership
+              WHERE membership.user_id = leader.id
+                AND membership.ministry_id = $1
+                AND membership.status = 'active'
+                AND membership.level IN ('owner', 'admin')
+            )
+          )
+      `,
+      [first.ministry_id],
+    )
+    const shortageText = rows
+      .map(
+        (row) =>
+          `${row.responsibility_name} (${Number(row.quantity_needed) - Number(row.assigned_quantity)} open)`,
+      )
+      .join(", ")
+    for (const leader of leaders.rows) {
+      await enqueueAlert({
+        subjectUserId: leader.id,
+        recipientUserId: leader.id,
+        kind: "urgent_staffing_shortage",
+        title: `Urgent staffing shortage: ${first.event_title}`,
+        message: `${shortageText} · ${formatAssignmentDate(first.start_time)} · acknowledge within ${acknowledgmentMinutes} minutes`,
+        eventId: first.event_id,
+        ministryId: first.ministry_id,
+        dedupeKey: `${acknowledgmentGroupKey}:${leader.id}`,
+        metadata: {
+          notificationCategory: "schedule_changes",
+          notificationUrl: `/${first.ministry_slug}?event=${first.event_id}`,
+          privacySafeMessage: "An urgent ministry staffing shortage requires acknowledgment.",
+          acknowledgmentGroupKey,
+        },
+        immediate: true,
+        acknowledgmentRequired: true,
+        acknowledgmentDeadline,
+      })
+      queued += 1
+    }
+  }
+  return queued
+}
+
+export const processUrgentAcknowledgmentEscalations = async () => {
+  const due = await getPool().query(
+    `
+      SELECT alert.metadata->>'acknowledgmentGroupKey' AS group_key,
+        min(alert.event_id::STRING) AS event_id,
+        min(alert.ministry_id::STRING) AS ministry_id,
+        min(event.title) AS event_title,
+        min(event.start_time) AS start_time
+      FROM ministry_alerts alert
+      JOIN events event ON event.id = alert.event_id
+      WHERE alert.acknowledgment_required = true
+        AND alert.acknowledged_at IS NULL
+        AND alert.escalation_sent_at IS NULL
+        AND alert.acknowledgment_deadline_at <= now()
+        AND event.start_time > now()
+        AND alert.metadata->>'acknowledgmentGroupKey' IS NOT NULL
+      GROUP BY alert.metadata->>'acknowledgmentGroupKey'
+      LIMIT 50
+    `,
+  )
+  let escalated = 0
+  for (const group of due.rows) {
+    const claimed = await getPool().query(
+      `
+        UPDATE ministry_alerts
+        SET escalation_sent_at = now(), updated_at = now()
+        WHERE metadata->>'acknowledgmentGroupKey' = $1
+          AND acknowledged_at IS NULL
+          AND escalation_sent_at IS NULL
+        RETURNING id
+      `,
+      [group.group_key],
+    )
+    if (!claimed.rowCount) continue
+    const leaders = await getPool().query(
+      `
+        SELECT DISTINCT leader.id
+        FROM users leader
+        WHERE leader.status = 'active'
+          AND (
+            leader.global_role IN ('owner', 'super_admin')
+            OR EXISTS (
+              SELECT 1
+              FROM ministry_members membership
+              WHERE membership.user_id = leader.id
+                AND membership.ministry_id = $1
+                AND membership.status = 'active'
+                AND membership.level IN ('owner', 'admin')
+            )
+          )
+      `,
+      [group.ministry_id],
+    )
+    for (const leader of leaders.rows) {
+      await enqueueAlert({
+        subjectUserId: leader.id,
+        recipientUserId: leader.id,
+        kind: "urgent_acknowledgment_overdue",
+        title: `Urgent acknowledgment overdue: ${group.event_title}`,
+        message: `Nobody acknowledged the urgent update for ${formatAssignmentDate(group.start_time)}. Open the event now.`,
+        eventId: group.event_id,
+        ministryId: group.ministry_id,
+        dedupeKey: `urgent-escalation:${group.group_key}:${leader.id}`,
+        metadata: {
+          notificationCategory: "schedule_changes",
+          notificationUrl: "/?section=events",
+          privacySafeMessage: "An urgent ministry update has not been acknowledged.",
+        },
+        immediate: true,
+      })
+      escalated += 1
+    }
+  }
+  return escalated
 }
 
 export const sendAssignmentNotification = async (
@@ -256,7 +565,23 @@ export const sendEventScheduleNotifications = async (
     },
   }[changeKind]
 
+  const eventStartsAt = result.rows[0]?.start_time
+    ? new Date(result.rows[0].start_time)
+    : null
+  const minutesUntilEvent = eventStartsAt
+    ? (eventStartsAt.getTime() - Date.now()) / 60_000
+    : Number.POSITIVE_INFINITY
+  const urgent = minutesUntilEvent > 0 && minutesUntilEvent <= 180
+  const acknowledgmentMinutes = minutesUntilEvent <= 60 ? 5 : 15
+  const acknowledgmentDeadline = urgent
+    ? new Date(Date.now() + acknowledgmentMinutes * 60_000)
+    : null
+  const urgentGroups = new Map<string, any>()
+
   for (const assignment of result.rows) {
+    const acknowledgmentGroupKey = urgent
+      ? `urgent-event:${changeKind}:${assignment.event_id}:${assignment.ministry_id}:${new Date(assignment.schedule_updated_at).toISOString()}`
+      : null
     await enqueueAlert({
       subjectUserId: assignment.subject_user_id,
       recipientUserId: assignment.recipient_user_id,
@@ -271,9 +596,58 @@ export const sendEventScheduleNotifications = async (
         notificationCategory: "schedule_changes",
         notificationUrl: `/${assignment.ministry_slug}?event=${assignment.event_id}`,
         privacySafeMessage: copy.safe,
+        ...(acknowledgmentGroupKey ? { acknowledgmentGroupKey } : {}),
       },
       immediate: true,
+      acknowledgmentRequired: urgent,
+      acknowledgmentDeadline,
     })
+    if (urgent && minutesUntilEvent <= 30 && acknowledgmentGroupKey) {
+      urgentGroups.set(acknowledgmentGroupKey, assignment)
+    }
+  }
+
+  for (const [acknowledgmentGroupKey, assignment] of urgentGroups) {
+    const leaders = await getPool().query(
+      `
+        SELECT DISTINCT leader.id
+        FROM users leader
+        WHERE leader.status = 'active'
+          AND (
+            leader.global_role IN ('owner', 'super_admin')
+            OR EXISTS (
+              SELECT 1
+              FROM ministry_members membership
+              WHERE membership.user_id = leader.id
+                AND membership.ministry_id = $1
+                AND membership.status = 'active'
+                AND membership.level IN ('owner', 'admin')
+            )
+          )
+      `,
+      [assignment.ministry_id],
+    )
+    for (const leader of leaders.rows) {
+      await enqueueAlert({
+        subjectUserId: leader.id,
+        recipientUserId: leader.id,
+        kind: `urgent_event_${changeKind}`,
+        title: `Urgent ${copy.title.toLowerCase()}: ${assignment.event_title}`,
+        message: `${formatAssignmentDate(assignment.start_time)} · acknowledgment required within ${acknowledgmentMinutes} minutes`,
+        eventId: assignment.event_id,
+        ministryId: assignment.ministry_id,
+        dedupeKey: `${acknowledgmentGroupKey}:leader:${leader.id}`,
+        metadata: {
+          notificationCategory: "schedule_changes",
+          notificationUrl: `/${assignment.ministry_slug}?event=${assignment.event_id}`,
+          privacySafeMessage: "An urgent ministry schedule update requires acknowledgment.",
+          acknowledgmentGroupKey,
+        },
+        immediate: true,
+        acknowledgmentRequired: true,
+        acknowledgmentDeadline,
+      })
+    }
   }
   return { queued: result.rowCount || 0 }
 }
@@ -286,11 +660,19 @@ export const queueAssignmentReminderAlert = async (reminderId: string) => {
         reminder.event_id, reminder.assignment_id, event.title AS event_title,
         event.start_time, event.location, responsibility.name AS responsibility_name,
         COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id,
-        ministry.slug AS ministry_slug
+        ministry.slug AS ministry_slug,
+        subject.first_name AS subject_first_name,
+        subject.last_name AS subject_last_name,
+        EXISTS (
+          SELECT 1 FROM managed_profiles managed_profile
+          WHERE managed_profile.child_user_id = reminder.subject_user_id
+            AND managed_profile.status IN ('active', 'separation_pending')
+        ) AS is_managed_profile
       FROM ministry_reminders reminder
       JOIN responsibility_assignments assignment ON assignment.id = reminder.assignment_id
       JOIN events event ON event.id = reminder.event_id
       JOIN event_responsibilities responsibility ON responsibility.id = assignment.responsibility_id
+      JOIN users subject ON subject.id = reminder.subject_user_id
       JOIN ministries ministry
         ON ministry.id = COALESCE(responsibility.ministry_id, event.ministry_id)
       WHERE reminder.id = $1
@@ -360,6 +742,70 @@ export const queueAssignmentReminderAlert = async (reminderId: string) => {
     },
     immediate: reminder.reminder_type === "confirmation_overdue",
   })
+  if (reminder.reminder_type === "confirmation_overdue") {
+    const marked = await getPool().query(
+      `
+        UPDATE responsibility_assignments
+        SET confirmation_overdue_at = COALESCE(confirmation_overdue_at, now()),
+            updated_at = now()
+        WHERE id = $1
+          AND status IN ('pending', 'assigned')
+        RETURNING id
+      `,
+      [reminder.assignment_id],
+    )
+    if (marked.rowCount) {
+      const leaders = await getPool().query(
+        `
+          SELECT DISTINCT leader.id
+          FROM users leader
+          WHERE leader.status = 'active'
+            AND leader.id <> $2
+            AND (
+              leader.global_role IN ('owner', 'super_admin')
+              OR EXISTS (
+                SELECT 1
+                FROM ministry_members membership
+                WHERE membership.user_id = leader.id
+                  AND membership.ministry_id = $1
+                  AND membership.status = 'active'
+                  AND membership.level IN ('owner', 'admin')
+              )
+            )
+        `,
+        [reminder.ministry_id, reminder.subject_user_id],
+      )
+      const subjectName = [
+        reminder.subject_first_name,
+        reminder.subject_last_name,
+      ]
+        .filter(Boolean)
+        .join(" ") || "A member"
+      for (const leader of leaders.rows) {
+        await enqueueAlert({
+          subjectUserId: leader.id,
+          recipientUserId: leader.id,
+          kind: reminder.is_managed_profile
+            ? "guardian_approval_overdue"
+            : "confirmation_overdue_leader",
+          title: reminder.is_managed_profile
+            ? `Guardian approval overdue: ${reminder.event_title}`
+            : `Confirmation overdue: ${reminder.event_title}`,
+          message: `${subjectName} has not confirmed ${reminder.responsibility_name} · ${formatAssignmentDate(reminder.start_time)}`,
+          assignmentId: reminder.assignment_id,
+          eventId: reminder.event_id,
+          ministryId: reminder.ministry_id,
+          dedupeKey: `confirmation-overdue-leader:${reminder.assignment_id}:${leader.id}:${reminder.id}`,
+          metadata: {
+            notificationCategory: "reminders",
+            notificationUrl: `/${reminder.ministry_slug}?event=${reminder.event_id}`,
+            privacySafeMessage: "An assignment confirmation is overdue and needs leader attention.",
+          },
+          immediate: true,
+        })
+      }
+    }
+  }
   await getPool().query(
     `UPDATE ministry_reminders SET status = 'sent', sent_at = now(), claimed_at = NULL, last_error = NULL, updated_at = now() WHERE id = $1`,
     [reminderId],

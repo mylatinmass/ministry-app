@@ -267,6 +267,9 @@ const messageServer = await read("src/server/notifications/messages.ts")
 const messageComponent = await read(
   "src/react/components/ministry/MinistryMessages.jsx",
 )
+const completedAssignmentNotificationsMigration = await read(
+  "migrations/20260812_02_complete_assignment_notification_workflows.sql",
+)
 assert.match(messageMigration, /CREATE TABLE IF NOT EXISTS ministry_messages/)
 assert.match(messageMigration, /CREATE TABLE IF NOT EXISTS ministry_message_recipients/)
 assert.match(messageMigration, /channel IN \('email', 'telegram'\)/)
@@ -280,6 +283,15 @@ assert.match(messageComponent, /NEW MESSAGE/)
 assert.match(messageComponent, /Telegram messages do not use a subject/)
 assert.match(accountNavigation, /id: "messages"/)
 assert.match(homeWorkspace, /messageSummary\.unreadCount/)
+assert.match(
+  completedAssignmentNotificationsMigration,
+  /confirmation_overdue_at TIMESTAMPTZ/,
+)
+assert.match(
+  completedAssignmentNotificationsMigration,
+  /acknowledgment_deadline_at TIMESTAMPTZ/,
+)
+assert.match(homeWorkspace, />\s*Acknowledge\s*</)
 
 assert.match(authHelper, /activeProfileUserId/)
 assert.match(authHelper, /authMethod: options\.authMethod \|\| "password"/)
@@ -574,10 +586,16 @@ assert.match(assignmentNotifications, /sendEventScheduleNotifications/)
 assert.match(assignmentNotifications, /sendAccountPush/)
 assert.match(assignmentNotifications, /sendTelegramMessage/)
 assert.match(assignmentNotifications, /sendKlaviyoAlertDue/)
+assert.match(assignmentNotifications, /queueWeeklyAssignmentReviews/)
+assert.match(assignmentNotifications, /processUrgentStaffingShortages/)
+assert.match(assignmentNotifications, /processUrgentAcknowledgmentEscalations/)
+assert.match(assignmentNotifications, /confirmation-overdue-leader/)
 assert.match(profile, /notificationCategoryOptions/)
 assert.match(profile, /transactional text messages/)
 assert.match(alertsServer, /mark_all_read/)
 assert.match(alertsServer, /deliveryStatus/)
+assert.match(alertsServer, /body\.action === "acknowledge"/)
+assert.match(alertsServer, /notification\.acknowledged/)
 assert.match(homeWorkspace, /profile\.alertCount > 0/)
 assert.match(homeWorkspace, /bg-orange-400/)
 assert.match(apiRoute, /scheduling\/reports/)

@@ -240,6 +240,8 @@ const MinistryHomeWorkspace = ({ data }) => {
 
   React.useEffect(() => {
     loadAlerts()
+    const interval = window.setInterval(loadAlerts, 60_000)
+    return () => window.clearInterval(interval)
   }, [loadAlerts, currentUser?.id])
 
   const loadMessageSummary = React.useCallback(() => {
@@ -291,6 +293,21 @@ const MinistryHomeWorkspace = ({ data }) => {
           : profile
       ),
     }))
+  }
+
+  const acknowledgeAlert = async (alertId) => {
+    const token = window.sessionStorage.getItem(MINISTRY_SESSION_KEY)
+    const response = await fetch(getFunctionEndpoint("notifications"), {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ action: "acknowledge", alertId }),
+    })
+    if (!response.ok) return
+    const result = await response.json()
+    setAlertsData(result)
   }
 
   const selectSection = (id) => {
@@ -396,9 +413,28 @@ const MinistryHomeWorkspace = ({ data }) => {
                     }`}
                   >
                     <p className="font-semibold text-gray-800">{alert.title}</p>
-                    <p className="mt-1 text-sm leading-relaxed text-gray-600">
+                    <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-gray-600">
                       {alert.message}
                     </p>
+                    {alert.acknowledgmentRequired && !alert.acknowledgedAt && (
+                      <button
+                        type="button"
+                        onClick={() => acknowledgeAlert(alert.id)}
+                        className="mt-3 rounded-lg bg-[#896542] px-3 py-2 text-xs font-semibold text-white hover:bg-[#6f4f34]"
+                      >
+                        Acknowledge
+                      </button>
+                    )}
+                    {alert.acknowledgedAt && (
+                      <p className="mt-2 text-xs font-semibold text-green-700">
+                        Acknowledged
+                      </p>
+                    )}
+                    {alert.escalatedAt && !alert.acknowledgedAt && (
+                      <p className="mt-2 text-xs font-semibold text-orange-700">
+                        Escalated to ministry leaders
+                      </p>
+                    )}
                     <p className="mt-2 text-xs text-gray-400">
                       Delivery: {alert.deliveryStatus.replaceAll("_", " ")}
                       {alert.deliveries?.length

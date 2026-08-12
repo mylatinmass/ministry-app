@@ -39,6 +39,8 @@ const tables = [
   "push_subscriptions",
   "ministry_reminders",
   "ministry_reminder_deliveries",
+  "ministry_alerts",
+  "ministry_alert_deliveries",
   "ministry_messages",
   "ministry_message_recipients",
 ]

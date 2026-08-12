@@ -722,6 +722,7 @@ const loadEventDetails = async (
             assignment.status,
             assignment.quantity,
             assignment.confirmed_at,
+            assignment.confirmation_overdue_at,
             assignment.service_outcome,
             assignment.outcome_recorded_at,
             assignment.outcome_note,
@@ -866,6 +867,7 @@ const loadEventDetails = async (
       status: assignment.status,
       quantity: Number(assignment.quantity),
       confirmedAt: assignment.confirmed_at,
+      confirmationOverdueAt: assignment.confirmation_overdue_at,
       serviceOutcome: assignment.service_outcome || "",
       outcomeRecordedAt: assignment.outcome_recorded_at,
       outcomeNote: assignment.outcome_note || "",
@@ -1745,6 +1747,7 @@ const assignMemberToResponsibility = async (
             assigned_by = $2,
             signup_source = 'admin_assignment',
             notify_email = true,
+            confirmation_overdue_at = NULL,
             updated_at = now()
         WHERE id = $1
         RETURNING *

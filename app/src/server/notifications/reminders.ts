@@ -4,8 +4,11 @@ import { json } from "../request"
 import { verifySchedulerRequest } from "./scheduler-auth"
 import { processKlaviyoProfileSyncs } from "./klaviyo-profiles"
 import {
+  processUrgentAcknowledgmentEscalations,
+  processUrgentStaffingShortages,
   processNotificationDigests,
   queueAssignmentReminderAlert,
+  queueWeeklyAssignmentReviews,
 } from "./assignment-notifications"
 import { processMinistryMessageDeliveries } from "./messages"
 
@@ -281,6 +284,9 @@ export const handleReminderProcessing = async (request: Request) => {
     await queueAssignmentReminderAlert(reminder.id)
   }
 
+  const weeklyReviews = await queueWeeklyAssignmentReviews()
+  const urgentShortages = await processUrgentStaffingShortages()
+  const urgentEscalations = await processUrgentAcknowledgmentEscalations()
   const processedAlerts = await processNotificationDigests()
   const processedMessages = await processMinistryMessageDeliveries()
 
@@ -288,6 +294,9 @@ export const handleReminderProcessing = async (request: Request) => {
     klaviyoProfiles,
     reconciledAssignments: reconciled,
     processedReminders: reminders.length,
+    weeklyReviews,
+    urgentShortages,
+    urgentEscalations,
     processedAlerts,
     processedMessages,
   })

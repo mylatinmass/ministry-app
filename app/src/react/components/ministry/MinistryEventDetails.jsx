@@ -1052,7 +1052,11 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                                       <span className="font-semibold">
                                         {assignment.firstName} {assignment.lastName}
                                       </span>
-                                      <span>· {assignment.status.replaceAll("_", " ")}</span>
+                                      <span>
+                                        · {assignment.confirmationOverdueAt && ["pending", "assigned"].includes(assignment.status)
+                                          ? "confirmation overdue"
+                                          : assignment.status.replaceAll("_", " ")}
+                                      </span>
                                       {assignment.isVolunteer && canManage && (
                                         <span className="w-full text-[11px] text-gray-600">
                                           Volunteer

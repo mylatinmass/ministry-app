@@ -36,12 +36,16 @@ const reconcileReminders = async () => {
         ra.user_id AS subject_user_id,
         COALESCE(mp.guardian_user_id, ra.user_id) AS recipient_user_id,
         e.start_time,
+        e.start_time - COALESCE(responsibility.relative_start_minutes, 0)
+          * INTERVAL '1 minute' AS duty_start_time,
         e.published_at,
         e.confirmation_deadline_at,
         e.updated_at AS event_updated_at,
         COALESCE(recipient.notification_lead_minutes, 60) AS lead_minutes
       FROM responsibility_assignments ra
       JOIN events e ON e.id = ra.event_id
+      JOIN event_responsibilities responsibility
+        ON responsibility.id = ra.responsibility_id
       LEFT JOIN managed_profiles mp
         ON mp.child_user_id = ra.user_id
        AND mp.status IN ('active', 'separation_pending')
@@ -50,8 +54,10 @@ const reconcileReminders = async () => {
       WHERE ra.user_id IS NOT NULL
         AND ra.status = ANY($1)
         AND e.status = 'published'
-        AND e.start_time > now() - INTERVAL '4 hours'
-        AND e.start_time < now() + INTERVAL '31 days'
+        AND e.start_time - COALESCE(responsibility.relative_start_minutes, 0)
+          * INTERVAL '1 minute' > now() - INTERVAL '4 hours'
+        AND e.start_time - COALESCE(responsibility.relative_start_minutes, 0)
+          * INTERVAL '1 minute' < now() + INTERVAL '31 days'
         AND recipient.status = 'active'
     `,
     [ASSIGNMENT_STATUSES],
@@ -65,21 +71,21 @@ const reconcileReminders = async () => {
   try {
     await client.query("BEGIN")
     for (const candidate of candidates.rows) {
-      const eventStart = new Date(candidate.start_time)
+      const dutyStart = new Date(candidate.duty_start_time)
       const publicationTime = new Date(
         candidate.published_at || candidate.event_updated_at,
       )
       const explicitDeadline = candidate.confirmation_deadline_at
         ? new Date(candidate.confirmation_deadline_at)
         : null
-      const oneWeekBefore = new Date(eventStart.getTime() - 7 * 86_400_000)
+      const oneWeekBefore = new Date(dutyStart.getTime() - 7 * 86_400_000)
       const publicationMidpoint = new Date(
         Math.min(
-          eventStart.getTime() - 60_000,
+          dutyStart.getTime() - 60_000,
           publicationTime.getTime() +
             Math.max(
               60_000,
-              (eventStart.getTime() - publicationTime.getTime()) / 2,
+              (dutyStart.getTime() - publicationTime.getTime()) / 2,
             ),
         ),
       )
@@ -88,14 +94,14 @@ const reconcileReminders = async () => {
           ? oneWeekBefore
           : publicationMidpoint
       const confirmationDeadline =
-        explicitDeadline && explicitDeadline < eventStart
+        explicitDeadline && explicitDeadline < dutyStart
           ? explicitDeadline
           : defaultDeadline
       const schedules: Array<{ type: string; at: Date }> = [
         {
           type: "event_offset",
           at: new Date(
-            eventStart.getTime() - Number(candidate.lead_minutes) * 60_000,
+            dutyStart.getTime() - Number(candidate.lead_minutes) * 60_000,
           ),
         },
       ]

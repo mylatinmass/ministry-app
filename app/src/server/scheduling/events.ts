@@ -114,6 +114,16 @@ const normalizeEventResponsibility = (body: any) => {
       { status: 400 },
     )
   }
+  if (
+    !Number.isInteger(relativeStartMinutes) ||
+    relativeStartMinutes < 0 ||
+    relativeStartMinutes > 10_080
+  ) {
+    throw Object.assign(
+      new Error("Duty start time must be 0 to 10,080 minutes before the event"),
+      { status: 400 },
+    )
+  }
 
   return {
     name,
@@ -124,9 +134,7 @@ const normalizeEventResponsibility = (body: any) => {
     requiredLevelId: cleanText(body.requiredLevelId, 100) || null,
     requiredQualification:
       cleanText(body.requiredQualification, 500) || null,
-    relativeStartMinutes: Number.isInteger(relativeStartMinutes)
-      ? relativeStartMinutes
-      : 0,
+    relativeStartMinutes,
     instructions: cleanText(body.instructions) || null,
   }
 }

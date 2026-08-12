@@ -21,9 +21,13 @@ const MinistryEventAgenda = ({
   emptyText,
   showDateHeadings = true,
   onEventSelect,
+  useAssignmentTime = false,
 }) => {
   const groupedEvents = events.reduce((groups, event) => {
-    const key = toDateKey(event.start_time)
+    const displayTime = useAssignmentTime && event.assignment_start_time
+      ? event.assignment_start_time
+      : event.start_time
+    const key = toDateKey(displayTime)
     if (!groups[key]) groups[key] = []
     groups[key].push(event)
     return groups
@@ -55,6 +59,9 @@ const MinistryEventAgenda = ({
                 )}
                 <div className="space-y-2">
                   {groupedEvents[key].map((event) => {
+                    const displayTime = useAssignmentTime && event.assignment_start_time
+                      ? event.assignment_start_time
+                      : event.start_time
                     const isMassTemplate = /^(low|high) mass$/i.test(
                       event.template_name || "",
                     )
@@ -93,7 +100,7 @@ const MinistryEventAgenda = ({
                         }`}
                       >
                         <div className="flex flex-row items-center gap-3 w-full leading-relaxed text-gray-400 text-sm">
-                          {formatTime(event.start_time)}
+                          {formatTime(displayTime)}
                           {templateName && (
                             <h6 className="font-semibold uppercase">
                               {templateName}

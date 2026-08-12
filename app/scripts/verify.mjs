@@ -302,6 +302,8 @@ assert.match(schedulingEvents, /friday_before_first_saturday/)
 assert.match(schedulingEvents, /previewRecurrenceChange/)
 assert.match(schedulingEvents, /event\.recurrence_rule_changed/)
 assert.match(schedulingEvents, /body\.updateScope === "this_and_future"/)
+assert.match(reminders, /AS duty_start_time/)
+assert.match(reminders, /dutyStart\.getTime\(\) - Number\(candidate\.lead_minutes\)/)
 assert.match(homeWorkspace, /user: currentUser/)
 
 assert.match(authHelper, /activeProfileUserId/)

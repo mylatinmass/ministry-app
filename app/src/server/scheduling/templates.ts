@@ -150,6 +150,19 @@ const validateTemplateInput = (input: TemplateInput) => {
       { status: 400 },
     )
   }
+  if (
+    input.responsibilities?.some(
+      (responsibility) =>
+        !Number.isInteger(responsibility.relativeStartMinutes) ||
+        Number(responsibility.relativeStartMinutes) < 0 ||
+        Number(responsibility.relativeStartMinutes) > 10_080,
+    )
+  ) {
+    throw Object.assign(
+      new Error("Responsibility start time must be 0 to 10,080 minutes before the event"),
+      { status: 400 },
+    )
+  }
 }
 
 const loadAvailableMinistries = async (client: PoolClient) => {

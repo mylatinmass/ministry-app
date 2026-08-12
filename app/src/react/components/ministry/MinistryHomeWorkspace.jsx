@@ -186,8 +186,8 @@ const MinistryHomeWorkspace = ({ data }) => {
       })
       .sort(
         (first, second) =>
-          new Date(first.start_time).getTime() -
-          new Date(second.start_time).getTime()
+          new Date(first.assignment_start_time || first.start_time).getTime() -
+          new Date(second.assignment_start_time || second.start_time).getTime()
       )
   }, [myEvents])
   const today = React.useMemo(() => new Date(), [])
@@ -386,6 +386,7 @@ const MinistryHomeWorkspace = ({ data }) => {
             emptyTitle="No upcoming assignments"
             emptyText="New duties assigned to this profile will appear here."
             onEventSelect={setSelectedEvent}
+            useAssignmentTime
           />
         </section>
         <div className="grid gap-5 lg:grid-cols-2">

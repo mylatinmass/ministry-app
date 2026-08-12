@@ -29,6 +29,19 @@ const blankResponsibility = {
   instructions: "",
 }
 
+const formatDutyTime = (eventStart, minutesBefore = 0) =>
+  new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(
+    new Date(
+      new Date(eventStart).getTime() - Number(minutesBefore || 0) * 60_000,
+    ),
+  )
+
 const MinistryEventDetails = ({ event, ministryName, onClose }) => {
   const [details, setDetails] = React.useState(null)
   const [isLoading, setIsLoading] = React.useState(false)
@@ -903,9 +916,11 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                   </select>
                 </label>
                 <label className="text-sm font-semibold text-gray-700">
-                  Minutes relative to event
+                  Duty begins (minutes before event)
                   <input
                     type="number"
+                    min="0"
+                    max="10080"
                     value={responsibilityForm.relativeStartMinutes}
                     onChange={(event) =>
                       updateResponsibilityField(
@@ -1035,6 +1050,10 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                               {responsibility.requiredLevelName
                                 ? ` · Requires ${responsibility.requiredLevelName} or higher`
                                 : ""}
+                              {` · Duty: ${formatDutyTime(
+                                displayedEvent.start_time,
+                                responsibility.relativeStartMinutes,
+                              )}`}
                             </p>
                             {responsibility.instructions && (
                               <p className="mt-1 text-sm text-gray-500">

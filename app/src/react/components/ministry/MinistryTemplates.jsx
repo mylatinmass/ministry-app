@@ -667,10 +667,15 @@ const MinistryTemplates = ({ data, activeAction }) => {
                                   Number(event.target.value),
                                 )
                               }
-                              placeholder="Minutes relative to event"
-                              aria-label="Minutes relative to event start"
+                              min="0"
+                              max="10080"
+                              placeholder="Minutes before event"
+                              aria-label="Duty begins this many minutes before the event"
                               className="h-10 rounded-lg border border-gray-200 px-3 text-sm"
                             />
+                            <span className="text-xs text-gray-500 sm:col-span-2">
+                              Duty begins this many minutes before the event. Use 0 for the event start time.
+                            </span>
                             <label className="flex items-center gap-2 text-sm text-gray-600">
                               <input
                                 type="checkbox"

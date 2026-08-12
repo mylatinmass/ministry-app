@@ -385,7 +385,10 @@ export const sendAssignmentNotification = async (
     `
       SELECT assignment.id, assignment.user_id, assignment.updated_at,
         event.id AS event_id,
-        event.title AS event_title, event.start_time, event.location,
+        event.title AS event_title, event.start_time,
+        event.start_time - COALESCE(responsibility.relative_start_minutes, 0)
+          * INTERVAL '1 minute' AS duty_start_time,
+        event.location,
         responsibility.name AS responsibility_name,
         COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id,
         COALESCE(guardian.guardian_user_id, assignment.user_id) AS recipient_user_id,
@@ -406,7 +409,7 @@ export const sendAssignmentNotification = async (
   )
   const assignment = result.rows[0]
   if (!assignment) return { queued: false }
-  const when = formatAssignmentDate(assignment.start_time)
+  const when = formatAssignmentDate(assignment.duty_start_time)
   await enqueueAlert({
     subjectUserId: assignment.user_id,
     recipientUserId: assignment.recipient_user_id,
@@ -434,6 +437,8 @@ export const sendAssignmentChangeRequestedNotification = async (
     `
       SELECT assignment.user_id, assignment.updated_at, event.id AS event_id,
         event.title AS event_title, event.start_time,
+        event.start_time - COALESCE(responsibility.relative_start_minutes, 0)
+          * INTERVAL '1 minute' AS duty_start_time,
         responsibility.name AS responsibility_name,
         COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id,
         subject.first_name, subject.last_name
@@ -475,7 +480,7 @@ export const sendAssignmentChangeRequestedNotification = async (
       recipientUserId: leader.id,
       kind: "assignment_change_requested",
       title: "Assignment change requested",
-      message: `${volunteerName} requested a change to ${assignment.responsibility_name} for ${assignment.event_title} · ${formatAssignmentDate(assignment.start_time)}`,
+      message: `${volunteerName} requested a change to ${assignment.responsibility_name} for ${assignment.event_title} · ${formatAssignmentDate(assignment.duty_start_time)}`,
       assignmentId,
       eventId: assignment.event_id,
       ministryId: assignment.ministry_id,
@@ -509,6 +514,8 @@ export const sendEventScheduleNotifications = async (
         event.id AS event_id,
         event.title AS event_title,
         event.start_time,
+        event.start_time - COALESCE(responsibility.relative_start_minutes, 0)
+          * INTERVAL '1 minute' AS duty_start_time,
         event.location,
         GREATEST(
           event.updated_at,
@@ -587,7 +594,7 @@ export const sendEventScheduleNotifications = async (
       recipientUserId: assignment.recipient_user_id,
       kind: `event_${changeKind}`,
       title: `${copy.title}: ${assignment.event_title}`,
-      message: `${assignment.responsibility_name} · ${formatAssignmentDate(assignment.start_time)}${assignment.location ? ` · ${assignment.location}` : ""} · ${copy.verb}`,
+      message: `${assignment.responsibility_name} · ${formatAssignmentDate(assignment.duty_start_time)}${assignment.location ? ` · ${assignment.location}` : ""} · ${copy.verb}`,
       assignmentId: assignment.assignment_id,
       eventId: assignment.event_id,
       ministryId: assignment.ministry_id,
@@ -658,7 +665,10 @@ export const queueAssignmentReminderAlert = async (reminderId: string) => {
       SELECT reminder.id, reminder.reminder_type, reminder.subject_user_id,
         reminder.recipient_user_id,
         reminder.event_id, reminder.assignment_id, event.title AS event_title,
-        event.start_time, event.location, responsibility.name AS responsibility_name,
+        event.start_time,
+        event.start_time - COALESCE(responsibility.relative_start_minutes, 0)
+          * INTERVAL '1 minute' AS duty_start_time,
+        event.location, responsibility.name AS responsibility_name,
         COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id,
         ministry.slug AS ministry_slug,
         subject.first_name AS subject_first_name,
@@ -729,7 +739,7 @@ export const queueAssignmentReminderAlert = async (reminderId: string) => {
     recipientUserId: reminder.recipient_user_id,
     kind: copy.kind,
     title: copy.title,
-    message: `${copy.prefix}: ${reminder.responsibility_name} · ${formatAssignmentDate(reminder.start_time)}${reminder.location ? ` · ${reminder.location}` : ""}`,
+    message: `${copy.prefix}: ${reminder.responsibility_name} · ${formatAssignmentDate(reminder.duty_start_time)}${reminder.location ? ` · ${reminder.location}` : ""}`,
     assignmentId: reminder.assignment_id,
     eventId: reminder.event_id,
     ministryId: reminder.ministry_id,

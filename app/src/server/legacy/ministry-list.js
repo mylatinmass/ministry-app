@@ -174,7 +174,8 @@ const handler = async (event) => {
           SELECT
             ra.event_id,
             ra.status,
-            er.name AS responsibility_name
+            er.name AS responsibility_name,
+            er.relative_start_minutes
           FROM responsibility_assignments ra
           JOIN event_responsibilities er ON er.id = ra.responsibility_id
           WHERE ra.user_id = $1
@@ -203,11 +204,19 @@ const handler = async (event) => {
         lastName: user.last_name,
         status: assignment.status,
         responsibilityName: assignment.responsibility_name,
+        dutyStartTime: new Date(
+          new Date(event.start_time).getTime() -
+            Number(assignment.relative_start_minutes || 0) * 60_000
+        ).toISOString(),
       }))
+      const assignmentStartTime = visibleProfileAssignments
+        .map((assignment) => assignment.dutyStartTime)
+        .sort()[0] || null
       return {
         ...event,
         responsibility_count: Number(event.responsibility_count),
         is_assigned: assignments.length > 0,
+        assignment_start_time: assignmentStartTime,
         visibleProfileAssignments,
       }
     })

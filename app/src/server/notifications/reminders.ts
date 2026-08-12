@@ -7,6 +7,7 @@ import {
   processNotificationDigests,
   queueAssignmentReminderAlert,
 } from "./assignment-notifications"
+import { processMinistryMessageDeliveries } from "./messages"
 
 const ASSIGNMENT_STATUSES = [
   "pending",
@@ -281,11 +282,13 @@ export const handleReminderProcessing = async (request: Request) => {
   }
 
   const processedAlerts = await processNotificationDigests()
+  const processedMessages = await processMinistryMessageDeliveries()
 
   return json({
     klaviyoProfiles,
     reconciledAssignments: reconciled,
     processedReminders: reminders.length,
     processedAlerts,
+    processedMessages,
   })
 }

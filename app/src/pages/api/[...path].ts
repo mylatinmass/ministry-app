@@ -7,6 +7,7 @@ import {
 } from "../../server/notifications/subscriptions"
 import { handleReminderProcessing } from "../../server/notifications/reminders"
 import { handleAlerts } from "../../server/notifications/alerts"
+import { handleMessages } from "../../server/notifications/messages"
 import {
   handleTelegramConnection,
   handleTelegramSetup,
@@ -50,6 +51,9 @@ const route: APIRoute = async ({ params, request }) => {
   }
   if (path === "notifications") {
     return handleAlerts(request)
+  }
+  if (path === "messages") {
+    return handleMessages(request)
   }
   if (path === "scheduling/templates") {
     return handleTemplates(request)

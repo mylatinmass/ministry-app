@@ -42,6 +42,7 @@ const MinistryWorkspace = ({ data }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = React.useState(false)
   const [familyData, setFamilyData] = React.useState(null)
+  const [messageUnreadCount, setMessageUnreadCount] = React.useState(0)
   const [visibleProfileIds, setVisibleProfileIds] = React.useState([])
   const activeSection =
     availableSections.find((section) => section.id === sectionId) ||
@@ -83,6 +84,25 @@ const MinistryWorkspace = ({ data }) => {
     return () =>
       window.removeEventListener("ministry-profiles-updated", loadProfiles)
   }, [])
+
+  React.useEffect(() => {
+    const loadUnreadMessages = () => {
+      const token = window.sessionStorage.getItem(MINISTRY_SESSION_KEY)
+      fetch(getFunctionEndpoint("messages"), {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then(async (response) => {
+          const result = await response.json()
+          if (!response.ok) throw new Error(result.message)
+          return result
+        })
+        .then((result) => setMessageUnreadCount(result.unreadCount || 0))
+        .catch(() => {})
+    }
+    loadUnreadMessages()
+    const interval = window.setInterval(loadUnreadMessages, 60_000)
+    return () => window.clearInterval(interval)
+  }, [currentUser?.id])
 
   const saveVisibleProfiles = (ids) => {
     setVisibleProfileIds(ids)
@@ -192,6 +212,12 @@ const MinistryWorkspace = ({ data }) => {
                   >
                     <Icon className="size-5 shrink-0" />
                     <span className="flex-1">{section.label}</span>
+                    {section.id === "messages" && messageUnreadCount > 0 && (
+                      <span
+                        className="size-2 shrink-0 rounded-full bg-orange-400"
+                        aria-label={`${messageUnreadCount} unread messages`}
+                      />
+                    )}
                     {active && <ChevronRightIcon className="size-4" />}
                   </Link>
                 )
@@ -432,7 +458,13 @@ const MinistryWorkspace = ({ data }) => {
                     }`}
                   >
                     <Icon className="size-5" />
-                    <span>{section.label}</span>
+                    <span className="flex-1">{section.label}</span>
+                    {section.id === "messages" && messageUnreadCount > 0 && (
+                      <span
+                        className="size-2 shrink-0 rounded-full bg-orange-400"
+                        aria-label={`${messageUnreadCount} unread messages`}
+                      />
+                    )}
                   </Link>
                 )
               })}

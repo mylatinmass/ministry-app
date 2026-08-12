@@ -1,0 +1,355 @@
+import * as React from "react"
+import {
+  ChatBubbleLeftRightIcon,
+  EnvelopeIcon,
+  PaperAirplaneIcon,
+  XMarkIcon,
+} from "@heroicons/react/24/outline"
+import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
+import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
+
+const messageDate = (value) =>
+  new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value))
+
+const deliveryLabel = (message) => {
+  const parts = [`${message.recipientCount} recipient${message.recipientCount === 1 ? "" : "s"}`]
+  if (message.sentCount) parts.push(`${message.sentCount} delivered`)
+  if (message.pendingCount) parts.push(`${message.pendingCount} pending`)
+  if (message.skippedCount) parts.push(`${message.skippedCount} not enabled`)
+  if (message.failedCount) parts.push(`${message.failedCount} failed`)
+  return parts.join(" · ")
+}
+
+const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
+  const [data, setData] = React.useState({
+    unreadCount: 0,
+    canCompose: false,
+    canMessageAll: false,
+    manageableMinistries: [],
+    received: [],
+    sent: [],
+  })
+  const [loading, setLoading] = React.useState(true)
+  const [error, setError] = React.useState("")
+  const [notice, setNotice] = React.useState("")
+  const [showComposer, setShowComposer] = React.useState(false)
+  const [sending, setSending] = React.useState(false)
+  const [form, setForm] = React.useState({
+    audience: "ministry",
+    ministryId: initialMinistryId,
+    channel: "email",
+    subject: "",
+    body: "",
+  })
+
+  const loadMessages = React.useCallback(async () => {
+    const token = window.sessionStorage.getItem(MINISTRY_SESSION_KEY)
+    const response = await fetch(getFunctionEndpoint("messages"), {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const result = await response.json()
+    if (!response.ok) throw new Error(result.message || "Unable to load messages")
+    setData(result)
+    onUnreadCountChange?.(result.unreadCount)
+    setForm((current) => ({
+      ...current,
+      audience:
+        current.audience === "all_members" && !result.canMessageAll
+          ? "ministry"
+          : current.audience,
+      ministryId:
+        current.ministryId && result.manageableMinistries.some(
+          (ministry) => ministry.id === current.ministryId,
+        )
+          ? current.ministryId
+          : result.manageableMinistries[0]?.id || "",
+    }))
+  }, [onUnreadCountChange])
+
+  React.useEffect(() => {
+    setLoading(true)
+    loadMessages()
+      .catch((loadError) => setError(loadError.message))
+      .finally(() => setLoading(false))
+  }, [loadMessages])
+
+  const patchRead = async (payload) => {
+    const token = window.sessionStorage.getItem(MINISTRY_SESSION_KEY)
+    const response = await fetch(getFunctionEndpoint("messages"), {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    })
+    const result = await response.json()
+    if (!response.ok) throw new Error(result.message || "Unable to update messages")
+    setData(result)
+    onUnreadCountChange?.(result.unreadCount)
+  }
+
+  const markRead = (message) => {
+    if (message.read) return
+    patchRead({ action: "mark_read", messageId: message.id }).catch((readError) =>
+      setError(readError.message),
+    )
+  }
+
+  const sendMessage = async (event) => {
+    event.preventDefault()
+    setSending(true)
+    setError("")
+    setNotice("")
+    try {
+      const token = window.sessionStorage.getItem(MINISTRY_SESSION_KEY)
+      const response = await fetch(getFunctionEndpoint("messages"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(form),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.message || "Unable to send message")
+      setNotice(
+        `Message queued for ${result.recipientCount} ${result.recipientCount === 1 ? "member" : "members"}.`,
+      )
+      setForm((current) => ({ ...current, subject: "", body: "" }))
+      setShowComposer(false)
+      await loadMessages()
+    } catch (sendError) {
+      setError(sendError.message)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  if (loading) {
+    return <p className="py-8 text-center text-sm text-gray-500">Loading messages…</p>
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="century-font text-3xl text-gray-950">Messages</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            One-way announcements from your ministry leaders.
+          </p>
+        </div>
+        {data.canCompose && (
+          <button
+            type="button"
+            onClick={() => setShowComposer((open) => !open)}
+            className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#6f4f34]"
+          >
+            {showComposer ? <XMarkIcon className="size-5" /> : <PaperAirplaneIcon className="size-5" />}
+            {showComposer ? "Cancel" : "NEW MESSAGE"}
+          </button>
+        )}
+      </div>
+
+      {error && (
+        <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+      {notice && (
+        <p className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+          {notice}
+        </p>
+      )}
+
+      {showComposer && data.canCompose && (
+        <form
+          onSubmit={sendMessage}
+          className="space-y-4 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm"
+        >
+          <h3 className="century-font text-2xl text-gray-950">New Message</h3>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="text-sm font-semibold text-gray-700">
+              Send to
+              <select
+                value={form.audience === "all_members" ? "all_members" : form.ministryId}
+                onChange={(event) =>
+                  setForm((current) =>
+                    event.target.value === "all_members"
+                      ? { ...current, audience: "all_members", ministryId: "" }
+                      : { ...current, audience: "ministry", ministryId: event.target.value },
+                  )
+                }
+                required
+                className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 font-normal"
+              >
+                {data.canMessageAll && <option value="all_members">All members</option>}
+                {data.manageableMinistries.map((ministry) => (
+                  <option key={ministry.id} value={ministry.id}>
+                    {ministry.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm font-semibold text-gray-700">
+              Platform
+              <select
+                value={form.channel}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    channel: event.target.value,
+                    subject: event.target.value === "telegram" ? "" : current.subject,
+                  }))
+                }
+                className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 font-normal"
+              >
+                <option value="email">Email</option>
+                <option value="telegram">Telegram</option>
+              </select>
+            </label>
+          </div>
+
+          {form.channel === "email" && (
+            <label className="block text-sm font-semibold text-gray-700">
+              Subject
+              <input
+                type="text"
+                value={form.subject}
+                onChange={(event) => setForm((current) => ({ ...current, subject: event.target.value }))}
+                maxLength={250}
+                required
+                className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 font-normal"
+              />
+            </label>
+          )}
+
+          <label className="block text-sm font-semibold text-gray-700">
+            Message
+            <textarea
+              value={form.body}
+              onChange={(event) => setForm((current) => ({ ...current, body: event.target.value }))}
+              maxLength={form.channel === "telegram" ? 250 : undefined}
+              required
+              rows={form.channel === "telegram" ? 4 : 8}
+              className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-3 font-normal"
+            />
+          </label>
+          {form.channel === "telegram" ? (
+            <div className="flex items-center justify-between gap-3 text-xs text-gray-500">
+              <span>Telegram messages do not use a subject and are limited to 250 characters.</span>
+              <span className={form.body.length >= 240 ? "font-semibold text-orange-600" : ""}>
+                {form.body.length}/250
+              </span>
+            </div>
+          ) : (
+            <p className="text-xs text-gray-500">Email requires a subject and allows a full-length message.</p>
+          )}
+          <button
+            type="submit"
+            disabled={sending || (form.audience === "ministry" && !form.ministryId)}
+            className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <PaperAirplaneIcon className="size-5" />
+            {sending ? "Sending…" : "Send Message"}
+          </button>
+        </form>
+      )}
+
+      <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h3 className="century-font text-2xl text-gray-950">Inbox</h3>
+          {data.unreadCount > 0 && (
+            <button
+              type="button"
+              onClick={() => patchRead({ action: "mark_all_read" }).catch((readError) => setError(readError.message))}
+              className="text-xs font-semibold text-[#896542]"
+            >
+              Mark all read
+            </button>
+          )}
+        </div>
+        {data.received.length ? (
+          <div className="space-y-3">
+            {data.received.map((message) => (
+              <button
+                key={message.id}
+                type="button"
+                onClick={() => markRead(message)}
+                className={`w-full rounded-xl border px-4 py-4 text-left ${
+                  message.read
+                    ? "border-gray-100 bg-gray-50"
+                    : "border-orange-200 bg-orange-50"
+                }`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    {!message.read && <span className="size-2 rounded-full bg-orange-400" aria-label="Unread" />}
+                    {message.channel === "email" ? (
+                      <EnvelopeIcon className="size-5 text-[#896542]" />
+                    ) : (
+                      <ChatBubbleLeftRightIcon className="size-5 text-[#896542]" />
+                    )}
+                    <p className="font-semibold text-gray-900">
+                      {message.subject || "Telegram announcement"}
+                    </p>
+                  </div>
+                  <p className="text-xs text-gray-400">{messageDate(message.createdAt)}</p>
+                </div>
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-gray-600">
+                  {message.body}
+                </p>
+                <p className="mt-3 text-xs text-gray-400">
+                  {message.senderName} · {message.ministryName || "All members"} · {message.channel}
+                </p>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-gray-200 px-4 py-6 text-center">
+            <p className="font-semibold text-gray-700">No messages</p>
+            <p className="mt-1 text-sm text-gray-500">Announcements sent to this profile will appear here.</p>
+          </div>
+        )}
+      </section>
+
+      {data.canCompose && (
+        <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+          <h3 className="mb-4 century-font text-2xl text-gray-950">Sent Messages</h3>
+          {data.sent.length ? (
+            <div className="space-y-3">
+              {data.sent.map((message) => (
+                <article key={message.id} className="rounded-xl border border-gray-100 px-4 py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <p className="font-semibold text-gray-900">
+                      {message.subject || "Telegram announcement"}
+                    </p>
+                    <p className="text-xs text-gray-400">{messageDate(message.createdAt)}</p>
+                  </div>
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-gray-600">
+                    {message.body}
+                  </p>
+                  <p className="mt-3 text-xs text-gray-400">
+                    {message.channel} · {message.ministryName || "All members"} · {deliveryLabel(message)}
+                  </p>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-xl border border-dashed border-gray-200 px-4 py-6 text-center text-sm text-gray-500">
+              No messages have been sent yet.
+            </p>
+          )}
+        </section>
+      )}
+    </div>
+  )
+}
+
+export default MinistryMessages

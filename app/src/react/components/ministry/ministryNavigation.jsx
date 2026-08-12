@@ -6,7 +6,6 @@ import {
   CalendarDaysIcon,
   CalendarIcon,
   ChartBarIcon,
-  ChatBubbleLeftRightIcon,
   CheckCircleIcon,
   ClipboardDocumentCheckIcon,
   ClockIcon,
@@ -137,17 +136,6 @@ const ministrySections = [
       action("my-availability", "Mine", UserCircleIcon),
       action("team-availability", "Team", UsersIcon),
       action("conflicts", "Conflicts", BellAlertIcon),
-    ],
-  },
-  {
-    id: "messages",
-    label: "Messages",
-    icon: ChatBubbleLeftRightIcon,
-    description: "Keep ministry announcements and conversations together.",
-    actions: [
-      action("new-message", "New", PlusIcon),
-      action("inbox", "Inbox", ChatBubbleLeftRightIcon),
-      action("announcements", "Notices", BellAlertIcon),
     ],
   },
   {

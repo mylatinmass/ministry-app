@@ -1,5 +1,6 @@
 import {
   CalendarDaysIcon,
+  ChatBubbleLeftRightIcon,
   CheckCircleIcon,
   ClockIcon,
   HomeIcon,
@@ -33,6 +34,12 @@ const accountSections = [
     label: "Availability",
     icon: ClockIcon,
     description: "Block dates when this profile cannot be scheduled.",
+  },
+  {
+    id: "messages",
+    label: "Messages",
+    icon: ChatBubbleLeftRightIcon,
+    description: "Read announcements sent by ministry leaders.",
   },
   {
     id: "ministries",

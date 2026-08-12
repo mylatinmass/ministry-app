@@ -20,6 +20,7 @@ import MinistryGlobalMembers from "./MinistryGlobalMembers"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import MinistrySupport from "./MinistrySupport"
 import MinistryEvents from "./MinistryEvents"
+import MinistryMessages from "./MinistryMessages"
 import VolunteerEvents from "./VolunteerEvents"
 import { accountSections } from "./accountNavigation"
 
@@ -142,6 +143,10 @@ const MinistryHomeWorkspace = ({ data }) => {
   const [profileMenuOpen, setProfileMenuOpen] = React.useState(false)
   const [familyData, setFamilyData] = React.useState(null)
   const [alertsData, setAlertsData] = React.useState({ alerts: [], unreadCount: 0 })
+  const [messageSummary, setMessageSummary] = React.useState({
+    received: [],
+    unreadCount: 0,
+  })
   const [showCreateEvent, setShowCreateEvent] = React.useState(false)
   const manageableMinistries = React.useMemo(
     () =>
@@ -236,6 +241,34 @@ const MinistryHomeWorkspace = ({ data }) => {
   React.useEffect(() => {
     loadAlerts()
   }, [loadAlerts, currentUser?.id])
+
+  const loadMessageSummary = React.useCallback(() => {
+    const token = window.sessionStorage.getItem(MINISTRY_SESSION_KEY)
+    return fetch(getFunctionEndpoint("messages"), {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async (response) => {
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.message)
+        return result
+      })
+      .then(setMessageSummary)
+      .catch(() => {})
+  }, [])
+
+  React.useEffect(() => {
+    loadMessageSummary()
+    const interval = window.setInterval(loadMessageSummary, 60_000)
+    return () => window.clearInterval(interval)
+  }, [loadMessageSummary, currentUser?.id])
+
+  const handleMessageUnreadCount = React.useCallback((unreadCount) => {
+    setMessageSummary((current) =>
+      current.unreadCount === unreadCount
+        ? current
+        : { ...current, unreadCount },
+    )
+  }, [])
 
   const markAllAlertsRead = async () => {
     const token = window.sessionStorage.getItem(MINISTRY_SESSION_KEY)
@@ -391,10 +424,41 @@ const MinistryHomeWorkspace = ({ data }) => {
             icon={ChatBubbleLeftRightIcon}
             title="Ministry Notices"
           >
-            <EmptyDashboardBlock
-              title="No new notices"
-              text="Announcements sent by your ministry leaders will appear here."
-            />
+            {messageSummary.received?.length ? (
+              <div className="space-y-3">
+                {messageSummary.received.slice(0, 3).map((message) => (
+                  <button
+                    key={message.id}
+                    type="button"
+                    onClick={() => selectSection("messages")}
+                    className={`w-full rounded-xl border px-4 py-3 text-left ${
+                      message.read
+                        ? "border-gray-100 bg-gray-50"
+                        : "border-orange-200 bg-orange-50"
+                    }`}
+                  >
+                    <p className="font-semibold text-gray-800">
+                      {message.subject || "Telegram announcement"}
+                    </p>
+                    <p className="mt-1 line-clamp-2 text-sm leading-relaxed text-gray-600">
+                      {message.body}
+                    </p>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => selectSection("messages")}
+                  className="text-sm font-semibold text-[#896542]"
+                >
+                  View all messages
+                </button>
+              </div>
+            ) : (
+              <EmptyDashboardBlock
+                title="No new notices"
+                text="Announcements sent by your ministry leaders will appear here."
+              />
+            )}
           </DashboardBlock>
         </div>
       </div>
@@ -476,6 +540,12 @@ const MinistryHomeWorkspace = ({ data }) => {
     )
   } else if (sectionId === "availability") {
     content = <MinistryAvailability />
+  } else if (sectionId === "messages") {
+    content = (
+      <MinistryMessages
+        onUnreadCountChange={handleMessageUnreadCount}
+      />
+    )
   } else if (sectionId === "ministries") {
     content = (
       <MinistryCards
@@ -528,6 +598,12 @@ const MinistryHomeWorkspace = ({ data }) => {
                   >
                     <Icon className="size-5 shrink-0" />
                     <span className="flex-1">{section.label}</span>
+                    {section.id === "messages" && messageSummary.unreadCount > 0 && (
+                      <span
+                        className="size-2 shrink-0 rounded-full bg-orange-400"
+                        aria-label={`${messageSummary.unreadCount} unread messages`}
+                      />
+                    )}
                     {active && <ChevronRightIcon className="size-4" />}
                   </button>
                 )
@@ -698,7 +774,13 @@ const MinistryHomeWorkspace = ({ data }) => {
                     }`}
                   >
                     <Icon className="size-5" />
-                    <span>{section.label}</span>
+                    <span className="flex-1">{section.label}</span>
+                    {section.id === "messages" && messageSummary.unreadCount > 0 && (
+                      <span
+                        className="size-2 shrink-0 rounded-full bg-orange-400"
+                        aria-label={`${messageSummary.unreadCount} unread messages`}
+                      />
+                    )}
                   </button>
                 )
               })}

@@ -11,6 +11,7 @@ import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 import PushNotifications from "./PushNotifications"
 import TelegramNotifications from "./TelegramNotifications"
+import { applyMinistryTheme } from "../../utils/ministryTheme"
 
 const reminderOptions = [
   [15, "15 minutes"],
@@ -255,6 +256,7 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
 
       setProfile(result.profile)
       setDraft(result.profile)
+      applyMinistryTheme(result.profile.appearanceTheme, result.profile.id)
       setIsEditing(false)
       setMessage("Your account has been updated.")
       onUserUpdate?.({
@@ -262,6 +264,7 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
         firstName: result.profile.firstName,
         lastName: result.profile.lastName,
         username: result.profile.username,
+        appearanceTheme: result.profile.appearanceTheme,
       })
     } catch (error) {
       setErrorMessage(error.message)
@@ -396,6 +399,26 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
               {profile.status}
             </p>
           </div>
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-400">
+              Appearance
+            </span>
+            {isEditing ? (
+              <select
+                name="appearanceTheme"
+                value={draft.appearanceTheme || "light"}
+                onChange={handleChange}
+                className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-gray-900 outline-none transition focus:border-[#896542] focus:ring-2 focus:ring-[#896542]/10"
+              >
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            ) : (
+              <p className="mt-2 min-h-7 text-base font-medium capitalize text-gray-900">
+                {profile.appearanceTheme || "light"}
+              </p>
+            )}
+          </label>
         </div>
       </section>
 
@@ -672,11 +695,11 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
         </section>
       )}
 
-      <div aria-live="polite" className="min-h-6 text-center text-sm">
+      <div aria-live="polite" aria-atomic="true" className="min-h-6 text-center text-sm">
         {errorMessage ? (
-          <p className="text-red-600">{errorMessage}</p>
+          <p role="alert" className="text-red-600">{errorMessage}</p>
         ) : message ? (
-          <p className="font-medium text-green-700">{message}</p>
+          <p role="status" className="font-medium text-green-700">{message}</p>
         ) : isEditing ? (
           <p className="text-gray-500">
             Leave this profile view to discard unsaved changes.

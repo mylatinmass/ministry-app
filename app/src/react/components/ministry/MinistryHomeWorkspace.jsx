@@ -16,6 +16,8 @@ import MinistryEventDetails from "./MinistryEventDetails"
 import MinistryHomeCalendar from "./MinistryHomeCalendar"
 import MinistryOrdoReference from "./MinistryOrdoReference"
 import MinistryProfile from "./MinistryProfile"
+import { applyMinistryTheme } from "../../utils/ministryTheme"
+import useAccessibleDialog from "../../hooks/useAccessibleDialog"
 import MinistryGlobalMembers from "./MinistryGlobalMembers"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import MinistrySupport from "./MinistrySupport"
@@ -23,6 +25,7 @@ import MinistryEvents from "./MinistryEvents"
 import MinistryMessages from "./MinistryMessages"
 import VolunteerEvents from "./VolunteerEvents"
 import ChapelSettings from "./ChapelSettings"
+import MinistryConflictTicker from "./MinistryConflictTicker"
 import { accountSections } from "./accountNavigation"
 
 const accessLabels = {
@@ -141,8 +144,13 @@ const MinistryHomeWorkspace = ({ data }) => {
       : "home"
   })
   const [currentUser, setCurrentUser] = React.useState(data.user)
+  React.useLayoutEffect(() => {
+    applyMinistryTheme(currentUser?.appearanceTheme, currentUser?.id)
+  }, [currentUser?.appearanceTheme, currentUser?.id])
   const [selectedEvent, setSelectedEvent] = React.useState(null)
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false)
+  const closeMobileMenu = React.useCallback(() => setMobileMenuOpen(false), [])
+  const mobileMenuRef = useAccessibleDialog(mobileMenuOpen, closeMobileMenu)
   const [profileMenuOpen, setProfileMenuOpen] = React.useState(false)
   const [familyData, setFamilyData] = React.useState(null)
   const [alertsData, setAlertsData] = React.useState({ alerts: [], unreadCount: 0 })
@@ -333,6 +341,8 @@ const MinistryHomeWorkspace = ({ data }) => {
     })
     const result = await response.json()
     if (!response.ok) return
+
+    applyMinistryTheme(result.activeProfile?.appearanceTheme, profileId)
 
     window.sessionStorage.setItem(MINISTRY_SESSION_KEY, result.token)
     window.sessionStorage.setItem(
@@ -611,10 +621,10 @@ const MinistryHomeWorkspace = ({ data }) => {
   }
 
   return (
-    <div className="h-screen overflow-hidden bg-white text-gray-900">
+    <div className="ministry-app-viewport overflow-hidden bg-white text-gray-900">
       <div className="mx-auto flex h-full w-full max-w-[1600px]">
         <aside className="hidden w-72 shrink-0 border-r border-gray-100 bg-white lg:block">
-          <div className="sticky top-0 flex max-h-screen flex-col overflow-y-auto px-4 py-6">
+          <div className="ministry-scroll-region sticky top-0 flex max-h-full flex-col overflow-y-auto px-4 py-6">
             <div className="mb-5 px-3">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#C1A387]">
                 Ministry workspace
@@ -632,6 +642,7 @@ const MinistryHomeWorkspace = ({ data }) => {
                     key={section.id}
                     type="button"
                     onClick={() => selectSection(section.id)}
+                    aria-current={active ? "page" : undefined}
                     className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${
                       active
                         ? "bg-[#f7f3ef] font-semibold text-[#6f4f34]"
@@ -764,7 +775,12 @@ const MinistryHomeWorkspace = ({ data }) => {
             </div>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 lg:px-6">
+          <MinistryConflictTicker
+            profileId={currentUser?.id}
+            onOpenAvailability={() => selectSection("availability")}
+          />
+
+          <div className="ministry-scroll-region min-h-0 flex-1 overflow-y-auto px-4 py-5 lg:px-6">
             {content}
           </div>
         </main>
@@ -775,22 +791,22 @@ const MinistryHomeWorkspace = ({ data }) => {
           <button
             type="button"
             aria-label="Close ministry menu"
-            onClick={() => setMobileMenuOpen(false)}
+            onClick={closeMobileMenu}
             className="absolute inset-0 bg-black/30 backdrop-blur-[1px]"
           />
-          <div className="absolute inset-y-0 left-0 flex w-[86%] max-w-sm flex-col bg-white shadow-2xl">
+          <div ref={mobileMenuRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="home-mobile-menu-title" className="absolute inset-y-0 left-0 flex w-[86%] max-w-sm flex-col bg-white shadow-2xl">
             <div className="flex items-start justify-between border-b border-[#e6ddd4] p-5">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#C1A387]">
                   Ministry workspace
                 </p>
-                <h2 className="mt-1 century-font text-2xl text-[#6f4f34]">
+                <h2 id="home-mobile-menu-title" className="mt-1 century-font text-2xl text-[#6f4f34]">
                   Ministries
                 </h2>
               </div>
               <button
                 type="button"
-                onClick={() => setMobileMenuOpen(false)}
+                onClick={closeMobileMenu}
                 className="rounded-lg border border-gray-200 bg-white p-2 text-gray-600"
                 aria-label="Close menu"
               >
@@ -809,6 +825,7 @@ const MinistryHomeWorkspace = ({ data }) => {
                     key={section.id}
                     type="button"
                     onClick={() => selectSection(section.id)}
+                    aria-current={active ? "page" : undefined}
                     className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left ${
                       active
                         ? "bg-[#f7f3ef] font-semibold text-[#6f4f34]"

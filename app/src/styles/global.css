@@ -10,9 +10,155 @@ html,
 body {
   margin: 0;
   min-height: 100%;
+  width: 100%;
+  overflow-x: hidden;
   background: #fff;
   color: #111827;
   font-family: Arial, Helvetica, sans-serif;
+}
+
+html[data-ministry-theme="dark"],
+html[data-ministry-theme="dark"] body {
+  background: #111827;
+  color: #f9fafb;
+}
+
+html[data-ministry-theme="dark"] .ministry-workspace-shell,
+html[data-ministry-theme="dark"] .ministry-workspace-body,
+html[data-ministry-theme="dark"] .bg-white {
+  background-color: #1f2937 !important;
+}
+
+html[data-ministry-theme="dark"] .ministry-workspace-navigation,
+html[data-ministry-theme="dark"] .ministry-workspace-header,
+html[data-ministry-theme="dark"] [class*="bg-[#f7f3ef]"],
+html[data-ministry-theme="dark"] [class*="bg-[#f4ede6]"],
+html[data-ministry-theme="dark"] [class*="bg-[#fbf8f4]"],
+html[data-ministry-theme="dark"] [class*="bg-[#fcfaf8]"],
+html[data-ministry-theme="dark"] [class*="bg-[#faf8f5]"],
+html[data-ministry-theme="dark"] [class*="bg-[#eee2d5]"] {
+  background-color: #263244 !important;
+}
+
+html[data-ministry-theme="dark"] .bg-gray-50,
+html[data-ministry-theme="dark"] .bg-gray-100 {
+  background-color: #374151 !important;
+}
+
+html[data-ministry-theme="dark"] .text-black,
+html[data-ministry-theme="dark"] .text-gray-950,
+html[data-ministry-theme="dark"] .text-gray-900,
+html[data-ministry-theme="dark"] .text-gray-800,
+html[data-ministry-theme="dark"] .text-gray-700 {
+  color: #f9fafb !important;
+}
+
+html[data-ministry-theme="dark"] .text-gray-600,
+html[data-ministry-theme="dark"] .text-gray-500,
+html[data-ministry-theme="dark"] .text-gray-400,
+html[data-ministry-theme="dark"] .text-gray-300 {
+  color: #d1d5db !important;
+}
+
+html[data-ministry-theme="dark"] [class*="text-[#896542]"],
+html[data-ministry-theme="dark"] [class*="text-[#6f4f34]"],
+html[data-ministry-theme="dark"] [class*="text-[#C1A387]"] {
+  color: #6ee7b7 !important;
+}
+
+html[data-ministry-theme="dark"] [class*="bg-[#896542]"],
+html[data-ministry-theme="dark"] [class*="bg-[#6f4f34]"] {
+  background-color: #047857 !important;
+  color: #fff !important;
+}
+
+html[data-ministry-theme="dark"] [class*="border-[#896542]"],
+html[data-ministry-theme="dark"] [class*="border-[#d8c7b8]"],
+html[data-ministry-theme="dark"] [class*="border-[#e8ddd3]"],
+html[data-ministry-theme="dark"] [class*="border-[#C1A387]"],
+html[data-ministry-theme="dark"] .border-gray-100,
+html[data-ministry-theme="dark"] .border-gray-200,
+html[data-ministry-theme="dark"] .border-gray-300 {
+  border-color: #4b5563 !important;
+}
+
+html[data-ministry-theme="dark"] input,
+html[data-ministry-theme="dark"] select,
+html[data-ministry-theme="dark"] textarea {
+  background-color: #111827;
+  border-color: #4b5563;
+  color: #f9fafb;
+}
+
+html[data-ministry-theme="dark"] input::placeholder,
+html[data-ministry-theme="dark"] textarea::placeholder {
+  color: #9ca3af;
+}
+
+html[data-ministry-theme="dark"] .bg-orange-50,
+html[data-ministry-theme="dark"] [class*="bg-orange-50/"] {
+  background-color: #431407 !important;
+}
+
+html[data-ministry-theme="dark"] .text-orange-700,
+html[data-ministry-theme="dark"] .text-orange-800,
+html[data-ministry-theme="dark"] .text-orange-900 {
+  color: #fdba74 !important;
+}
+
+html[data-ministry-theme="dark"] .bg-red-50,
+html[data-ministry-theme="dark"] .bg-green-50,
+html[data-ministry-theme="dark"] .bg-amber-50 {
+  background-color: #292524 !important;
+}
+
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid #f97316 !important;
+  outline-offset: 2px !important;
+}
+
+html[data-ministry-theme="dark"] ::selection {
+  background: #047857;
+  color: #fff;
+}
+
+.ministry-app-viewport {
+  height: 100vh;
+  height: 100dvh;
+  min-height: -webkit-fill-available;
+}
+
+.ministry-scroll-region {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+}
+
+@keyframes ministry-conflict-blink {
+  0%,
+  45% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50%,
+  95% {
+    opacity: 0.2;
+    transform: scale(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.ministry-conflict-alert-icon {
+  animation: ministry-conflict-blink 1.25s steps(1, end) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ministry-conflict-alert-icon {
+    animation: none;
+  }
 }
 
 * {

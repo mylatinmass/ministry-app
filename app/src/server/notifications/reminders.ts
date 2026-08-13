@@ -12,6 +12,7 @@ import {
 } from "./assignment-notifications"
 import { processMinistryMessageDeliveries } from "./messages"
 import { expireAssignmentSubstitutionRequests } from "../scheduling/substitutions"
+import { processWeeklyEmergencySchedules } from "./emergency-schedules"
 
 const ASSIGNMENT_STATUSES = [
   "pending",
@@ -298,6 +299,7 @@ export const handleReminderProcessing = async (request: Request) => {
   const urgentEscalations = await processUrgentAcknowledgmentEscalations()
   const processedAlerts = await processNotificationDigests()
   const processedMessages = await processMinistryMessageDeliveries()
+  const emergencySchedules = await processWeeklyEmergencySchedules()
 
   return json({
     klaviyoProfiles,
@@ -309,5 +311,6 @@ export const handleReminderProcessing = async (request: Request) => {
     urgentEscalations,
     processedAlerts,
     processedMessages,
+    emergencySchedules,
   })
 }

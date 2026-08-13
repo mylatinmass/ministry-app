@@ -36,7 +36,7 @@ const MinistryEventAgenda = ({
 
   return (
     <section
-      aria-label={label} className="flex-1 overflow-y-auto w-full"
+      aria-label={label} className="ministry-scroll-region min-h-0 flex-1 overflow-y-auto w-full"
     >
       {dateKeys.length ? (
         <div className="space-y-7">
@@ -93,6 +93,7 @@ const MinistryEventAgenda = ({
                         key={event.id}
                         type="button"
                         onClick={() => onEventSelect?.(event)}
+                        aria-label={`${eventName || templateName || "Event"}, ${new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(displayTime))}${event.is_assigned ? ", includes your assignment" : ""}`}
                         className={`relative w-full flex flex-col items-center gap-1 border border-l-8 px-4 py-2 transition hover:bg-gray-50 ${
                           event.is_assigned
                             ? "border-orange-400"

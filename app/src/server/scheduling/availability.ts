@@ -4,6 +4,7 @@ import { json } from "../request"
 import { sendAssignmentChangeRequestedNotification } from "../notifications/assignment-notifications"
 import {
   getIdentityContext,
+  requireMinistryAccess,
   writeSchedulingAudit,
 } from "./authorization"
 
@@ -56,7 +57,11 @@ const parseDateKey = (value: unknown, fieldName: string) => {
 const cleanText = (value: unknown, maximum = 250) =>
   typeof value === "string" ? value.trim().slice(0, maximum) : ""
 
-const loadAssignments = async (client: PoolClient, userId: string) => {
+const loadAssignments = async (
+  client: PoolClient,
+  userId: string,
+  ministryId: string | null = null,
+) => {
   const result = await client.query(
     `
       SELECT
@@ -83,9 +88,10 @@ const loadAssignments = async (client: PoolClient, userId: string) => {
       WHERE assignment.user_id = $1
         AND assignment.status = ANY($2)
         AND event.status = 'published'
+        AND ($3::UUID IS NULL OR ministry.id = $3::UUID)
       ORDER BY event.start_time, lower(responsibility.name)
     `,
-    [userId, ASSIGNED_DUTY_STATUSES],
+    [userId, ASSIGNED_DUTY_STATUSES, ministryId],
   )
 
   return result.rows.map((row) => ({
@@ -104,7 +110,11 @@ const loadAssignments = async (client: PoolClient, userId: string) => {
   }))
 }
 
-const loadBlocks = async (client: PoolClient, userId: string) => {
+const loadBlocks = async (
+  client: PoolClient,
+  userId: string,
+  ministryId: string | null = null,
+) => {
   const result = await client.query(
     `
       SELECT
@@ -120,9 +130,14 @@ const loadBlocks = async (client: PoolClient, userId: string) => {
       LEFT JOIN ministries ministry ON ministry.id = block.ministry_id
       WHERE block.user_id = $1
         AND block.status = 'active'
+        AND (
+          $2::UUID IS NULL
+          OR block.ministry_id IS NULL
+          OR block.ministry_id = $2::UUID
+        )
       ORDER BY block.start_date, block.end_date, block.created_at
     `,
-    [userId],
+    [userId, ministryId],
   )
   return result.rows.map((row) => ({
     id: row.id,
@@ -140,8 +155,10 @@ const createBlock = async (
   client: PoolClient,
   context: Awaited<ReturnType<typeof getIdentityContext>>,
   body: any,
+  subjectUserId = context.user.id,
+  forcedMinistryId: string | null = null,
 ) => {
-  const ministryId = cleanText(body.ministryId, 100) || null
+  const ministryId = forcedMinistryId || cleanText(body.ministryId, 100) || null
   let ministryName = "All ministries"
   if (ministryId) {
     const ministryResult = await client.query(
@@ -154,7 +171,7 @@ const createBlock = async (
           AND membership.status = 'active'
         LIMIT 1
       `,
-      [context.user.id, ministryId],
+      [subjectUserId, ministryId],
     )
     if (!ministryResult.rowCount) {
       throw Object.assign(new Error("Choose one of your active ministries"), {
@@ -192,7 +209,7 @@ const createBlock = async (
     )
   }
 
-  const assignments = await loadAssignments(client, context.user.id)
+  const assignments = await loadAssignments(client, subjectUserId)
   const overlapping = await client.query(
     `
       SELECT id, start_date, end_date
@@ -207,7 +224,7 @@ const createBlock = async (
         )
       FOR UPDATE
     `,
-    [context.user.id, startDate, endDate, ministryId],
+    [subjectUserId, startDate, endDate, ministryId],
   )
   let mergedStart = startDate
   let mergedEnd = endDate
@@ -235,6 +252,9 @@ const createBlock = async (
       updated: false,
     }
   }
+  if (body.previewOnly === true) {
+    return { message: "Availability checked", blocks: [], conflicts, updated: false }
+  }
   if (conflicts.length && body.requestChanges !== true) {
     throw Object.assign(
       new Error("Confirm that change requests should be sent for assigned duties"),
@@ -246,7 +266,7 @@ const createBlock = async (
     const change = await requestAssignmentChange(client, context, {
       assignmentId: assignment.id,
       reason: `Availability marked unavailable from ${mergedStart} through ${mergedEnd}.`,
-    })
+    }, subjectUserId)
     if (change.created) changeRequestedAssignmentIds.push(assignment.id)
   }
   const segments = [{ startDate: mergedStart, endDate: mergedEnd }]
@@ -277,7 +297,7 @@ const createBlock = async (
         RETURNING id, ministry_id, start_date, end_date, label, created_at, updated_at
       `,
       [
-        context.user.id,
+        subjectUserId,
         ministryId,
         segment.startDate,
         segment.endDate,
@@ -308,6 +328,7 @@ const createBlock = async (
       },
       metadata: {
         replacedBlockIds: overlapping.rows.map((item) => item.id),
+        subjectUserId,
       },
     })
   }
@@ -327,6 +348,8 @@ const cancelBlock = async (
   client: PoolClient,
   context: Awaited<ReturnType<typeof getIdentityContext>>,
   body: any,
+  subjectUserId = context.user.id,
+  forcedMinistryId: string | null = null,
 ) => {
   const blockId = typeof body.blockId === "string" ? body.blockId : ""
   const blockResult = await client.query(
@@ -335,11 +358,12 @@ const cancelBlock = async (
       FROM availability_blocks
       WHERE id = $1
         AND user_id = $2
+        AND ($3::UUID IS NULL OR ministry_id = $3::UUID)
         AND status = 'active'
       LIMIT 1
       FOR UPDATE
     `,
-    [blockId, context.user.id],
+    [blockId, subjectUserId, forcedMinistryId],
   )
   const block = blockResult.rows[0]
   if (!block) {
@@ -377,6 +401,7 @@ async function requestAssignmentChange(
   client: PoolClient,
   context: Awaited<ReturnType<typeof getIdentityContext>>,
   body: any,
+  subjectUserId = context.user.id,
 ) {
   const assignmentId =
     typeof body.assignmentId === "string" ? body.assignmentId : ""
@@ -398,7 +423,7 @@ async function requestAssignmentChange(
       LIMIT 1
       FOR UPDATE
     `,
-    [assignmentId, context.user.id, ASSIGNED_DUTY_STATUSES],
+    [assignmentId, subjectUserId, ASSIGNED_DUTY_STATUSES],
   )
   const assignment = assignmentResult.rows[0]
   if (!assignment) {
@@ -439,7 +464,7 @@ async function requestAssignmentChange(
       VALUES ($1, $2, $3, $4)
       RETURNING id
     `,
-    [assignment.id, context.user.id, context.actor.id, reason],
+    [assignment.id, subjectUserId, context.actor.id, reason],
   )
   await client.query(
     `
@@ -472,14 +497,113 @@ async function requestAssignmentChange(
   }
 }
 
+const loadManagedMembers = async (
+  client: PoolClient,
+  ministryId: string,
+) => {
+  const result = await client.query(
+    `
+      SELECT user_account.id, user_account.first_name, user_account.last_name
+      FROM ministry_members membership
+      JOIN users user_account ON user_account.id = membership.user_id
+      WHERE membership.ministry_id = $1
+        AND membership.status = 'active'
+        AND user_account.status = 'active'
+      ORDER BY lower(user_account.first_name), lower(user_account.last_name), user_account.id
+    `,
+    [ministryId],
+  )
+  return result.rows.map((row) => ({
+    id: row.id,
+    firstName: row.first_name,
+    lastName: row.last_name,
+  }))
+}
+
+const resolveManagedSubjects = async (
+  client: PoolClient,
+  context: Awaited<ReturnType<typeof getIdentityContext>>,
+  ministryId: string,
+  requestedIds: unknown,
+) => {
+  await requireMinistryAccess(client, context.user, ministryId, true)
+  const ids = Array.from(
+    new Set(
+      (Array.isArray(requestedIds) ? requestedIds : [requestedIds])
+        .map((value) => cleanText(value, 100))
+        .filter(Boolean),
+    ),
+  )
+  if (!ids.length) {
+    throw Object.assign(new Error("Choose at least one ministry member"), {
+      status: 400,
+    })
+  }
+  const result = await client.query(
+    `
+      SELECT user_id
+      FROM ministry_members
+      WHERE ministry_id = $1
+        AND user_id = ANY($2::UUID[])
+        AND status = 'active'
+    `,
+    [ministryId, ids],
+  )
+  if (result.rowCount !== ids.length) {
+    throw Object.assign(
+      new Error("Availability can only be managed for active members of this ministry"),
+      { status: 403 },
+    )
+  }
+  return ids
+}
+
 export const handleAvailability = async (request: Request) => {
   const client = await getPool().connect()
   try {
     const context = await getIdentityContext(client, request)
     if (request.method === "GET") {
+      const url = new URL(request.url)
+      const managedMinistryId = cleanText(url.searchParams.get("ministryId"), 100)
+      const requestedSubjectId = cleanText(url.searchParams.get("subjectUserId"), 100)
+      let subjectUserId = context.user.id
+      let managedMembers: any[] = []
+      if (managedMinistryId) {
+        const access = await requireMinistryAccess(
+          client,
+          context.user,
+          managedMinistryId,
+          false,
+        )
+        if (access.canManage) {
+          managedMembers = await loadManagedMembers(client, managedMinistryId)
+          if (requestedSubjectId) {
+            await resolveManagedSubjects(
+              client,
+              context,
+              managedMinistryId,
+              [requestedSubjectId],
+            )
+            subjectUserId = requestedSubjectId
+          }
+        }
+      }
+      const subjectResult = await client.query(
+        `SELECT id, first_name, last_name FROM users WHERE id = $1 LIMIT 1`,
+        [subjectUserId],
+      )
+      const subject = subjectResult.rows[0] || context.user
       const [blocks, assignments, ministriesResult] = await Promise.all([
-        loadBlocks(client, context.user.id),
-        loadAssignments(client, context.user.id),
+        loadBlocks(
+          client,
+          subjectUserId,
+          subjectUserId === context.user.id ? null : managedMinistryId || null,
+        ),
+        loadAssignments(
+          client,
+          subjectUserId,
+          subjectUserId === context.user.id ? null : managedMinistryId || null,
+        ),
         client.query(
           `
             SELECT ministry.id, ministry.name
@@ -494,13 +618,15 @@ export const handleAvailability = async (request: Request) => {
       ])
       return json({
         user: {
-          id: context.user.id,
-          firstName: context.user.first_name,
-          lastName: context.user.last_name,
+          id: subject.id,
+          firstName: subject.first_name,
+          lastName: subject.last_name,
         },
         blocks,
         assignments,
         ministries: ministriesResult.rows,
+        managedMembers,
+        managedMinistryId,
       })
     }
     if (request.method !== "POST") {
@@ -511,10 +637,70 @@ export const handleAvailability = async (request: Request) => {
     await client.query("BEGIN")
     try {
       let result: any
-      if (body.action === "create_block") {
+      if (["preview_blocks", "create_blocks"].includes(body.action)) {
+        const ministryId = cleanText(body.ministryId, 100)
+        if (!ministryId) {
+          throw Object.assign(new Error("Choose the ministry being managed"), {
+            status: 400,
+          })
+        }
+        const subjectIds = await resolveManagedSubjects(
+          client,
+          context,
+          ministryId,
+          body.subjectUserIds,
+        )
+        const results = []
+        for (const subjectUserId of subjectIds) {
+          results.push({
+            subjectUserId,
+            result: await createBlock(
+              client,
+              context,
+              {
+                ...body,
+                previewOnly: body.action === "preview_blocks",
+                requireConflictFree: false,
+              },
+              subjectUserId,
+              ministryId,
+            ),
+          })
+        }
+        const conflicts = results.flatMap((item) =>
+          (item.result.conflicts || []).map((conflict) => ({
+            ...conflict,
+            subjectUserId: item.subjectUserId,
+          })),
+        )
+        result = {
+          message:
+            body.action === "preview_blocks"
+              ? "Availability checked"
+              : `Availability updated for ${subjectIds.length} ${subjectIds.length === 1 ? "member" : "members"}`,
+          conflicts,
+          updated: results.some((item) => item.result.updated),
+          changeRequestedAssignmentIds: results.flatMap(
+            (item) => item.result.changeRequestedAssignmentIds || [],
+          ),
+        }
+      } else if (body.action === "create_block") {
         result = await createBlock(client, context, body)
       } else if (body.action === "cancel_block") {
-        result = await cancelBlock(client, context, body)
+        const ministryId = cleanText(body.managedMinistryId, 100)
+        const subjectUserId = cleanText(body.subjectUserId, 100)
+        if (ministryId && subjectUserId) {
+          await resolveManagedSubjects(client, context, ministryId, [subjectUserId])
+          result = await cancelBlock(
+            client,
+            context,
+            body,
+            subjectUserId,
+            ministryId,
+          )
+        } else {
+          result = await cancelBlock(client, context, body)
+        }
       } else if (body.action === "request_change") {
         result = await requestAssignmentChange(client, context, body)
       } else {

@@ -9,6 +9,7 @@ import {
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
+import useAccessibleDialog from "../../hooks/useAccessibleDialog"
 
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"]
 
@@ -83,7 +84,7 @@ const sortedRange = (first, second) =>
     ? { startDate: first, endDate: second }
     : { startDate: second, endDate: first }
 
-const MinistryAvailability = () => {
+const MinistryAvailability = ({ ministryId = "", canManageMembers = false }) => {
   const [availability, setAvailability] = React.useState({
     user: null,
     blocks: [],
@@ -97,12 +98,21 @@ const MinistryAvailability = () => {
   const [selectionEnd, setSelectionEnd] = React.useState("")
   const [label, setLabel] = React.useState("")
   const [scopeMinistryId, setScopeMinistryId] = React.useState("")
+  const [selectedMemberIds, setSelectedMemberIds] = React.useState([])
   const [isLoading, setIsLoading] = React.useState(true)
   const [isSaving, setIsSaving] = React.useState(false)
   const [message, setMessage] = React.useState("")
   const [errorMessage, setErrorMessage] = React.useState("")
   const [pendingConflictRequest, setPendingConflictRequest] =
     React.useState(null)
+  const closeConflictDialog = React.useCallback(
+    () => setPendingConflictRequest(null),
+    [],
+  )
+  const conflictDialogRef = useAccessibleDialog(
+    Boolean(pendingConflictRequest),
+    closeConflictDialog,
+  )
   const dragStart = React.useRef("")
   const dragMoved = React.useRef(false)
   const dragging = React.useRef(false)
@@ -122,7 +132,17 @@ const MinistryAvailability = () => {
     setErrorMessage("")
     try {
       const response = await fetch(
-        getFunctionEndpoint("scheduling/availability"),
+        (() => {
+          const url = new URL(
+            getFunctionEndpoint("scheduling/availability"),
+            window.location.origin,
+          )
+          if (ministryId) url.searchParams.set("ministryId", ministryId)
+          if (selectedMemberIds[0]) {
+            url.searchParams.set("subjectUserId", selectedMemberIds[0])
+          }
+          return url
+        })(),
         { headers: requestHeaders() },
       )
       const result = await response.json()
@@ -135,7 +155,7 @@ const MinistryAvailability = () => {
     } finally {
       setIsLoading(false)
     }
-  }, [requestHeaders])
+  }, [requestHeaders, ministryId, selectedMemberIds])
 
   React.useEffect(() => {
     loadAvailability()
@@ -180,6 +200,7 @@ const MinistryAvailability = () => {
       }
       setMessage(result.message)
       await loadAvailability()
+      window.dispatchEvent(new Event("ministry-conflicts-updated"))
       return result
     } catch (error) {
       setErrorMessage(error.message)
@@ -198,7 +219,13 @@ const MinistryAvailability = () => {
         (assignment) =>
       assignment.date >= selection.startDate &&
           assignment.date <= selection.endDate &&
-          (!scopeMinistryId || assignment.ministryId === scopeMinistryId),
+          (!(canManageMembers && selectedMemberIds.length
+            ? ministryId
+            : scopeMinistryId) ||
+            assignment.ministryId ===
+              (canManageMembers && selectedMemberIds.length
+                ? ministryId
+                : scopeMinistryId)),
       )
     : []
   const todayKey = toDateKey(new Date())
@@ -262,6 +289,41 @@ const MinistryAvailability = () => {
 
   const blockSelection = async () => {
     if (!selection) return
+    if (canManageMembers && selectedMemberIds.length) {
+      const preview = await postAction({
+        action: "preview_blocks",
+        subjectUserIds: selectedMemberIds,
+        ministryId,
+        startDate: selection.startDate,
+        endDate: selection.endDate,
+        label,
+      })
+      if (preview?.conflicts?.length) {
+        setMessage("")
+        setPendingConflictRequest({
+          selection,
+          label,
+          ministryId,
+          subjectUserIds: selectedMemberIds,
+          conflicts: preview.conflicts,
+        })
+        return
+      }
+      const result = await postAction({
+        action: "create_blocks",
+        subjectUserIds: selectedMemberIds,
+        ministryId,
+        startDate: selection.startDate,
+        endDate: selection.endDate,
+        label,
+      })
+      if (result?.updated) {
+        setSelectionStart("")
+        setSelectionEnd("")
+        setLabel("")
+      }
+      return
+    }
     const result = await postAction({
       action: "create_block",
       startDate: selection.startDate,
@@ -290,6 +352,24 @@ const MinistryAvailability = () => {
 
   const continueBlockSelection = async () => {
     if (!pendingConflictRequest) return
+    if (pendingConflictRequest.subjectUserIds?.length) {
+      const result = await postAction({
+        action: "create_blocks",
+        subjectUserIds: pendingConflictRequest.subjectUserIds,
+        ministryId: pendingConflictRequest.ministryId,
+        startDate: pendingConflictRequest.selection.startDate,
+        endDate: pendingConflictRequest.selection.endDate,
+        label: pendingConflictRequest.label,
+        requestChanges: true,
+      })
+      if (result?.updated) {
+        setSelectionStart("")
+        setSelectionEnd("")
+        setLabel("")
+        setPendingConflictRequest(null)
+      }
+      return
+    }
     const result = await postAction({
       action: "create_block",
       startDate: pendingConflictRequest.selection.startDate,
@@ -311,6 +391,9 @@ const MinistryAvailability = () => {
     await postAction({
       action: "cancel_block",
       blockId: block.id,
+      subjectUserId: selectedMemberIds[0] || undefined,
+      managedMinistryId:
+        selectedMemberIds.length && canManageMembers ? ministryId : undefined,
     })
   }
 
@@ -333,10 +416,12 @@ const MinistryAvailability = () => {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#896542]">
-              My availability
+              {selectedMemberIds.length ? "Ministry availability" : "My availability"}
             </p>
             <h2 className="mt-2 century-font text-2xl text-gray-950">
-              Block dates you cannot serve
+              {selectedMemberIds.length
+                ? "Block dates ministry members cannot serve"
+                : "Block dates you cannot serve"}
             </h2>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-gray-500">
               Tap the first and last date, or drag across the calendar. Dates
@@ -363,6 +448,35 @@ const MinistryAvailability = () => {
           >
             {errorMessage || message}
           </p>
+        )}
+
+        {canManageMembers && availability.managedMembers?.length > 0 && (
+          <label className="mt-5 block text-sm font-semibold text-gray-700">
+            Manage ministry member availability
+            <select
+              multiple
+              value={selectedMemberIds}
+              onChange={(event) => {
+                setSelectedMemberIds(
+                  Array.from(event.target.selectedOptions, (option) => option.value),
+                )
+                setSelectionStart("")
+                setSelectionEnd("")
+                setPendingConflictRequest(null)
+              }}
+              className="mt-2 min-h-32 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 font-normal outline-none focus:border-[#896542]"
+            >
+              {availability.managedMembers.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.firstName} {member.lastName}
+                </option>
+              ))}
+            </select>
+            <span className="mt-2 block text-xs font-normal text-gray-500">
+              Select one or several members. Changes apply only to this ministry.
+              Leave everyone unselected to manage your own account.
+            </span>
+          </label>
         )}
 
         <div className="relative mt-6 xl:mx-12">
@@ -517,16 +631,27 @@ const MinistryAvailability = () => {
             <label className="text-sm font-semibold text-gray-700">
               Applies to
               <select
-                value={scopeMinistryId}
+                value={
+                  canManageMembers && selectedMemberIds.length
+                    ? ministryId
+                    : scopeMinistryId
+                }
                 onChange={(event) => setScopeMinistryId(event.target.value)}
+                disabled={canManageMembers && selectedMemberIds.length > 0}
                 className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 font-normal outline-none focus:border-[#896542]"
               >
+                {canManageMembers && selectedMemberIds.length > 0 ? (
+                  <option value={ministryId}>This ministry only</option>
+                ) : (
+                  <>
                 <option value="">All ministries</option>
                 {(availability.ministries || []).map((ministry) => (
                   <option key={ministry.id} value={ministry.id}>
                     {ministry.name} only
                   </option>
                 ))}
+                  </>
+                )}
               </select>
             </label>
             <label className="text-sm font-semibold text-gray-700">
@@ -574,19 +699,21 @@ const MinistryAvailability = () => {
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        disabled={
-                          isSaving ||
-                          assignment.changeRequestStatus === "pending"
-                        }
-                        onClick={() => requestChange(assignment)}
-                        className="rounded-lg border border-orange-200 px-3 py-2 text-sm font-semibold text-orange-700 disabled:bg-orange-50 disabled:opacity-70"
-                      >
-                        {assignment.changeRequestStatus === "pending"
-                          ? "Change requested"
-                          : "Request change"}
-                      </button>
+                      {!selectedMemberIds.length && (
+                        <button
+                          type="button"
+                          disabled={
+                            isSaving ||
+                            assignment.changeRequestStatus === "pending"
+                          }
+                          onClick={() => requestChange(assignment)}
+                          className="rounded-lg border border-orange-200 px-3 py-2 text-sm font-semibold text-orange-700 disabled:bg-orange-50 disabled:opacity-70"
+                        >
+                          {assignment.changeRequestStatus === "pending"
+                            ? "Change requested"
+                            : "Request change"}
+                        </button>
+                      )}
                     </div>
                   </article>
                 ))}
@@ -623,7 +750,7 @@ const MinistryAvailability = () => {
                     {block.ministryName || "All ministries"}
                   </p>
                 </div>
-                <button
+                {(!selectedMemberIds.length || block.ministryId === ministryId) && <button
                   type="button"
                   disabled={isSaving}
                   onClick={() => removeBlock(block)}
@@ -632,6 +759,7 @@ const MinistryAvailability = () => {
                 >
                   <TrashIcon className="size-5" />
                 </button>
+                }
               </article>
             ))}
           </div>
@@ -645,6 +773,8 @@ const MinistryAvailability = () => {
       {pendingConflictRequest && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 px-4">
           <section
+            ref={conflictDialogRef}
+            tabIndex={-1}
             role="alertdialog"
             aria-modal="true"
             aria-labelledby="availability-conflict-title"
@@ -670,6 +800,18 @@ const MinistryAvailability = () => {
                   <p className="font-semibold text-gray-900">
                     {assignment.responsibilityName}
                   </p>
+                  {assignment.subjectUserId && (
+                    <p className="mt-1 text-xs font-semibold text-orange-800">
+                      {(() => {
+                        const member = availability.managedMembers?.find(
+                          (item) => item.id === assignment.subjectUserId,
+                        )
+                        return member
+                          ? `${member.firstName} ${member.lastName}`
+                          : "Ministry member"
+                      })()}
+                    </p>
+                  )}
                   <p className="mt-1 text-xs text-gray-600">
                     {formatDate(assignment.date)} · {assignment.eventTitle}
                   </p>
@@ -680,7 +822,7 @@ const MinistryAvailability = () => {
               <button
                 type="button"
                 disabled={isSaving}
-                onClick={() => setPendingConflictRequest(null)}
+                onClick={closeConflictDialog}
                 className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-600 disabled:opacity-50"
               >
                 Cancel

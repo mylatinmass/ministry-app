@@ -23,6 +23,7 @@ import { handleVolunteerSignup } from "../../server/scheduling/volunteers"
 import { handleVolunteerEvents } from "../../server/scheduling/volunteer-events"
 import { handleSupport } from "../../server/support"
 import { handleChapelSettings } from "../../server/chapel-settings"
+import { handlePriestAppointmentDetails } from "../../server/scheduling/priest-appointments"
 
 export const prerender = false
 
@@ -61,6 +62,9 @@ const route: APIRoute = async ({ params, request }) => {
   }
   if (path === "scheduling/events") {
     return handleEvents(request)
+  }
+  if (path === "scheduling/priest-appointment-details") {
+    return handlePriestAppointmentDetails(request)
   }
   if (path === "scheduling/availability") {
     return handleAvailability(request)

@@ -157,6 +157,12 @@ const MinistryWeekCalendar = ({
                   type="button"
                   onClick={() => selectWeekDay(date)}
                   aria-pressed={selected}
+                  aria-label={`${new Intl.DateTimeFormat("en-US", {
+                    weekday: "long",
+                    month: "long",
+                    day: "numeric",
+                    year: "numeric",
+                  }).format(date)}, ${dayEvents.length} ${dayEvents.length === 1 ? "event" : "events"}${hasAssignment ? ", includes your assignment" : ""}`}
                   className={`flex  min-w-0 flex-col gap-y-1 pt-1 items-center rounded-xl border  transition  ${
                     selected
                       ? "bg-[#eee2d5] shadow-sm scale-105 border-[#C1A387]"

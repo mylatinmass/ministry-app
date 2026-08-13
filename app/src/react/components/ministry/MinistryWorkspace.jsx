@@ -9,10 +9,13 @@ import {
   XMarkIcon,
 } from "@heroicons/react/24/outline"
 import MinistryWorkspaceContent from "./MinistryWorkspaceContent"
+import MinistryConflictTicker from "./MinistryConflictTicker"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 import { memberSections, ministrySections } from "./ministryNavigation"
 import { accountSections, accountSectionUrl } from "./accountNavigation"
+import { applyMinistryTheme } from "../../utils/ministryTheme"
+import useAccessibleDialog from "../../hooks/useAccessibleDialog"
 
 const accessLabels = {
   owner: "Global Owner",
@@ -35,6 +38,9 @@ const MinistryWorkspace = ({ data }) => {
   )
   const availableSections = isMember ? memberSections : ministrySections
   const [currentUser, setCurrentUser] = React.useState(data.user)
+  React.useLayoutEffect(() => {
+    applyMinistryTheme(currentUser?.appearanceTheme, currentUser?.id)
+  }, [currentUser?.appearanceTheme, currentUser?.id])
   const [sectionId, setSectionId] = React.useState(() =>
     isMember ? "schedule" : "overview",
   )
@@ -42,6 +48,8 @@ const MinistryWorkspace = ({ data }) => {
     isMember ? "month" : "summary",
   )
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false)
+  const closeMobileMenu = React.useCallback(() => setMobileMenuOpen(false), [])
+  const mobileMenuRef = useAccessibleDialog(mobileMenuOpen, closeMobileMenu)
   const [profileMenuOpen, setProfileMenuOpen] = React.useState(false)
   const [familyData, setFamilyData] = React.useState(null)
   const [messageUnreadCount, setMessageUnreadCount] = React.useState(0)
@@ -134,6 +142,7 @@ const MinistryWorkspace = ({ data }) => {
     })
     const result = await response.json()
     if (!response.ok) return
+    applyMinistryTheme(result.activeProfile?.appearanceTheme, profileId)
     window.sessionStorage.setItem(MINISTRY_SESSION_KEY, result.token)
     saveVisibleProfiles(
       showAll ? familyData.profiles.map((profile) => profile.id) : [profileId],
@@ -185,10 +194,10 @@ const MinistryWorkspace = ({ data }) => {
   }
 
   return (
-    <div className="ministry-workspace-shell h-screen overflow-hidden bg-white text-gray-900">
+    <div className="ministry-workspace-shell ministry-app-viewport overflow-hidden bg-white text-gray-900">
       <div className="mx-auto flex h-full w-full max-w-[1600px]">
         <aside className="ministry-workspace-navigation hidden w-72 shrink-0 border-r border-gray-100 bg-white lg:block">
-          <div className="sticky top-0 flex max-h-screen flex-col overflow-y-auto px-4 py-6">
+          <div className="ministry-scroll-region sticky top-0 flex max-h-full flex-col overflow-y-auto px-4 py-6">
             <div className="mb-5 px-3">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#C1A387]">
                 Ministry workspace
@@ -206,6 +215,7 @@ const MinistryWorkspace = ({ data }) => {
                   <Link
                     key={section.id}
                     to={accountSectionUrl(section.id)}
+                    aria-current={active ? "page" : undefined}
                     className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${
                       active
                         ? "bg-[#f7f3ef] font-semibold text-[#6f4f34]"
@@ -396,8 +406,15 @@ const MinistryWorkspace = ({ data }) => {
             </div>
           </header>
 
+          <MinistryConflictTicker
+            profileId={currentUser?.id}
+            onOpenAvailability={() =>
+              openWorkspaceArea("availability", "my-availability")
+            }
+          />
+
           <div
-            className={`ministry-workspace-body min-h-0 flex-1 px-2 ${
+            className={`ministry-workspace-body ministry-scroll-region min-h-0 flex-1 px-2 ${
               isSchedule ? "overflow-hidden" : "overflow-y-auto"
             }`}
           >
@@ -418,22 +435,22 @@ const MinistryWorkspace = ({ data }) => {
           <button
             type="button"
             aria-label="Close ministry menu"
-            onClick={() => setMobileMenuOpen(false)}
+            onClick={closeMobileMenu}
             className="absolute inset-0 bg-black/30 backdrop-blur-[1px]"
           />
-          <div className="absolute inset-y-0 left-0 flex w-[86%] max-w-sm flex-col bg-white shadow-2xl">
+          <div ref={mobileMenuRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="ministry-mobile-menu-title" className="absolute inset-y-0 left-0 flex w-[86%] max-w-sm flex-col bg-white shadow-2xl">
             <div className="flex items-start justify-between border-b border-[#e6ddd4] p-5">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#C1A387]">
                   Ministry
                 </p>
-                <h2 className="mt-1 century-font text-2xl text-[#6f4f34]">
+                <h2 id="ministry-mobile-menu-title" className="mt-1 century-font text-2xl text-[#6f4f34]">
                   {data.ministry.name}
                 </h2>
               </div>
               <button
                 type="button"
-                onClick={() => setMobileMenuOpen(false)}
+                onClick={closeMobileMenu}
                 className="rounded-lg border border-gray-200 bg-white p-2 text-gray-600"
                 aria-label="Close menu"
               >
@@ -453,6 +470,7 @@ const MinistryWorkspace = ({ data }) => {
                     key={section.id}
                     to={accountSectionUrl(section.id)}
                     onClick={() => setMobileMenuOpen(false)}
+                    aria-current={active ? "page" : undefined}
                     className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left ${
                       active
                         ? "bg-[#f7f3ef] font-semibold text-[#6f4f34]"
@@ -489,6 +507,7 @@ const MinistryWorkspace = ({ data }) => {
                 key={item.id}
                 type="button"
                 onClick={() => setActionId(item.id)}
+                aria-pressed={active}
                 className={`flex min-w-16 flex-1 flex-col items-center gap-1 rounded-xl px-2 py-2 text-[11px] font-medium transition ${
                   active ? "bg-[#f7f3ef] text-[#6f4f34]" : "text-gray-500"
                 }`}

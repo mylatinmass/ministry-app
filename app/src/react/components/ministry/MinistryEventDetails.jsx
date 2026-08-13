@@ -15,6 +15,7 @@ import {
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 import MinistryOrdoReference from "./MinistryOrdoReference"
+import useAccessibleDialog from "../../hooks/useAccessibleDialog"
 
 const blankResponsibility = {
   responsibilityId: "",
@@ -72,6 +73,9 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
   const [isPresented, setIsPresented] = React.useState(false)
   const [message, setMessage] = React.useState("")
   const [errorMessage, setErrorMessage] = React.useState("")
+  const [privateDetails, setPrivateDetails] = React.useState(null)
+  const [canManagePrivateDetails, setCanManagePrivateDetails] = React.useState(false)
+  const [isSavingPrivateDetails, setIsSavingPrivateDetails] = React.useState(false)
   const closeTimer = React.useRef(null)
 
   const loadDetails = React.useCallback(async () => {
@@ -99,6 +103,32 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
         throw new Error(result.message || "Unable to load event")
       }
       setDetails(result)
+      if (result.canSeeProtectedDetails) {
+        const privateUrl = new URL(
+          getFunctionEndpoint("scheduling/priest-appointment-details"),
+          window.location.origin,
+        )
+        privateUrl.searchParams.set("eventId", event.id)
+        const privateResponse = await fetch(privateUrl, {
+          headers: {
+            Authorization: `Bearer ${window.sessionStorage.getItem(MINISTRY_SESSION_KEY)}`,
+          },
+        })
+        const privateResult = await privateResponse.json()
+        if (privateResponse.ok) {
+          setPrivateDetails({
+            personName: privateResult.details?.person_name || "",
+            phone: privateResult.details?.phone || "",
+            address: privateResult.details?.address || "",
+            instructions: privateResult.details?.instructions || "",
+            privateNotes: privateResult.details?.private_notes || "",
+          })
+          setCanManagePrivateDetails(Boolean(privateResult.canManageProtectedDetails))
+        }
+      } else {
+        setPrivateDetails(null)
+        setCanManagePrivateDetails(false)
+      }
       setSignupCode(result.signup_code || "")
       const generalVolunteer = result.responsibilities?.find(
         (responsibility) =>
@@ -142,15 +172,41 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
     [],
   )
 
-  if (!event) return null
-
-  const closeDetails = () => {
+  const closeDetails = React.useCallback(() => {
     setIsPresented(false)
     if (closeTimer.current) window.clearTimeout(closeTimer.current)
     closeTimer.current = window.setTimeout(onClose, 300)
-  }
+  }, [onClose])
+  const dialogRef = useAccessibleDialog(Boolean(event), closeDetails)
+
+  if (!event) return null
 
   const displayedEvent = details || event
+
+  const savePrivateDetails = async () => {
+    setIsSavingPrivateDetails(true)
+    setErrorMessage("")
+    try {
+      const response = await fetch(
+        getFunctionEndpoint("scheduling/priest-appointment-details"),
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${window.sessionStorage.getItem(MINISTRY_SESSION_KEY)}`,
+          },
+          body: JSON.stringify({ eventId: displayedEvent.id, ...privateDetails }),
+        },
+      )
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.message || "Unable to update private details")
+      setMessage(result.message)
+    } catch (error) {
+      setErrorMessage(error.message)
+    } finally {
+      setIsSavingPrivateDetails(false)
+    }
+  }
 
   const start = new Date(displayedEvent.start_time)
   const end = new Date(displayedEvent.end_time)
@@ -562,9 +618,11 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
 
   return (
     <div
+      ref={dialogRef}
+      tabIndex={-1}
       role="dialog"
       aria-modal="true"
-      aria-label={`${displayedEvent.title} event details`}
+      aria-labelledby="ministry-event-details-title"
       className={`fixed inset-0 z-[90] overflow-y-auto bg-white transition-transform duration-300 ease-out lg:transition-none ${
         isPresented ? "translate-x-0" : "translate-x-full"
       }`}
@@ -600,13 +658,69 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
             {displayedEvent.participation_type}
           </span>
         </div>
-        <h1 className="mt-5 century-font text-4xl leading-tight text-gray-950 sm:text-5xl">
+        <h1 id="ministry-event-details-title" className="mt-5 century-font text-4xl leading-tight text-gray-950 sm:text-5xl">
           {displayedEvent.title}
         </h1>
         <p className="mt-4 text-base leading-relaxed text-gray-600 sm:text-lg">
           {displayedEvent.description ||
             "No event description has been added yet."}
         </p>
+
+        {displayedEvent.visibility === "private" && (
+          <section className="mt-8 rounded-2xl border border-[#d8c7b8] bg-[#fbf8f4] p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#896542]">
+              Private Priest appointment
+            </p>
+            {!details?.canSeeProtectedDetails ? (
+              <p className="mt-2 text-sm text-gray-600">
+                Personal details are restricted to the assigned priest and Priest Ministry administrators.
+              </p>
+            ) : privateDetails ? (
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                {[
+                  ["Person", "personName", "text"],
+                  ["Telephone", "phone", "tel"],
+                  ["Address", "address", "text"],
+                ].map(([label, key, type]) => (
+                  <label key={key} className={key === "address" ? "sm:col-span-2 text-sm font-semibold text-gray-700" : "text-sm font-semibold text-gray-700"}>
+                    {label}
+                    <input
+                      type={type}
+                      value={privateDetails[key]}
+                      readOnly={!canManagePrivateDetails}
+                      onChange={(changeEvent) => setPrivateDetails((current) => ({ ...current, [key]: changeEvent.target.value }))}
+                      className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 font-normal read-only:bg-gray-50"
+                    />
+                  </label>
+                ))}
+                {[
+                  ["Instructions", "instructions"],
+                  ["Private notes", "privateNotes"],
+                ].map(([label, key]) => (
+                  <label key={key} className="text-sm font-semibold text-gray-700 sm:col-span-2">
+                    {label}
+                    <textarea
+                      value={privateDetails[key]}
+                      readOnly={!canManagePrivateDetails}
+                      onChange={(changeEvent) => setPrivateDetails((current) => ({ ...current, [key]: changeEvent.target.value }))}
+                      className="mt-2 min-h-24 w-full rounded-xl border border-gray-200 bg-white p-3 font-normal read-only:bg-gray-50"
+                    />
+                  </label>
+                ))}
+                {canManagePrivateDetails && (
+                  <button
+                    type="button"
+                    disabled={isSavingPrivateDetails}
+                    onClick={savePrivateDetails}
+                    className="w-fit rounded-lg bg-[#896542] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    {isSavingPrivateDetails ? "Updating…" : "Update private details"}
+                  </button>
+                )}
+              </div>
+            ) : null}
+          </section>
+        )}
 
         {errorMessage && (
           <p

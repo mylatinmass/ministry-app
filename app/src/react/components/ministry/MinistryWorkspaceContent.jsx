@@ -290,6 +290,14 @@ const MinistryWorkspaceContent = ({
   const [calendarFocusDate, setCalendarFocusDate] = React.useState(null)
   const [selectedEvent, setSelectedEvent] = React.useState(null)
   const [showOnlyMyEvents, setShowOnlyMyEvents] = React.useState(false)
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+    const requestedEventId = new URLSearchParams(window.location.search).get("event")
+    if (!requestedEventId) return
+    const requestedEvent = [...(data.events || []), ...(data.calendarEvents || [])]
+      .find((item) => item.id === requestedEventId)
+    if (requestedEvent) setSelectedEvent(requestedEvent)
+  }, [data.events, data.calendarEvents])
   const [visibleScheduleRange, setVisibleScheduleRange] = React.useState(() => {
     const date = new Date()
     const month = `${date.getMonth() + 1}`.padStart(2, "0")
@@ -486,7 +494,12 @@ const MinistryWorkspaceContent = ({
     section.id === "availability" &&
     activeAction.id === "my-availability"
   ) {
-    content = <MinistryAvailability />
+    content = (
+      <MinistryAvailability
+        ministryId={data.ministry.id}
+        canManageMembers={data.ministry.accessLevel !== "member"}
+      />
+    )
   } else if (section.id === "profile") {
     content = (
       <MinistryProfile

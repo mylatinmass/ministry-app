@@ -20,6 +20,7 @@ const getMinistryUserById = async (client, userId) => {
         u.email,
         u.username,
         u.global_role,
+        u.appearance_theme,
         u.status,
         u.is_volunteer_profile,
         EXISTS (
@@ -50,6 +51,7 @@ const getMinistryUserByUsername = async (client, username) => {
         u.username,
         u.password_hash,
         u.global_role,
+        u.appearance_theme,
         u.status,
         u.is_volunteer_profile,
         EXISTS (
@@ -182,6 +184,7 @@ const toPublicMinistryUser = (user) => ({
   lastName: user.last_name,
   username: user.username,
   globalRole: user.global_role,
+  appearanceTheme: user.appearance_theme || "light",
 })
 
 module.exports = {

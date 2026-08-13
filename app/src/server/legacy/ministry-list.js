@@ -145,8 +145,16 @@ const handler = async (event) => {
             ordo_day.celebration AS ordo_celebration,
             ordo_day.general_information AS ordo_general_information,
             e.title,
-            e.description,
-            e.location,
+            CASE WHEN COALESCE(e.visibility, 'public') <> 'private'
+              OR EXISTS (SELECT 1 FROM responsibility_assignments private_assignment WHERE private_assignment.event_id = e.id AND private_assignment.user_id = $1 AND private_assignment.status NOT IN ('declined', 'cancelled'))
+              OR EXISTS (SELECT 1 FROM ministry_members private_access JOIN ministries private_ministry ON private_ministry.id = private_access.ministry_id WHERE private_access.user_id = $1 AND private_access.status = 'active' AND private_access.level IN ('owner', 'admin') AND private_ministry.slug = 'priests')
+              OR EXISTS (SELECT 1 FROM users private_user WHERE private_user.id = $1 AND private_user.global_role IN ('owner', 'super_admin'))
+              THEN e.description ELSE NULL END AS description,
+            CASE WHEN COALESCE(e.visibility, 'public') <> 'private'
+              OR EXISTS (SELECT 1 FROM responsibility_assignments private_assignment WHERE private_assignment.event_id = e.id AND private_assignment.user_id = $1 AND private_assignment.status NOT IN ('declined', 'cancelled'))
+              OR EXISTS (SELECT 1 FROM ministry_members private_access JOIN ministries private_ministry ON private_ministry.id = private_access.ministry_id WHERE private_access.user_id = $1 AND private_access.status = 'active' AND private_access.level IN ('owner', 'admin') AND private_ministry.slug = 'priests')
+              OR EXISTS (SELECT 1 FROM users private_user WHERE private_user.id = $1 AND private_user.global_role IN ('owner', 'super_admin'))
+              THEN e.location ELSE NULL END AS location,
             e.start_time,
             e.end_time,
             e.status,
@@ -166,8 +174,15 @@ const handler = async (event) => {
             ON ordo_day.liturgical_date =
               (e.start_time AT TIME ZONE 'America/New_York')::DATE
           WHERE e.status IN ('published', 'cancelled', 'completed')
+            AND (
+              COALESCE(e.visibility, 'public') <> 'private'
+              OR EXISTS (SELECT 1 FROM responsibility_assignments private_assignment WHERE private_assignment.event_id = e.id AND private_assignment.user_id = $1 AND private_assignment.status NOT IN ('declined', 'cancelled'))
+              OR EXISTS (SELECT 1 FROM ministry_members private_access JOIN ministries private_ministry ON private_ministry.id = private_access.ministry_id WHERE private_access.user_id = $1 AND private_access.status = 'active' AND private_ministry.slug = 'priests')
+              OR EXISTS (SELECT 1 FROM users private_user WHERE private_user.id = $1 AND private_user.global_role IN ('owner', 'super_admin'))
+            )
           ORDER BY e.start_time
-        `
+        `,
+        [user.id]
       ),
       client.query(
         `

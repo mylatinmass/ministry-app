@@ -127,7 +127,7 @@ const MinistryMonthCalendar = ({
 
               <button
                 type="button"
-                aria-label="Next week"
+                aria-label="Next month"
                 onClick={() => moveMonth(1)}
                 className="w-max p-2 rounded-xl transition hover:bg-gray-100"
               >
@@ -156,9 +156,11 @@ const MinistryMonthCalendar = ({
         </div>
 
         <div className="grid grid-cols-7 text-center text-xs font-semibold uppercase tracking-[0.14em] text-gray-700 sm:text-sm">
-          {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
-            <div key={`${day}-${index}`} className="py-2">
-              {day}
+          {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((day) => (
+            <div key={day} className="py-2">
+              <abbr title={day} className="no-underline" aria-label={day}>
+                {day.slice(0, 1)}
+              </abbr>
             </div>
           ))}
         </div>
@@ -192,11 +194,12 @@ const MinistryMonthCalendar = ({
                         ? "ring-1 ring-gray-300"
                         : ""
                 } hover:bg-gray-50`}
-                aria-label={new Intl.DateTimeFormat("en-US", {
+                aria-label={`${new Intl.DateTimeFormat("en-US", {
+                  weekday: "long",
                   month: "long",
                   day: "numeric",
                   year: "numeric",
-                }).format(date)}
+                }).format(date)}; ${dayEvents.length} ${dayEvents.length === 1 ? "event" : "events"}${hasAssignment ? "; includes your assignment" : ""}`}
               >
                 {date.getDate()}
               </button>

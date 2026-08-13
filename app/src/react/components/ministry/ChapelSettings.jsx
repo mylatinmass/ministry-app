@@ -7,6 +7,7 @@ import {
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
+import useAccessibleDialog from "../../hooks/useAccessibleDialog"
 
 const emptyObservance = {
   id: "",
@@ -138,6 +139,8 @@ const ChapelSettings = () => {
   const [settings, setSettings] = React.useState(null)
   const [editing, setEditing] = React.useState(false)
   const [observance, setObservance] = React.useState(null)
+  const closeObservance = React.useCallback(() => setObservance(null), [])
+  const observanceDialogRef = useAccessibleDialog(Boolean(observance), closeObservance)
   const [isSaving, setIsSaving] = React.useState(false)
   const [message, setMessage] = React.useState("")
   const [errorMessage, setErrorMessage] = React.useState("")
@@ -339,15 +342,22 @@ const ChapelSettings = () => {
 
       {observance && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4">
-          <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-5 shadow-xl">
+          <div
+            ref={observanceDialogRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="chapel-observance-dialog-title"
+            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-5 shadow-xl"
+          >
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="century-font text-2xl text-gray-950">
+                <h2 id="chapel-observance-dialog-title" className="century-font text-2xl text-gray-950">
                   {observance.id ? "Edit observance" : "Add observance"}
                 </h2>
                 <p className="mt-1 text-sm text-gray-500">This is a chapel-specific exception to the standard Ordo calendar.</p>
               </div>
-              <button type="button" onClick={() => setObservance(null)} className="rounded-full p-2 text-gray-500 hover:bg-gray-100" aria-label="Close">
+              <button type="button" onClick={closeObservance} className="rounded-full p-2 text-gray-500 hover:bg-gray-100" aria-label="Close observance editor">
                 <XMarkIcon className="size-5" />
               </button>
             </div>

@@ -3,6 +3,7 @@ import {
   CheckIcon,
   DocumentArrowDownIcon,
   DocumentDuplicateIcon,
+  ExclamationTriangleIcon,
   NoSymbolIcon,
   PencilSquareIcon,
   PlusIcon,
@@ -10,6 +11,7 @@ import {
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 import MinistryOrdoReference from "./MinistryOrdoReference"
+import useAccessibleDialog from "../../hooks/useAccessibleDialog"
 import {
   downloadEventSchedulePdf,
   getEventRange,
@@ -47,6 +49,7 @@ const initialForm = () => ({
   recurrenceOrdinal: 1,
   updateScope: "this_event",
   participationType: "members",
+  visibility: "public",
 })
 
 const formatEventDate = (value) =>
@@ -129,6 +132,13 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
   const [isSaving, setIsSaving] = React.useState(false)
   const [templatePreview, setTemplatePreview] = React.useState(null)
   const [recurrencePreview, setRecurrencePreview] = React.useState(null)
+  const [conflictPreview, setConflictPreview] = React.useState(null)
+  const closeConflictPreview = React.useCallback(() => setConflictPreview(null), [])
+  const conflictDialogRef = useAccessibleDialog(
+    Boolean(conflictPreview),
+    closeConflictPreview,
+  )
+  const [conflictReason, setConflictReason] = React.useState("")
   const [creatingRepeatingEvent, setCreatingRepeatingEvent] = React.useState(false)
   const [message, setMessage] = React.useState("")
   const [errorMessage, setErrorMessage] = React.useState("")
@@ -190,18 +200,23 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
 
   const updateField = (field, value) => {
     setRecurrencePreview(null)
+    setConflictPreview(null)
     if (field !== "templateId") setTemplatePreview(null)
     setForm((current) => ({ ...current, [field]: value }))
   }
 
   const selectTemplate = (templateId) => {
     const template = templates.find((item) => item.id === templateId)
+    const privateByDefault = /sick call|private appointment|travel/i.test(
+      template?.name || "",
+    )
     setForm((current) => ({
       ...current,
       templateId,
       title: current.title || template?.name || "",
       description: current.description || template?.description || "",
       participationType: template?.participationType || "members",
+      visibility: privateByDefault ? "private" : current.visibility,
     }))
   }
 
@@ -227,6 +242,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       recurrenceOrdinal: Number(recurrence.ordinal || 1),
       updateScope: "this_event",
       participationType: event.participation_type || "members",
+      visibility: event.visibility || "public",
     })
   }
 
@@ -241,7 +257,35 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       startTime: "",
       endTime: "",
       participationType: event.participation_type || "members",
+      visibility: event.visibility || "public",
     })
+
+  const persistEvent = async (body, { editing, cloning }) => {
+    const response = await fetch(
+      getFunctionEndpoint("scheduling/events"),
+      {
+        method: editing ? "PATCH" : "POST",
+        headers: requestHeaders(),
+        body: JSON.stringify(body),
+      },
+    )
+    const result = await response.json()
+    if (!response.ok) {
+      if (result.conflicts?.length) {
+        setConflictPreview({ body, editing, cloning, conflicts: result.conflicts })
+        return false
+      }
+      throw new Error(result.message || "Unable to save event")
+    }
+    setMessage(result.message)
+    setForm(initialForm())
+    setRecurrencePreview(null)
+    setConflictPreview(null)
+    setConflictReason("")
+    setCreatingRepeatingEvent(false)
+    await loadData()
+    return true
+  }
 
   const saveEvent = async (event) => {
     event.preventDefault()
@@ -293,23 +337,67 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
         setRecurrencePreview(previewResult)
         return
       }
-      const response = await fetch(
-        getFunctionEndpoint("scheduling/events"),
-        {
-          method: editing ? "PATCH" : "POST",
-          headers: requestHeaders(),
-          body: JSON.stringify(body),
-        },
-      )
-      const result = await response.json()
-      if (!response.ok) {
-        throw new Error(result.message || "Unable to save event")
+      if (
+        editing &&
+        form.updateScope === "this_and_future" &&
+        recurrencePreview?.conflicts?.length
+      ) {
+        setConflictPreview({
+          body,
+          editing,
+          cloning,
+          conflicts: recurrencePreview.conflicts,
+        })
+        return
       }
-      setMessage(result.message)
-      setForm(initialForm())
-      setRecurrencePreview(null)
-      setCreatingRepeatingEvent(false)
-      await loadData()
+      if (!(editing && form.updateScope === "this_and_future")) {
+        const previewResponse = await fetch(
+          getFunctionEndpoint("scheduling/events"),
+          {
+            method: "POST",
+            headers: requestHeaders(),
+            body: JSON.stringify({
+              ...body,
+              action: "preview_event_conflicts",
+            }),
+          },
+        )
+        const previewResult = await previewResponse.json()
+        if (!previewResponse.ok) {
+          throw new Error(previewResult.message || "Unable to check event conflicts")
+        }
+        if (previewResult.conflicts?.length) {
+          setConflictPreview({
+            body,
+            editing,
+            cloning,
+            conflicts: previewResult.conflicts,
+          })
+          return
+        }
+      }
+      await persistEvent(body, { editing, cloning })
+    } catch (error) {
+      setErrorMessage(error.message)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const ignoreEventConflicts = async () => {
+    if (!conflictPreview) return
+    setIsSaving(true)
+    setErrorMessage("")
+    try {
+      await persistEvent(
+        {
+          ...conflictPreview.body,
+          conflictOverride: true,
+          conflictOverrideReason:
+            conflictReason.trim() || "Overlap reviewed by ministry administrator",
+        },
+        conflictPreview,
+      )
     } catch (error) {
       setErrorMessage(error.message)
     } finally {
@@ -438,6 +526,68 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
           }`}
         >
           {errorMessage || message}
+        </div>
+      )}
+
+      {conflictPreview && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4">
+          <div
+            ref={conflictDialogRef}
+            tabIndex={-1}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="event-conflict-title"
+            className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl"
+          >
+            <div className="flex items-start gap-3">
+              <span className="rounded-xl bg-orange-500 p-2.5 text-white">
+                <ExclamationTriangleIcon className="size-6" />
+              </span>
+              <div>
+                <h3 id="event-conflict-title" className="century-font text-2xl text-gray-950">
+                  Event schedule conflict
+                </h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Fix the date or time, or keep the overlap with a visible warning.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 space-y-2">
+              {conflictPreview.conflicts.map((conflict) => (
+                <div key={conflict.id} className="rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm text-orange-900">
+                  <span className="font-semibold">{conflict.title}</span>
+                  <span> · {formatEventDate(conflict.startTime)}</span>
+                </div>
+              ))}
+            </div>
+            <label className="mt-4 block text-sm font-semibold text-gray-700">
+              Override note (optional)
+              <input
+                value={conflictReason}
+                maxLength={500}
+                onChange={(event) => setConflictReason(event.target.value)}
+                placeholder="Why this overlap is acceptable"
+                className="mt-2 h-11 w-full rounded-xl border border-gray-200 px-3 font-normal"
+              />
+            </label>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeConflictPreview}
+                className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700"
+              >
+                Fix
+              </button>
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={ignoreEventConflicts}
+                className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {isSaving ? "Saving..." : "Ignore and save"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -604,6 +754,23 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
           )}
 
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            {data.ministry?.slug === "priests" && (
+              <label className="text-sm font-semibold text-gray-700 sm:col-span-2">
+                Visibility
+                <select
+                  value={form.visibility}
+                  onChange={(event) => updateField("visibility", event.target.value)}
+                  className="mt-2 h-12 w-full rounded-xl border border-gray-200 bg-white px-4 font-normal"
+                >
+                  <option value="public">Public event</option>
+                  <option value="ministry">Priest Ministry only</option>
+                  <option value="private">Private appointment</option>
+                </select>
+                <span className="mt-2 block text-xs font-normal text-gray-500">
+                  Private appointments show only the event type. Personal details are protected separately.
+                </span>
+              </label>
+            )}
             <label className="text-sm font-semibold text-gray-700 sm:col-span-2">
               Who can participate
               <select
@@ -940,6 +1107,11 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                         {event.responsibility_count} responsibilities
                         {event.recurrence_group_id ? " · Repeating" : ""}
                       </p>
+                      {event.conflict_override && (
+                        <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-orange-500 px-2 py-1 text-xs font-semibold text-white">
+                          <ExclamationTriangleIcon className="size-3.5" /> Schedule overlap ignored
+                        </p>
+                      )}
                     </button>
                     <span className="self-start rounded-full bg-gray-100 px-2 py-1 text-xs uppercase text-gray-500 sm:self-auto">
                       {event.status}

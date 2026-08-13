@@ -8,6 +8,7 @@ import {
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
+import useAccessibleDialog from "../../hooks/useAccessibleDialog"
 
 const CHAPEL_TIME_ZONE = "America/New_York"
 
@@ -63,6 +64,14 @@ const MinistryOrdoReference = ({
   const [errorMessage, setErrorMessage] = React.useState("")
   const [showVerificationNotice, setShowVerificationNotice] =
     React.useState(false)
+  const closeVerificationNotice = React.useCallback(
+    () => setShowVerificationNotice(false),
+    [],
+  )
+  const verificationDialogRef = useAccessibleDialog(
+    showVerificationNotice,
+    closeVerificationNotice,
+  )
 
   const loadReference = React.useCallback(async () => {
     if (!liturgicalDate) {
@@ -185,11 +194,13 @@ const MinistryOrdoReference = ({
           role="presentation"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
-              setShowVerificationNotice(false)
+              closeVerificationNotice()
             }
           }}
         >
           <div
+            ref={verificationDialogRef}
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-labelledby="ordo-verification-title"
@@ -209,7 +220,7 @@ const MinistryOrdoReference = ({
               </div>
               <button
                 type="button"
-                onClick={() => setShowVerificationNotice(false)}
+                onClick={closeVerificationNotice}
                 aria-label="Close verification message"
                 className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100"
               >

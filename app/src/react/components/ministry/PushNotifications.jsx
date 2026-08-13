@@ -208,7 +208,7 @@ const PushNotifications = () => {
         )}
       </div>
       {message && (
-        <p className="mt-2 max-w-xl text-sm leading-relaxed text-gray-500">
+        <p role="status" aria-live="polite" className="mt-2 max-w-xl text-sm leading-relaxed text-gray-500">
           {message}
         </p>
       )}

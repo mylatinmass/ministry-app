@@ -19,6 +19,7 @@ import {
   loadEventSubstitutionState,
   requestAssignmentSubstitute,
 } from "./substitutions"
+import { getPriestPrivacyAccess } from "./priest-privacy"
 
 const EVENT_STATUSES = new Set([
   "draft",
@@ -61,6 +62,7 @@ const SERVICE_OUTCOMES = new Set([
   "excused",
 ])
 const PARTICIPATION_TYPES = new Set(["members", "volunteers", "both"])
+const EVENT_VISIBILITIES = new Set(["public", "ministry", "private"])
 const SIGNUP_CODE_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const RESERVED_SIGNUP_CODES = new Set([
   "api",
@@ -149,6 +151,99 @@ const parseDate = (value: unknown, fieldName: string) => {
     throw Object.assign(new Error(`${fieldName} is invalid`), { status: 400 })
   }
   return date
+}
+
+const findEventConflicts = async (
+  client: PoolClient,
+  ministryIds: string[],
+  start: Date,
+  end: Date,
+  excludeEventIds: string[] = [],
+) => {
+  if (!ministryIds.length) return []
+  const result = await client.query(
+    `
+      SELECT DISTINCT event.id, event.title, event.start_time, event.end_time
+      FROM events event
+      LEFT JOIN event_ministries event_ministry
+        ON event_ministry.event_id = event.id
+      WHERE event.status IN ('draft', 'published')
+        AND (
+          event.ministry_id = ANY($1::UUID[])
+          OR event_ministry.ministry_id = ANY($1::UUID[])
+        )
+        AND event.start_time < $3
+        AND event.end_time > $2
+        AND NOT (event.id = ANY($4::UUID[]))
+      ORDER BY event.start_time, event.id
+      LIMIT 20
+    `,
+    [ministryIds, start, end, excludeEventIds],
+  )
+  return result.rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    startTime: row.start_time,
+    endTime: row.end_time,
+  }))
+}
+
+const previewEventConflicts = async (
+  client: PoolClient,
+  context: any,
+  body: any,
+) => {
+  const start = parseDate(body.startTime, "Start time")
+  const end = parseDate(body.endTime, "End time")
+  if (end <= start) {
+    throw Object.assign(new Error("End time must be after start time"), {
+      status: 400,
+    })
+  }
+  const eventId = cleanText(body.eventId, 100)
+  let ministryIds: string[] = []
+  if (eventId) {
+    const eventResult = await client.query(
+      `SELECT id, ministry_id FROM events WHERE id = $1 LIMIT 1`,
+      [eventId],
+    )
+    const event = eventResult.rows[0]
+    if (!event) throw Object.assign(new Error("Event not found"), { status: 404 })
+    await requireMinistryAccess(client, context.user, event.ministry_id, true)
+    const participants = await client.query(
+      `SELECT ministry_id FROM event_ministries WHERE event_id = $1`,
+      [eventId],
+    )
+    ministryIds = Array.from(
+      new Set([event.ministry_id, ...participants.rows.map((row) => row.ministry_id)]),
+    ).filter(Boolean) as string[]
+  } else {
+    const structure = await loadTemplateStructure(
+      client,
+      cleanText(body.templateId, 100),
+    )
+    await requireMinistryAccess(
+      client,
+      context.user,
+      structure.template.ministry_id,
+      true,
+    )
+    ministryIds = Array.from(
+      new Set([
+        structure.template.ministry_id,
+        ...structure.blocks.map((block: any) => block.ministry_id),
+      ]),
+    ).filter(Boolean) as string[]
+  }
+  return {
+    conflicts: await findEventConflicts(
+      client,
+      ministryIds,
+      start,
+      end,
+      eventId ? [eventId] : [],
+    ),
+  }
 }
 
 const toChapelDateKey = (value: string | Date) => {
@@ -494,8 +589,11 @@ const createEventFromStructure = async (
     recurrenceAnchorAt = null,
     recurrenceParentGroupId = null,
     participationType,
+    visibility = "public",
     confirmationDeadline = null,
     sourceEventId = null,
+    conflictOverride = false,
+    conflictOverrideReason = null,
   }: any,
 ) => {
   const resolvedParticipationType = PARTICIPATION_TYPES.has(participationType)
@@ -513,6 +611,7 @@ const createEventFromStructure = async (
         start_time,
         end_time,
         participation_type,
+        visibility,
         status,
         published_at,
         confirmation_deadline_at,
@@ -522,12 +621,20 @@ const createEventFromStructure = async (
         recurrence_rule,
         recurrence_anchor_at,
         recurrence_parent_group_id,
+        conflict_override,
+        conflict_override_reason,
+        conflict_override_by,
+        conflict_override_at,
         created_by
       )
       VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-        CASE WHEN $10 = 'published' THEN now() ELSE NULL END,
-        $11, 1, $12, $13, $14::JSONB, $15, $16, $17
+        $11, CASE WHEN $11 = 'published' THEN now() ELSE NULL END,
+        $12, 1, $13, $14, $15::JSONB, $16, $17,
+        $18, $19,
+        CASE WHEN $18 THEN $20 ELSE NULL END,
+        CASE WHEN $18 THEN now() ELSE NULL END,
+        $20
       )
       RETURNING id
     `,
@@ -541,6 +648,7 @@ const createEventFromStructure = async (
       start,
       end,
       resolvedParticipationType,
+      visibility,
       status,
       confirmationDeadline,
       sourceEventId,
@@ -548,6 +656,8 @@ const createEventFromStructure = async (
       recurrenceRule ? JSON.stringify(recurrenceRule) : null,
       recurrenceAnchorAt,
       recurrenceParentGroupId,
+      Boolean(conflictOverride),
+      conflictOverrideReason || null,
       context.user.id,
     ],
   )
@@ -641,6 +751,8 @@ const createEventFromStructure = async (
         (block: any) => block.ministry_id,
       ),
       generatedResponsibilities: structure.responsibilities.length,
+      conflictOverride: Boolean(conflictOverride),
+      conflictOverrideReason: conflictOverrideReason || null,
     },
   })
   return eventId
@@ -674,6 +786,7 @@ const loadEventList = async (
         event.confirmation_deadline_at,
         event.published_at,
         event.participation_type,
+        event.visibility,
         event.signup_code,
         event.signup_open,
         event.status,
@@ -682,6 +795,8 @@ const loadEventList = async (
         event.recurrence_rule,
         event.recurrence_anchor_at,
         event.recurrence_parent_group_id,
+        event.conflict_override,
+        event.conflict_override_reason,
         event.updated_at,
         (
           SELECT count(*)
@@ -707,12 +822,25 @@ const loadEventList = async (
     `,
     [ministryId, access.canManage],
   )
-  return result.rows.map((event) => ({
-    ...event,
-    template_version: Number(event.template_version || 0) || null,
-    version: Number(event.version),
-    responsibility_count: Number(event.responsibility_count),
-  }))
+  return Promise.all(result.rows.map(async (event) => {
+    const privacy = await getPriestPrivacyAccess(client, context.user, event)
+    if (!privacy.canSeeEvent) return null
+    return {
+      ...event,
+      description:
+        event.visibility === "private" && !privacy.canSeeProtectedDetails
+          ? null
+          : event.description,
+      location:
+        event.visibility === "private" && !privacy.canSeeProtectedDetails
+          ? null
+          : event.location,
+      canSeeProtectedDetails: privacy.canSeeProtectedDetails,
+      template_version: Number(event.template_version || 0) || null,
+      version: Number(event.version),
+      responsibility_count: Number(event.responsibility_count),
+    }
+  })).then((events) => events.filter(Boolean))
 }
 
 const loadEventDetails = async (
@@ -736,6 +864,16 @@ const loadEventDetails = async (
   )
   const event = eventResult.rows[0]
   if (!event) throw Object.assign(new Error("Event not found"), { status: 404 })
+  const privacyAccess = await getPriestPrivacyAccess(client, context.user, event)
+  if (!privacyAccess.canSeeEvent) {
+    throw Object.assign(new Error("You do not have access to this private event"), {
+      status: 403,
+    })
+  }
+  if (event.visibility === "private" && !privacyAccess.canSeeProtectedDetails) {
+    event.description = null
+    event.location = null
+  }
 
   const participantResult = await client.query(
     `
@@ -890,17 +1028,26 @@ const loadEventDetails = async (
               SELECT count(*)
               FROM responsibility_assignments other_assignment
               JOIN events other_event ON other_event.id = other_assignment.event_id
+              JOIN event_responsibilities other_responsibility
+                ON other_responsibility.id = other_assignment.responsibility_id
               WHERE other_assignment.user_id = assignment.user_id
                 AND other_assignment.event_id <> assignment.event_id
                 AND other_assignment.status = ANY($4)
                 AND other_event.status NOT IN ('cancelled', 'archived')
-                AND other_event.start_time < $3
-                AND other_event.end_time > $2
+                AND other_event.start_time
+                  + COALESCE(other_responsibility.relative_start_minutes, 0)
+                    * INTERVAL '1 minute' < $3
+                AND other_event.end_time >
+                  $2::TIMESTAMPTZ
+                  + COALESCE(assigned_responsibility.relative_start_minutes, 0)
+                    * INTERVAL '1 minute'
             ) AS conflict_count,
             COALESCE(member.first_name, assignment.volunteer_name) AS first_name,
             member.last_name,
             COALESCE(member.is_volunteer_profile, false) AS is_volunteer_profile
           FROM responsibility_assignments assignment
+          JOIN event_responsibilities assigned_responsibility
+            ON assigned_responsibility.id = assignment.responsibility_id
           LEFT JOIN users member ON member.id = assignment.user_id
           WHERE assignment.event_id = $1
             AND assignment.status NOT IN ('declined', 'cancelled')
@@ -975,12 +1122,19 @@ const loadEventDetails = async (
               FROM responsibility_assignments other_assignment
               JOIN events other_event
                 ON other_event.id = other_assignment.event_id
+              JOIN event_responsibilities other_responsibility
+                ON other_responsibility.id = other_assignment.responsibility_id
               WHERE other_assignment.user_id = member.id
                 AND other_assignment.status = ANY($5)
                 AND other_event.id <> $1
                 AND other_event.status NOT IN ('cancelled', 'archived')
-                AND other_event.start_time < $7
-                AND other_event.end_time > $6
+                AND other_event.start_time
+                  + COALESCE(other_responsibility.relative_start_minutes, 0)
+                    * INTERVAL '1 minute' < $7
+                AND other_event.end_time >
+                  $6::TIMESTAMPTZ
+                  + COALESCE(responsibility.relative_start_minutes, 0)
+                    * INTERVAL '1 minute'
             )
           ORDER BY
             responsibility.id,
@@ -1247,6 +1401,7 @@ const loadEventDetails = async (
       rankOrder: Number(level.rank_order),
     })),
     canManageEvent: publicView ? false : canManageEvent,
+    canSeeProtectedDetails: privacyAccess.canSeeProtectedDetails,
     isPublicView: publicView,
     assignmentVisibilityRestricted:
       visibleResponsibilities.length < responsibilityResult.rows.length,
@@ -1344,7 +1499,7 @@ const recordServiceOutcome = async (
   return "Service outcome recorded"
 }
 
-const createEvents = async (
+export const createEvents = async (
   client: PoolClient,
   context: any,
   body: any,
@@ -1362,9 +1517,9 @@ const createEvents = async (
   )
 
   const title = cleanText(body.title, 250) || structure.template.name
-  const description =
+  let description =
     cleanText(body.description) || structure.template.description || ""
-  const location = cleanText(body.location, 500)
+  let location = cleanText(body.location, 500)
   const start = parseDate(body.startTime, "Start time")
   const end = parseDate(body.endTime, "End time")
   if (end <= start) {
@@ -1405,10 +1560,45 @@ const createEvents = async (
   const participationType = PARTICIPATION_TYPES.has(body.participationType)
     ? body.participationType
     : structure.template.participation_type || "members"
+  const privateByDefault = /sick call|private appointment|travel/i.test(
+    structure.template.name || "",
+  )
+  const visibility = EVENT_VISIBILITIES.has(body.visibility)
+    ? body.visibility
+    : privateByDefault
+      ? "private"
+      : "public"
+  if (visibility === "private") {
+    description = ""
+    location = ""
+  }
+  const ministryIds = Array.from(
+    new Set([
+      structure.template.ministry_id,
+      ...structure.blocks.map((block: any) => block.ministry_id),
+    ]),
+  ).filter(Boolean) as string[]
+  const conflictOverride = body.conflictOverride === true
+  const conflictOverrideReason = conflictOverride
+    ? cleanText(body.conflictOverrideReason, 500) || "Overlap reviewed by ministry administrator"
+    : null
   const eventIds: string[] = []
 
   for (const occurrenceStart of occurrenceStarts) {
     const occurrenceEnd = new Date(occurrenceStart.getTime() + duration)
+    const conflicts = await findEventConflicts(
+      client,
+      ministryIds,
+      occurrenceStart,
+      occurrenceEnd,
+      [],
+    )
+    if (conflicts.length && !conflictOverride) {
+      throw Object.assign(
+        new Error("This event overlaps another event. Fix the time or explicitly ignore the warning."),
+        { status: 409, conflicts },
+      )
+    }
     eventIds.push(
       await createEventFromStructure(client, context, {
         structure,
@@ -1423,10 +1613,13 @@ const createEvents = async (
         recurrenceAnchorAt:
           occurrenceStarts.length > 1 ? occurrenceStart : null,
         participationType,
+        visibility,
         confirmationDeadline:
           confirmationOffset === null
             ? null
             : new Date(occurrenceStart.getTime() + confirmationOffset),
+        conflictOverride: conflicts.length > 0 && conflictOverride,
+        conflictOverrideReason,
       }),
     )
   }
@@ -1657,6 +1850,26 @@ const cloneEvent = async (
       sort_order: responsibility.sort_order,
     })),
   }
+  const ministryIds = Array.from(
+    new Set([
+      source.ministry_id,
+      ...blocks.rows.map((block) => block.ministry_id),
+    ]),
+  ).filter(Boolean) as string[]
+  const conflicts = await findEventConflicts(
+    client,
+    ministryIds,
+    start,
+    end,
+    [],
+  )
+  const conflictOverride = body.conflictOverride === true
+  if (conflicts.length && !conflictOverride) {
+    throw Object.assign(
+      new Error("This event overlaps another event. Fix the time or explicitly ignore the warning."),
+      { status: 409, conflicts },
+    )
+  }
   return createEventFromStructure(client, context, {
     structure,
     title: cleanText(body.title, 250) || `${source.title} Copy`,
@@ -1673,6 +1886,10 @@ const cloneEvent = async (
     recurrenceRule: null,
     confirmationDeadline,
     sourceEventId,
+    conflictOverride: conflicts.length > 0 && conflictOverride,
+    conflictOverrideReason: conflictOverride
+      ? cleanText(body.conflictOverrideReason, 500) || "Overlap reviewed by ministry administrator"
+      : null,
   })
 }
 
@@ -1901,6 +2118,7 @@ const assignMemberToResponsibility = async (
         responsibility.name,
         responsibility.quantity_needed,
         responsibility.required_ministry_level_id,
+        responsibility.relative_start_minutes,
         responsibility.status
       FROM event_responsibilities responsibility
       JOIN events event ON event.id = responsibility.event_id
@@ -1963,12 +2181,18 @@ const assignMemberToResponsibility = async (
           FROM responsibility_assignments other_assignment
           JOIN events other_event
             ON other_event.id = other_assignment.event_id
+          JOIN event_responsibilities other_responsibility
+            ON other_responsibility.id = other_assignment.responsibility_id
           WHERE other_assignment.user_id = member.id
             AND other_assignment.status = ANY($4)
             AND other_event.id <> $5
             AND other_event.status NOT IN ('cancelled', 'archived')
-            AND other_event.start_time < $7
-            AND other_event.end_time > $6
+            AND other_event.start_time
+              + COALESCE(other_responsibility.relative_start_minutes, 0)
+                * INTERVAL '1 minute' < $7
+            AND other_event.end_time >
+              $6::TIMESTAMPTZ
+              + COALESCE($9::INT, 0) * INTERVAL '1 minute'
         )
       LIMIT 1
     `,
@@ -1981,6 +2205,7 @@ const assignMemberToResponsibility = async (
       event.start_time,
       event.end_time,
       responsibility.required_ministry_level_id,
+      Number(responsibility.relative_start_minutes || 0),
     ],
   )
   const member = eligibleResult.rows[0]
@@ -2834,6 +3059,9 @@ const updateEvent = async (
   const participationType = PARTICIPATION_TYPES.has(body.participationType)
     ? body.participationType
     : event.participation_type
+  const visibility = EVENT_VISIBILITIES.has(body.visibility)
+    ? body.visibility
+    : event.visibility || "public"
   const start = parseDate(body.startTime, "Start time")
   const end = parseDate(body.endTime, "End time")
   if (!title) {
@@ -2903,6 +3131,23 @@ const updateEvent = async (
       effectiveFrom: start.toISOString(),
       previousGroupId: event.recurrence_group_id,
     }
+    const recurrenceConflictPreview = await previewRecurrenceChange(
+      client,
+      context,
+      body,
+    )
+    const conflictOverride = body.conflictOverride === true
+    if (recurrenceConflictPreview.conflicts.length && !conflictOverride) {
+      throw Object.assign(
+        new Error("These changes overlap other events. Fix the schedule or explicitly ignore the warning."),
+        { status: 409, conflicts: recurrenceConflictPreview.conflicts },
+      )
+    }
+    const conflictOverrideReason =
+      recurrenceConflictPreview.conflicts.length && conflictOverride
+        ? cleanText(body.conflictOverrideReason, 500) ||
+          "Overlap reviewed by ministry administrator"
+        : null
     const changedEventIds: string[] = []
     for (const [index, affectedEvent] of affected.entries()) {
       const occurrenceStart = occurrenceStarts[index]
@@ -2919,11 +3164,16 @@ const updateEvent = async (
               start_time = $5,
               end_time = $6,
               participation_type = $7,
-              confirmation_deadline_at = $8,
-              recurrence_group_id = $9,
-              recurrence_rule = $10::JSONB,
+              visibility = $8,
+              confirmation_deadline_at = $9,
+              recurrence_group_id = $10,
+              recurrence_rule = $11::JSONB,
               recurrence_anchor_at = $5,
-              recurrence_parent_group_id = $11,
+              recurrence_parent_group_id = $12,
+              conflict_override = $13,
+              conflict_override_reason = $14,
+              conflict_override_by = CASE WHEN $13 THEN $15 ELSE NULL END,
+              conflict_override_at = CASE WHEN $13 THEN now() ELSE NULL END,
               signup_open = CASE
                 WHEN $7 IN ('volunteers', 'both') THEN signup_open
                 ELSE false
@@ -2935,15 +3185,19 @@ const updateEvent = async (
         [
           affectedEvent.id,
           title,
-          cleanText(body.description) || null,
-          cleanText(body.location, 500) || null,
+          visibility === "private" ? null : cleanText(body.description) || null,
+          visibility === "private" ? null : cleanText(body.location, 500) || null,
           occurrenceStart,
           occurrenceEnd,
           participationType,
+          visibility,
           nextConfirmationDeadline,
           nextGroupId,
           JSON.stringify(nextRule),
           event.recurrence_group_id,
+          recurrenceConflictPreview.conflicts.length > 0 && conflictOverride,
+          conflictOverrideReason,
+          context.user.id,
         ],
       )
       if (
@@ -2970,6 +3224,9 @@ const updateEvent = async (
           endTime: occurrenceEnd,
           recurrenceGroupId: nextGroupId,
           recurrenceRule: nextRule,
+          conflictOverride:
+            recurrenceConflictPreview.conflicts.length > 0 && conflictOverride,
+          conflictOverrideReason,
         },
         metadata: {
           effectiveFromEventId: eventId,
@@ -2983,6 +3240,33 @@ const updateEvent = async (
       eventIds: changedEventIds,
     }
   }
+  const participantResult = await client.query(
+    `SELECT ministry_id FROM event_ministries WHERE event_id = $1`,
+    [eventId],
+  )
+  const ministryIds = Array.from(
+    new Set([
+      event.ministry_id,
+      ...participantResult.rows.map((row) => row.ministry_id),
+    ]),
+  ).filter(Boolean) as string[]
+  const conflicts = await findEventConflicts(
+    client,
+    ministryIds,
+    start,
+    end,
+    [eventId],
+  )
+  const conflictOverride = body.conflictOverride === true
+  if (conflicts.length && !conflictOverride) {
+    throw Object.assign(
+      new Error("This event overlaps another event. Fix the time or explicitly ignore the warning."),
+      { status: 409, conflicts },
+    )
+  }
+  const conflictOverrideReason = conflicts.length && conflictOverride
+    ? cleanText(body.conflictOverrideReason, 500) || "Overlap reviewed by ministry administrator"
+    : null
   const previousOrdoDate = toChapelDateKey(event.start_time)
   const nextOrdoDate = toChapelDateKey(start)
   if (previousOrdoDate !== nextOrdoDate) {
@@ -3013,7 +3297,12 @@ const updateEvent = async (
           start_time = $5,
           end_time = $6,
           participation_type = $7,
-          confirmation_deadline_at = $8,
+          visibility = $8,
+          confirmation_deadline_at = $9,
+          conflict_override = $10,
+          conflict_override_reason = $11,
+          conflict_override_by = CASE WHEN $10 THEN $12 ELSE NULL END,
+          conflict_override_at = CASE WHEN $10 THEN now() ELSE NULL END,
           signup_open = CASE
             WHEN $7 IN ('volunteers', 'both') THEN signup_open
             ELSE false
@@ -3025,12 +3314,16 @@ const updateEvent = async (
     [
       eventId,
       title,
-      cleanText(body.description) || null,
-      cleanText(body.location, 500) || null,
+      visibility === "private" ? null : cleanText(body.description) || null,
+      visibility === "private" ? null : cleanText(body.location, 500) || null,
       start,
       end,
       participationType,
+      visibility,
       confirmationDeadline,
+      conflicts.length > 0 && conflictOverride,
+      conflictOverrideReason,
+      context.user.id,
     ],
   )
   if (["volunteers", "both"].includes(participationType)) {
@@ -3044,12 +3337,15 @@ const updateEvent = async (
     beforeData: event,
     afterData: {
       title,
-      description: cleanText(body.description),
-      location: cleanText(body.location, 500),
+      description: visibility === "private" ? null : cleanText(body.description),
+      location: visibility === "private" ? null : cleanText(body.location, 500),
       startTime: start,
       endTime: end,
       participationType,
+      visibility,
       confirmationDeadline,
+      conflictOverride: conflicts.length > 0 && conflictOverride,
+      conflictOverrideReason,
     },
   })
   return { message: "Event updated", eventIds: [eventId] }
@@ -3181,6 +3477,11 @@ export const handleEvents = async (request: Request) => {
     await client.query("BEGIN")
     try {
       if (request.method === "POST") {
+        if (body.action === "preview_event_conflicts") {
+          const preview = await previewEventConflicts(client, context, body)
+          await client.query("COMMIT")
+          return json(preview)
+        }
         if (body.action === "preview_recurrence_change") {
           const preview = await previewRecurrenceChange(client, context, body)
           await client.query("COMMIT")
@@ -3322,7 +3623,13 @@ export const handleEvents = async (request: Request) => {
   } catch (error: any) {
     const status = error?.status || (/session|token|inactive/i.test(error?.message) ? 401 : 500)
     if (status === 500) console.error("Unable to manage events:", error)
-    return json({ message: error?.message || "Unable to manage events" }, status)
+    return json(
+      {
+        message: error?.message || "Unable to manage events",
+        conflicts: Array.isArray(error?.conflicts) ? error.conflicts : undefined,
+      },
+      status,
+    )
   } finally {
     client.release()
   }

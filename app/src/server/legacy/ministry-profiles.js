@@ -91,6 +91,7 @@ const listProfiles = async (client, context) => {
           child.last_name,
           child.username,
           child.global_role,
+          child.appearance_theme,
           child.status,
           (
             SELECT separation.new_email
@@ -155,6 +156,7 @@ const listProfiles = async (client, context) => {
         lastName: row.last_name,
         username: row.username,
         globalRole: row.global_role,
+        appearanceTheme: row.appearance_theme || "light",
         status: row.status,
         isGuardian: false,
         relationshipId: row.relationship_id,
@@ -594,7 +596,7 @@ const handler = async (event) => {
       )).rowCount
       if (!allowed) return jsonResponse(403, { message: "Profile access denied" })
       const targetResult = await client.query(
-        `SELECT id, first_name, last_name, username, global_role, status FROM users WHERE id = $1 AND status = 'active'`,
+        `SELECT id, first_name, last_name, username, global_role, appearance_theme, status FROM users WHERE id = $1 AND status = 'active'`,
         [profileId]
       )
       if (!targetResult.rowCount) return jsonResponse(404, { message: "Profile not found" })

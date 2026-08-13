@@ -158,12 +158,12 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
       </div>
 
       {error && (
-        <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </p>
       )}
       {notice && (
-        <p className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+        <p role="status" aria-live="polite" className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
           {notice}
         </p>
       )}
@@ -282,6 +282,7 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
                 key={message.id}
                 type="button"
                 onClick={() => markRead(message)}
+                aria-label={`${message.read ? "Read" : "Unread"} ${message.channel} message: ${message.subject || "Telegram announcement"}, from ${message.senderName}, ${messageDate(message.createdAt)}`}
                 className={`w-full rounded-xl border px-4 py-4 text-left ${
                   message.read
                     ? "border-gray-100 bg-gray-50"

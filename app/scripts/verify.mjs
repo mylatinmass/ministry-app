@@ -114,6 +114,27 @@ const substitutionMigration = await read(
 const substitutionScheduling = await read(
   "src/server/scheduling/substitutions.ts",
 )
+const conflictTicker = await read(
+  "src/react/components/ministry/MinistryConflictTicker.jsx",
+)
+const eventAgenda = await read(
+  "src/react/components/ministry/MinistryEventAgenda.jsx",
+)
+const globalStyles = await read("src/styles/global.css")
+const priestMinistryMigration = await read(
+  "migrations/20260813_01_add_priest_ministry_and_event_conflicts.sql",
+)
+const appearanceMigration = await read(
+  "migrations/20260813_03_add_profile_appearance_theme.sql",
+)
+const ministryTheme = await read("src/react/utils/ministryTheme.js")
+const accessibleDialog = await read("src/react/hooks/useAccessibleDialog.js")
+const monthCalendar = await read(
+  "src/react/components/ministry/MinistryMonthCalendar.jsx",
+)
+const messagesComponent = await read(
+  "src/react/components/ministry/MinistryMessages.jsx",
+)
 
 const [
   massScheduleMigration,
@@ -168,6 +189,23 @@ assert.match(apiRoute, /scheduling\/templates/)
 assert.match(apiRoute, /scheduling\/events/)
 assert.match(apiRoute, /scheduling\/availability/)
 assert.match(apiRoute, /scheduling\/ordo/)
+assert.match(appearanceMigration, /appearance_theme STRING NOT NULL DEFAULT 'light'/)
+assert.match(appearanceMigration, /appearance_theme IN \('light', 'dark'\)/)
+assert.match(ministryProfileServer, /appearanceTheme: profile\.appearance_theme \|\| "light"/)
+assert.match(ministryProfileServer, /appearance_theme = \$16/)
+assert.match(profile, /name="appearanceTheme"/)
+assert.match(profile, /applyMinistryTheme\(result\.profile\.appearanceTheme/)
+assert.match(ministryTheme, /dataset\.ministryTheme/)
+assert.match(ministryTheme, /ministry_theme_\$\{profileId\}/)
+assert.match(globalStyles, /data-ministry-theme="dark"/)
+assert.match(globalStyles, /#047857/)
+assert.match(globalStyles, /#6ee7b7/)
+assert.match(accessibleDialog, /event\.key === "Escape"/)
+assert.match(accessibleDialog, /returnFocusRef\.current/)
+assert.match(monthCalendar, /includes your assignment/)
+assert.match(monthCalendar, /aria-label="Next month"/)
+assert.match(messagesComponent, /role="alert"/)
+assert.match(messagesComponent, /aria-live="polite"/)
 
 assert.match(packageJson, /"prebuild":\s*"[^"]*sync-mass-schedule\.mjs --build"/)
 assert.match(packageJson, /"sync:mass-schedule"/)
@@ -318,6 +356,27 @@ assert.match(substitutionScheduling, /FOR UPDATE OF request, assignment/)
 assert.match(substitutionScheduling, /conflicting assignment and cannot accept/)
 assert.match(substitutionScheduling, /status = 'accepted'/)
 assert.match(substitutionScheduling, /status = 'expired'/)
+assert.match(conflictTicker, /bg-orange-500/)
+assert.match(conflictTicker, /change_requested/)
+assert.match(conflictTicker, /ministry-conflicts-updated/)
+assert.match(conflictTicker, /Handle now/)
+assert.match(ministryWorkspace, /MinistryConflictTicker/)
+assert.match(homeWorkspace, /MinistryConflictTicker/)
+assert.match(schedulingEvents, /other_responsibility\.relative_start_minutes/)
+assert.match(schedulingEvents, /responsibility\.relative_start_minutes/)
+assert.match(eventAgenda, /ministry-scroll-region/)
+assert.match(globalStyles, /height:\s*100dvh/)
+assert.match(globalStyles, /-webkit-overflow-scrolling:\s*touch/)
+assert.match(priestMinistryMigration, /'Priests'/)
+assert.match(priestMinistryMigration, /'priest_sick_call'/)
+assert.match(priestMinistryMigration, /'priest_private_appointment'/)
+assert.match(priestMinistryMigration, /conflict_override_reason/)
+assert.match(schedulingEvents, /preview_event_conflicts/)
+assert.match(schedulingEvents, /Fix the time or explicitly ignore the warning/)
+assert.match(availabilityComponent, /Manage ministry member availability/)
+assert.match(availabilityComponent, /subjectUserIds/)
+assert.match(schedulingAvailability, /resolveManagedSubjects/)
+assert.match(schedulingAvailability, /Availability can only be managed for active members of this ministry/)
 assert.match(eventDetails, /Request substitute/)
 assert.match(eventDetails, /Accept substitution/)
 assert.match(homeWorkspace, /user: currentUser/)
@@ -716,6 +775,34 @@ assert.match(schedulingVolunteers, /is_public_assignment = true/)
 assert.match(schedulingVolunteers, /responsibility\.unlimited_capacity/)
 assert.match(schedulingEvents, /generalVolunteerUnlimited/)
 assert.match(eventDetails, /General Volunteer spots/)
+
+const [
+  privatePriestMigration,
+  priestAppointments,
+  priestPrivacy,
+  telegramScheduling,
+  emergencySchedules,
+] = await Promise.all([
+  read("migrations/20260813_02_add_private_priest_workflows.sql"),
+  read("src/server/scheduling/priest-appointments.ts"),
+  read("src/server/scheduling/priest-privacy.ts"),
+  read("src/server/notifications/telegram.ts"),
+  read("src/server/notifications/emergency-schedules.ts"),
+])
+assert.match(privatePriestMigration, /CREATE TABLE IF NOT EXISTS priest_appointment_details/)
+assert.match(privatePriestMigration, /CREATE TABLE IF NOT EXISTS telegram_event_drafts/)
+assert.match(priestAppointments, /protectedValuesExcluded: true/)
+assert.doesNotMatch(priestAppointments, /afterData:\s*next/)
+assert.match(priestPrivacy, /access\.canManage \|\|/)
+assert.match(priestPrivacy, /assignment\.user_id = \$2/)
+assert.match(schedulingEvents, /visibility === "private" \? null/)
+assert.match(apiRoute, /scheduling\/priest-appointment-details/)
+assert.match(telegramScheduling, /gpt-4o-mini-transcribe/)
+assert.match(telegramScheduling, /eventdraft:confirm/)
+assert.match(telegramScheduling, /Do not include names, addresses, telephone numbers/)
+assert.match(emergencySchedules, /weekly emergency schedule/)
+assert.match(emergencySchedules, /privacy-safe copy intentionally excludes private names/)
+assert.match(reminders, /processWeeklyEmergencySchedules/)
 
 const [
   volunteerAccountMigration,

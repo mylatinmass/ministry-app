@@ -52,6 +52,7 @@ const loadProfile = async (client, context) => {
           profile.username,
           profile.global_role,
           profile.status,
+          profile.appearance_theme,
           contact.notification_lead_minutes,
           contact.notification_email_enabled,
           contact.notification_telegram_enabled,
@@ -111,6 +112,7 @@ const loadProfile = async (client, context) => {
     username: profile.username || "",
     globalRole: profile.global_role,
     status: profile.status,
+    appearanceTheme: profile.appearance_theme || "light",
     isManagedProfile: context.isManagedProfile,
     inheritsGuardianContact: context.isManagedProfile,
     notificationLeadMinutes: Number(profile.notification_lead_minutes || 60),
@@ -172,6 +174,7 @@ const validateProfile = (body) => {
   }
   const smsTransactionalConsentAccepted =
     body.smsTransactionalConsentAccepted === true
+  const appearanceTheme = body.appearanceTheme === "dark" ? "dark" : "light"
   const usernameMessage = usernameError(username)
 
   if (!firstName || !lastName) return { error: "First and last name are required" }
@@ -208,6 +211,7 @@ const validateProfile = (body) => {
     notificationChannels,
     notificationCategories,
     smsTransactionalConsentAccepted,
+    appearanceTheme,
   }
 }
 
@@ -253,17 +257,27 @@ const handler = async (event) => {
         if (!firstName || !lastName) {
           return jsonResponse(400, { message: "First and last name are required" })
         }
+        const appearanceTheme = body.appearanceTheme === "dark" ? "dark" : "light"
+        const beforeTheme = context.user.appearance_theme || "light"
         await client.query(
-          `UPDATE users SET first_name = $1, last_name = $2, updated_at = now() WHERE id = $3`,
-          [firstName, lastName, context.user.id]
+          `UPDATE users SET first_name = $1, last_name = $2, appearance_theme = $3, updated_at = now() WHERE id = $4`,
+          [firstName, lastName, appearanceTheme, context.user.id]
         )
         await client.query(
           `
             INSERT INTO managed_profile_audit (
               actor_user_id, subject_user_id, action, entity_type, entity_id
-            ) VALUES ($1, $2, 'profile.updated', 'user', $2)
+              , metadata
+            ) VALUES ($1, $2, 'profile.updated', 'user', $2, $3::JSONB)
           `,
-          [context.actor.id, context.user.id]
+          [
+            context.actor.id,
+            context.user.id,
+            JSON.stringify({
+              appearanceThemeBefore: beforeTheme,
+              appearanceThemeAfter: appearanceTheme,
+            }),
+          ]
         )
         const profile = await loadProfile(client, context)
         return jsonResponse(200, { profile })
@@ -309,7 +323,8 @@ const handler = async (event) => {
             notification_schedule_changes_enabled,
             notification_announcements_enabled,
             notification_volunteer_opportunities_enabled,
-            sms_transactional_consent_at
+            sms_transactional_consent_at,
+            appearance_theme
           FROM users
           WHERE id = $1
           LIMIT 1
@@ -348,8 +363,9 @@ const handler = async (event) => {
               WHEN $9 AND $15 THEN '2026-08-11'
               ELSE sms_transactional_consent_text_version
             END,
+            appearance_theme = $16,
             updated_at = now()
-          WHERE id = $16
+          WHERE id = $17
         `,
         [
           fields.firstName,
@@ -367,6 +383,7 @@ const handler = async (event) => {
           fields.notificationCategories.announcements,
           fields.notificationCategories.volunteerOpportunities,
           fields.smsTransactionalConsentAccepted,
+          fields.appearanceTheme,
           context.user.id,
         ]
       )
@@ -413,6 +430,7 @@ const handler = async (event) => {
             },
             smsTransactionalConsentAt:
               before?.sms_transactional_consent_at || null,
+            appearanceTheme: before?.appearance_theme || "light",
           }),
           JSON.stringify({
             notificationLeadMinutes: fields.notificationLeadMinutes,
@@ -420,6 +438,7 @@ const handler = async (event) => {
             notificationCategories: fields.notificationCategories,
             smsTransactionalConsentAccepted:
               fields.smsTransactionalConsentAccepted,
+            appearanceTheme: fields.appearanceTheme,
           }),
           JSON.stringify({ authenticationMethod: context.authMethod || "password" }),
         ]

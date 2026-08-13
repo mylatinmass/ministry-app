@@ -1,5 +1,3 @@
-BEGIN;
-
 ALTER TABLE events
   ADD COLUMN IF NOT EXISTS visibility STRING NOT NULL DEFAULT 'public';
 
@@ -53,5 +51,3 @@ CREATE TABLE IF NOT EXISTS ministry_emergency_schedule_deliveries (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (ministry_id, recipient_user_id, week_start)
 );
-
-COMMIT;

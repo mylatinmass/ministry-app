@@ -348,7 +348,7 @@ const ChapelSettings = () => {
             role="dialog"
             aria-modal="true"
             aria-labelledby="chapel-observance-dialog-title"
-            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-5 shadow-xl"
+            className="ministry-dialog-surface w-full max-w-xl rounded-2xl bg-white p-5 shadow-xl"
           >
             <div className="flex items-start justify-between gap-3">
               <div>

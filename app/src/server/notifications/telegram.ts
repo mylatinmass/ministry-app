@@ -462,7 +462,7 @@ const handleEventDraftCallback = async (callback: any) => {
       authMethod: "password",
       isEmailLinkSession: false,
     }
-    const eventIds = await createEvents(client, context, {
+    const creation = await createEvents(client, context, {
       templateId: draft.template_id,
       title: parsed.title || parsed.eventType,
       startTime: start.toISOString(),
@@ -472,10 +472,10 @@ const handleEventDraftCallback = async (callback: any) => {
       visibility: ["Sick Call", "Private Appointment", "Traveling"].includes(parsed.eventType) ? "private" : "ministry",
       recurrence: { frequency: "none" },
     })
-    await client.query(`UPDATE telegram_event_drafts SET status = 'confirmed', event_id = $2, updated_at = now() WHERE id = $1`, [draft.id, eventIds[0]])
+    await client.query(`UPDATE telegram_event_drafts SET status = 'confirmed', event_id = $2, updated_at = now() WHERE id = $1`, [draft.id, creation.eventIds[0]])
     await client.query("COMMIT")
     const appUrl = (process.env.PUBLIC_MINISTRY_APP_URL || "https://ministry.mylatinmass.com").replace(/\/$/, "")
-    await sendTelegramMessage(chatId, "Draft event created. Open the secure event view to assign the priest and add any private details.", `${appUrl}/priests?event=${eventIds[0]}&private=1`)
+    await sendTelegramMessage(chatId, "Draft event created. Open the secure event view to assign the priest and add any private details.", `${appUrl}/priests?event=${creation.eventIds[0]}&private=1`)
   } catch (error: any) {
     await client.query("ROLLBACK").catch(() => {})
     await reply(chatId, error?.message || "Unable to create the event draft")

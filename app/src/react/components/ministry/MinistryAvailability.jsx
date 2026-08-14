@@ -778,7 +778,7 @@ const MinistryAvailability = ({ ministryId = "", canManageMembers = false }) => 
             role="alertdialog"
             aria-modal="true"
             aria-labelledby="availability-conflict-title"
-            className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"
+            className="ministry-dialog-surface w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"
           >
             <h3
               id="availability-conflict-title"

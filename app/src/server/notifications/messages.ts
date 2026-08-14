@@ -63,18 +63,21 @@ const listMessages = async (client: any, context: any) => {
         LEFT JOIN ministries ministry ON ministry.id = message.ministry_id
         JOIN users sender ON sender.id = message.created_by_profile_id
         WHERE recipient.profile_user_id = $1
+          AND recipient.delivery_account_user_id = $2
         ORDER BY recipient.read_at IS NULL DESC, message.created_at DESC
         LIMIT 100
       `,
-      [context.user.id],
+      [context.user.id, context.actor.id],
     ),
     client.query(
       `
         SELECT count(*)::INT AS unread_count
         FROM ministry_message_recipients
-        WHERE profile_user_id = $1 AND read_at IS NULL
+        WHERE profile_user_id = $1
+          AND delivery_account_user_id = $2
+          AND read_at IS NULL
       `,
-      [context.user.id],
+      [context.user.id, context.actor.id],
     ),
     client.query(
       `
@@ -258,7 +261,9 @@ const createMessage = async (client: any, context: any, body: any) => {
             message_id, profile_user_id, delivery_account_user_id,
             is_delivery_target, delivery_status, last_error
           ) VALUES ($1, $2, $3, $4, $5, $6)
-          ON CONFLICT (message_id, profile_user_id) DO NOTHING
+          ON CONFLICT (
+            message_id, profile_user_id, delivery_account_user_id
+          ) DO NOTHING
         `,
         [
           messageId,
@@ -317,9 +322,11 @@ export const handleMessages = async (request: Request) => {
         `
           UPDATE ministry_message_recipients
           SET read_at = now(), updated_at = now()
-          WHERE profile_user_id = $1 AND read_at IS NULL
+          WHERE profile_user_id = $1
+            AND delivery_account_user_id = $2
+            AND read_at IS NULL
         `,
-        [context.user.id],
+        [context.user.id, context.actor.id],
       )
     } else if (body.action === "mark_read" && body.messageId) {
       await client.query(
@@ -328,9 +335,10 @@ export const handleMessages = async (request: Request) => {
           SET read_at = now(), updated_at = now()
           WHERE profile_user_id = $1
             AND message_id = $2
+            AND delivery_account_user_id = $3
             AND read_at IS NULL
         `,
-        [context.user.id, body.messageId],
+        [context.user.id, body.messageId, context.actor.id],
       )
     } else {
       return json({ message: "Unknown message action" }, 400)

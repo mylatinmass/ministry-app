@@ -50,7 +50,7 @@ const MinistryHomeContent = () => {
       <Helmet>
         <html lang="en" />
         <meta name="robots" content="noindex,nofollow" />
-        <meta name="viewport" content="initial-scale=1, viewport-fit=cover" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
       </Helmet>
       <Seo
         title="Ministries | MyLatinMass.com"

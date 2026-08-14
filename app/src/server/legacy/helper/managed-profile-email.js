@@ -22,6 +22,9 @@ const getSiteOrigin = (event) => {
 const buildSeparationUrl = (event, token) =>
   `${getSiteOrigin(event)}/profile-separate#token=${encodeURIComponent(token)}`
 
+const buildGuardianLinkUrl = (event, token) =>
+  `${getSiteOrigin(event)}/profile-link#token=${encodeURIComponent(token)}`
+
 const sendProfileSeparationEmail = async ({ email, firstName, activationUrl }) => {
   assertLiveDeliveryAllowed()
   const user = process.env.GMAIL_USER
@@ -44,4 +47,37 @@ const sendProfileSeparationEmail = async ({ email, firstName, activationUrl }) =
   })
 }
 
-module.exports = { buildSeparationUrl, sendProfileSeparationEmail }
+const sendGuardianLinkEmail = async ({
+  email,
+  guardianFirstName,
+  invitedByName,
+  childName,
+  responseUrl,
+}) => {
+  assertLiveDeliveryAllowed()
+  const user = process.env.GMAIL_USER
+  const password = process.env.GMAIL_PASS
+  if (!user || !password) {
+    throw new Error("Guardian link email is not configured")
+  }
+
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: { user, pass: password },
+  })
+
+  await transporter.sendMail({
+    from: `MyLatinMass.com <${user}>`,
+    to: email,
+    subject: `Link ${childName}'s ministry profile`,
+    text: `Hello ${guardianFirstName},\n\n${invitedByName} invited you to link ${childName}'s ministry profile to your account. If you accept, you can view and manage this child's schedule and receive notifications for their events.\n\n${responseUrl}\n\nYou may accept or decline. This private link expires in 7 days.`,
+    html: `<p>Hello ${escapeHtml(guardianFirstName)},</p><p>${escapeHtml(invitedByName)} invited you to link <strong>${escapeHtml(childName)}</strong>'s ministry profile to your account.</p><p>If you accept, you can view and manage this child's schedule and receive notifications for their events.</p><p><a href="${escapeHtml(responseUrl)}">Review profile invitation</a></p><p>You may accept or decline. This private link expires in 7 days.</p>`,
+  })
+}
+
+module.exports = {
+  buildGuardianLinkUrl,
+  buildSeparationUrl,
+  sendGuardianLinkEmail,
+  sendProfileSeparationEmail,
+}

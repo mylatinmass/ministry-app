@@ -8,6 +8,7 @@ import {
   processUrgentStaffingShortages,
   processNotificationDigests,
   queueAssignmentReminderAlert,
+  queueTomorrowSchedules,
   queueWeeklyAssignmentReviews,
 } from "./assignment-notifications"
 import { processMinistryMessageDeliveries } from "./messages"
@@ -51,6 +52,7 @@ const reconcileReminders = async () => {
       LEFT JOIN managed_profiles mp
         ON mp.child_user_id = ra.user_id
        AND mp.status IN ('active', 'separation_pending')
+      JOIN users subject ON subject.id = ra.user_id
       JOIN users recipient
         ON recipient.id = COALESCE(mp.guardian_user_id, ra.user_id)
       WHERE ra.user_id IS NOT NULL
@@ -74,31 +76,6 @@ const reconcileReminders = async () => {
     await client.query("BEGIN")
     for (const candidate of candidates.rows) {
       const dutyStart = new Date(candidate.duty_start_time)
-      const publicationTime = new Date(
-        candidate.published_at || candidate.event_updated_at,
-      )
-      const explicitDeadline = candidate.confirmation_deadline_at
-        ? new Date(candidate.confirmation_deadline_at)
-        : null
-      const oneWeekBefore = new Date(dutyStart.getTime() - 7 * 86_400_000)
-      const publicationMidpoint = new Date(
-        Math.min(
-          dutyStart.getTime() - 60_000,
-          publicationTime.getTime() +
-            Math.max(
-              60_000,
-              (dutyStart.getTime() - publicationTime.getTime()) / 2,
-            ),
-        ),
-      )
-      const defaultDeadline =
-        oneWeekBefore > publicationTime
-          ? oneWeekBefore
-          : publicationMidpoint
-      const confirmationDeadline =
-        explicitDeadline && explicitDeadline < dutyStart
-          ? explicitDeadline
-          : defaultDeadline
       const schedules: Array<{ type: string; at: Date }> = [
         {
           type: "event_offset",
@@ -107,31 +84,6 @@ const reconcileReminders = async () => {
           ),
         },
       ]
-      if (oneWeekBefore > publicationTime) {
-        schedules.push({ type: "one_week", at: oneWeekBefore })
-      }
-      if (["pending", "assigned"].includes(candidate.assignment_status)) {
-        const confirmationStart = new Date(
-          Math.max(
-            publicationTime.getTime(),
-            new Date(candidate.assignment_created_at).getTime(),
-          ),
-        )
-        const midpoint = new Date(
-          confirmationStart.getTime() +
-            (confirmationDeadline.getTime() - confirmationStart.getTime()) / 2,
-        )
-        if (midpoint > confirmationStart && midpoint < confirmationDeadline) {
-          schedules.push({ type: "confirmation_midpoint", at: midpoint })
-        }
-        schedules.push(
-          { type: "confirmation_deadline", at: confirmationDeadline },
-          {
-            type: "confirmation_overdue",
-            at: new Date(confirmationDeadline.getTime() + 60 * 60_000),
-          },
-        )
-      }
 
       for (const schedule of schedules) {
         const dedupeKey = reminderKey(
@@ -209,15 +161,10 @@ const reconcileReminders = async () => {
         SET status = 'cancelled', canceled_at = now(), updated_at = now()
         WHERE reminder.status IN ('pending', 'retry', 'processing')
           AND reminder.reminder_type IN (
+            'one_week',
             'confirmation_midpoint',
             'confirmation_deadline',
             'confirmation_overdue'
-          )
-          AND EXISTS (
-            SELECT 1
-            FROM responsibility_assignments assignment
-            WHERE assignment.id = reminder.assignment_id
-              AND assignment.status NOT IN ('pending', 'assigned')
           )
       `,
     )
@@ -295,6 +242,7 @@ export const handleReminderProcessing = async (request: Request) => {
   }
 
   const weeklyReviews = await queueWeeklyAssignmentReviews()
+  const tomorrowSchedules = await queueTomorrowSchedules()
   const urgentShortages = await processUrgentStaffingShortages()
   const urgentEscalations = await processUrgentAcknowledgmentEscalations()
   const processedAlerts = await processNotificationDigests()
@@ -307,6 +255,7 @@ export const handleReminderProcessing = async (request: Request) => {
     reconciledAssignments: reconciled,
     processedReminders: reminders.length,
     weeklyReviews,
+    tomorrowSchedules,
     urgentShortages,
     urgentEscalations,
     processedAlerts,

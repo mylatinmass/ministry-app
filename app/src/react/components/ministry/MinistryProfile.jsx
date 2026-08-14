@@ -6,6 +6,7 @@ import {
   PencilSquareIcon,
   PlusIcon,
   UserGroupIcon,
+  UserPlusIcon,
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
@@ -79,6 +80,8 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
   const [childForm, setChildForm] = React.useState({ firstName: "", lastName: "" })
   const [requestMinistryId, setRequestMinistryId] = React.useState("")
   const [separationEmail, setSeparationEmail] = React.useState("")
+  const [linkingChildId, setLinkingChildId] = React.useState("")
+  const [guardianEmail, setGuardianEmail] = React.useState("")
 
   const handleTelegramConnectionChange = React.useCallback((connected) => {
     const updateTelegramState = (current) =>
@@ -190,6 +193,27 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
       profileId: profile.id,
     })
     if (saved) setSeparationEmail("")
+  }
+
+  const sendGuardianLink = async (event, profileId) => {
+    event.preventDefault()
+    const saved = await runFamilyAction({
+      action: "invite_guardian",
+      profileId,
+      email: guardianEmail,
+    })
+    if (saved) {
+      setGuardianEmail("")
+      setLinkingChildId("")
+    }
+  }
+
+  const unlinkChild = async (child) => {
+    const confirmed = window.confirm(
+      `Unlink ${child.firstName} ${child.lastName} from your account? The other linked guardian will keep access.`,
+    )
+    if (!confirmed) return
+    await runFamilyAction({ action: "unlink_guardian", profileId: child.id })
   }
 
   const handleChange = (event) => {
@@ -657,6 +681,10 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
                 <div key={child.id} className="rounded-xl border border-gray-100 p-4">
                   <p className="font-semibold text-gray-900">{child.firstName} {child.lastName}</p>
                   <p className="mt-1 text-sm text-gray-500">{child.relationshipStatus === "separation_pending" ? "Independent account activation pending" : "Managed child profile"}</p>
+                  <p className="mt-1 text-xs text-gray-400">
+                    {child.guardianCount} linked {child.guardianCount === 1 ? "guardian" : "guardians"}
+                    {child.hasPendingGuardianInvitation ? " · Link invitation pending" : ""}
+                  </p>
                   {child.relationshipStatus === "active" && familyData.ministries.length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       <select value={requestMinistryId} onChange={(event) => setRequestMinistryId(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
@@ -666,29 +694,96 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
                       <button type="button" disabled={!requestMinistryId || isSaving} onClick={() => runFamilyAction({ action: "request_membership", profileId: child.id, ministryId: requestMinistryId })} className="rounded-lg border border-[#d8c7b8] px-3 py-2 text-sm font-semibold text-[#6f4f34]">Send request</button>
                     </div>
                   )}
+                  {child.relationshipStatus === "active" && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLinkingChildId((current) => current === child.id ? "" : child.id)
+                          setGuardianEmail("")
+                        }}
+                        className="inline-flex items-center gap-2 rounded-lg border border-[#d8c7b8] px-3 py-2 text-sm font-semibold text-[#6f4f34]"
+                      >
+                        <UserPlusIcon className="size-4" /> Link profile
+                      </button>
+                      {child.guardianCount > 1 && (
+                        <button
+                          type="button"
+                          disabled={isSaving}
+                          onClick={() => unlinkChild(child)}
+                          className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-600"
+                        >
+                          Unlink from my account
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {linkingChildId === child.id && (
+                    <form onSubmit={(event) => sendGuardianLink(event, child.id)} className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <label className="sr-only" htmlFor={`guardian-email-${child.id}`}>Other guardian's account email</label>
+                      <input
+                        id={`guardian-email-${child.id}`}
+                        type="email"
+                        required
+                        autoComplete="email"
+                        placeholder="Other guardian's account email"
+                        value={guardianEmail}
+                        onChange={(event) => setGuardianEmail(event.target.value)}
+                        className="h-11 flex-1 rounded-xl border border-gray-200 bg-white px-3"
+                      />
+                      <button type="submit" disabled={!guardianEmail || isSaving} className="rounded-xl bg-[#896542] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                        Send link
+                      </button>
+                    </form>
+                  )}
                 </div>
               ))}
             </div>
           )}
 
           {profile.isManagedProfile && (
-            <div className="mt-5 rounded-xl border border-gray-100 p-4">
-              <p className="font-semibold text-gray-900">Create an independent account</p>
-              <p className="mt-1 text-sm text-gray-500">
-                {separationPending
-                  ? "An activation invitation is pending. You can resend it, use a corrected email, or cancel the separation."
-                  : "A verified activation email will add a private login while keeping every ministry, assignment, and completed duty on this profile."}
-              </p>
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                <input type="email" required placeholder="New email address" value={separationEmail} onChange={(event) => setSeparationEmail(event.target.value)} className="h-11 flex-1 rounded-xl border border-gray-200 px-3" />
-                <button type="button" disabled={!separationEmail || isSaving} onClick={() => runFamilyAction({ action: "start_separation", profileId: profile.id, email: separationEmail })} className="rounded-xl border border-[#d8c7b8] px-4 py-2 text-sm font-semibold text-[#6f4f34]">
-                  {separationPending ? "Resend activation" : "Send activation"}
+            <div className="mt-5 space-y-3">
+              <div className="rounded-xl border border-gray-100 p-4">
+                <p className="font-semibold text-gray-900">Linked guardians</p>
+                <p className="mt-1 text-sm text-gray-500">
+                  {activeManagedProfile?.guardianCount || 1} linked {(activeManagedProfile?.guardianCount || 1) === 1 ? "guardian receives" : "guardians receive"} this profile's schedules and notifications.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLinkingChildId((current) => current === profile.id ? "" : profile.id)
+                    setGuardianEmail("")
+                  }}
+                  className="mt-3 inline-flex items-center gap-2 rounded-lg border border-[#d8c7b8] px-3 py-2 text-sm font-semibold text-[#6f4f34]"
+                >
+                  <UserPlusIcon className="size-4" /> Link another guardian
                 </button>
-                {separationPending && (
-                  <button type="button" disabled={isSaving} onClick={cancelSeparation} className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600">
-                    Cancel
-                  </button>
+                {linkingChildId === profile.id && (
+                  <form onSubmit={(event) => sendGuardianLink(event, profile.id)} className="mt-3 flex flex-col gap-2 sm:flex-row">
+                    <label className="sr-only" htmlFor="active-child-guardian-email">Other guardian's account email</label>
+                    <input id="active-child-guardian-email" type="email" required autoComplete="email" placeholder="Other guardian's account email" value={guardianEmail} onChange={(event) => setGuardianEmail(event.target.value)} className="h-11 flex-1 rounded-xl border border-gray-200 bg-white px-3" />
+                    <button type="submit" disabled={!guardianEmail || isSaving} className="rounded-xl bg-[#896542] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Send link</button>
+                  </form>
                 )}
+              </div>
+              <div className="rounded-xl border border-gray-100 p-4">
+                <p className="font-semibold text-gray-900">Create an independent account</p>
+                <p className="mt-1 text-sm text-gray-500">
+                  {separationPending
+                    ? "An activation invitation is pending. You can resend it, use a corrected email, or cancel the separation."
+                    : "A verified activation email will add a private login while keeping every ministry, assignment, and completed duty on this profile."}
+                </p>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <input type="email" required placeholder="New email address" value={separationEmail} onChange={(event) => setSeparationEmail(event.target.value)} className="h-11 flex-1 rounded-xl border border-gray-200 px-3" />
+                  <button type="button" disabled={!separationEmail || isSaving} onClick={() => runFamilyAction({ action: "start_separation", profileId: profile.id, email: separationEmail })} className="rounded-xl border border-[#d8c7b8] px-4 py-2 text-sm font-semibold text-[#6f4f34]">
+                    {separationPending ? "Resend activation" : "Send activation"}
+                  </button>
+                  {separationPending && (
+                    <button type="button" disabled={isSaving} onClick={cancelSeparation} className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600">
+                      Cancel
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           )}

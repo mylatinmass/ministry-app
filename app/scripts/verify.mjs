@@ -135,6 +135,9 @@ const monthCalendar = await read(
 const messagesComponent = await read(
   "src/react/components/ministry/MinistryMessages.jsx",
 )
+const cadenceMigration = await read(
+  "migrations/20260814_01_simplify_member_notification_cadence.sql",
+)
 
 const [
   massScheduleMigration,
@@ -282,10 +285,9 @@ assert.match(familyProfiles, /queueKlaviyoProfileSync\(client, childId\)/)
 assert.match(klaviyo, /assignment_subject_external_id/)
 assert.match(klaviyo, /external_id: `ministry:\$\{context\.recipient_user_id\}`/)
 assert.match(reminders, /processKlaviyoProfileSyncs/)
-assert.match(reminders, /confirmation_midpoint/)
-assert.match(reminders, /confirmation_deadline/)
-assert.match(reminders, /confirmation_overdue/)
-assert.match(reminders, /one_week/)
+assert.match(reminders, /queueTomorrowSchedules/)
+assert.match(reminders, /type:\s*"event_offset"/)
+assert.match(reminders, /'one_week',[\s\S]*'confirmation_midpoint'/)
 assert.match(volunteerSignupProfileSync, /queueKlaviyoProfileSync/)
 assert.match(invitationResponse, /queueKlaviyoProfileSync/)
 assert.match(pushNotificationsComponent, /Send test notification/)
@@ -539,8 +541,18 @@ assert.match(workspaceContent, /MinistryTemplates/)
 assert.match(workspaceContent, /MinistryEvents/)
 assert.match(eventDetails, /Add responsibility/)
 assert.match(eventDetails, /Event only/)
-assert.match(eventDetails, /Choose available member/)
-assert.match(eventDetails, /action:\s*"assign_member"/)
+assert.match(eventDetails, /LEAVE BLANK/)
+assert.match(eventDetails, /Auto Assignments/)
+assert.match(schedulingEvents, /responsibility_assignment\.auto_assigned/)
+assert.match(schedulingEvents, /event\.auto_published/)
+assert.match(schedulingEvents, /event\.auto_publish_held/)
+assert.match(schedulingEvents, /preview_matching_conflicts/)
+assert.match(schedulingEvents, /event\.matching_conflicts_resolved/)
+assert.match(eventDetails, /Apply to matching conflicts/)
+assert.match(eventDetails, /action:\s*"save_assignments"/)
+assert.match(schedulingEvents, /preview_template_assignments/)
+assert.match(schedulingEvents, /A member can fill only one position in an event/)
+assert.match(schedulingEvents, /event\.assignments_saved/)
 assert.match(familyProfiles, /cancel_separation/)
 assert.match(familyProfiles, /separation\.cancelled/)
 assert.match(familyProfiles, /mp\.status IN \('active', 'separation_pending'\)/)
@@ -675,15 +687,22 @@ assert.match(assignmentNotifications, /sendAccountPush/)
 assert.match(assignmentNotifications, /sendTelegramMessage/)
 assert.match(assignmentNotifications, /sendKlaviyoAlertDue/)
 assert.match(assignmentNotifications, /queueWeeklyAssignmentReviews/)
+assert.match(assignmentNotifications, /queueTomorrowSchedules/)
+assert.match(assignmentNotifications, /weekly_schedule_summary/)
+assert.match(assignmentNotifications, /unfilledSubRequests/)
+assert.match(assignmentNotifications, /buildDigestHtml/)
 assert.match(assignmentNotifications, /processUrgentStaffingShortages/)
 assert.match(assignmentNotifications, /processUrgentAcknowledgmentEscalations/)
-assert.match(assignmentNotifications, /confirmation-overdue-leader/)
+assert.match(assignmentNotifications, /final-schedule:/)
+assert.match(cadenceMigration, /retired_by_summary_notification_policy/)
+assert.match(cadenceMigration, /assignment_weekly_review/)
 assert.match(profile, /notificationCategoryOptions/)
 assert.match(profile, /transactional text messages/)
 assert.match(alertsServer, /mark_all_read/)
 assert.match(alertsServer, /deliveryStatus/)
 assert.match(alertsServer, /body\.action === "acknowledge"/)
 assert.match(alertsServer, /notification\.acknowledged/)
+assert.match(alertsServer, /recipient_user_id = \$2/)
 assert.match(homeWorkspace, /profile\.alertCount > 0/)
 assert.match(homeWorkspace, /bg-orange-400/)
 assert.match(apiRoute, /scheduling\/reports/)
@@ -833,6 +852,47 @@ assert.match(volunteerAccountInvitation, /createMinistryToken/)
 assert.match(volunteerAccountPage, /We already collected your profile information/)
 assert.match(authWithVolunteers, /is_volunteer_profile/)
 assert.match(loginLinkWithVolunteers, /u\.is_volunteer_profile = true/)
+
+const [
+  sharedGuardianMigration,
+  managedProfilesServer,
+  guardianLinkResponse,
+  managedProfileEmail,
+  managedProfileComponent,
+  guardianLinkPage,
+  sharedProfileSeparation,
+] = await Promise.all([
+  read("migrations/20260814_02_add_shared_guardian_links.sql"),
+  read("src/server/legacy/ministry-profiles.js"),
+  read("src/server/legacy/ministry-guardian-link-response.js"),
+  read("src/server/legacy/helper/managed-profile-email.js"),
+  read("src/react/components/ministry/MinistryProfile.jsx"),
+  read("src/react/pages/GuardianLinkApp.jsx"),
+  read("src/server/legacy/ministry-profile-separation.js"),
+])
+assert.match(sharedGuardianMigration, /DROP INDEX IF EXISTS managed_profiles_active_child_key/)
+assert.match(sharedGuardianMigration, /managed_profiles_active_guardian_child_key/)
+assert.match(sharedGuardianMigration, /CREATE TABLE IF NOT EXISTS managed_profile_link_invitations/)
+assert.match(sharedGuardianMigration, /token_hash STRING NOT NULL UNIQUE/)
+assert.match(sharedGuardianMigration, /ministry_message_recipients_message_profile_account_key/)
+assert.match(managedProfilesServer, /action === "invite_guardian"/)
+assert.match(managedProfilesServer, /action === "unlink_guardian"/)
+assert.match(managedProfilesServer, /A managed child must retain one guardian/)
+assert.match(managedProfilesServer, /guardian_link\.invited/)
+assert.match(guardianLinkResponse, /guardian_link\.accepted/)
+assert.match(guardianLinkResponse, /guardian_link\.declined/)
+assert.match(guardianLinkResponse, /locked\.invitee_user_id/)
+assert.match(managedProfileEmail, /Review profile invitation/)
+assert.match(managedProfileComponent, /Link another guardian/)
+assert.match(managedProfileComponent, /Unlink from my account/)
+assert.match(guardianLinkPage, /Accept link/)
+assert.match(guardianLinkPage, /Decline/)
+assert.match(sharedProfileSeparation, /WHERE child_user_id = \$1 AND status IN \('active', 'separation_pending'\)/)
+assert.match(reminders, /recipient\.notification_lead_minutes/)
+assert.match(messageServer, /delivery_account_user_id = \$2/)
+assert.match(messageServer, /message_id, profile_user_id, delivery_account_user_id/)
+assert.match(assignmentNotifications, /notificationRecipientsForProfile/)
+assert.match(assignmentNotifications, /assignment\.recipient_user_id/)
 
 const serverFiles = []
 const collectServerFiles = async (directory) => {

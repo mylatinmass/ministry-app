@@ -26,6 +26,27 @@ const formatAssignmentDate = (value: string | Date) =>
     timeZone: "America/New_York",
   }).format(new Date(value))
 
+const notificationRecipientsForProfile = async (profileUserId: string) => {
+  const result = await getPool().query(
+    `
+      SELECT guardian_user_id AS recipient_user_id
+      FROM managed_profiles
+      WHERE child_user_id = $1
+        AND status IN ('active', 'separation_pending')
+      UNION ALL
+      SELECT $1::UUID
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM managed_profiles
+        WHERE child_user_id = $1
+          AND status IN ('active', 'separation_pending')
+      )
+    `,
+    [profileUserId],
+  )
+  return result.rows.map((row) => row.recipient_user_id)
+}
+
 export const enqueueAlert = async ({
   subjectUserId,
   recipientUserId,
@@ -142,7 +163,7 @@ export const sendSubstitutionRequestNotifications = async (
       message: `${request.responsibility_name} · ${when}${request.reason ? ` · ${request.reason}` : ""}`,
       eventId: request.event_id,
       ministryId: request.ministry_id,
-      dedupeKey: `substitution-offer:${request.id}:${offer.subject_user_id}`,
+      dedupeKey: `substitution-offer:${request.id}:${offer.subject_user_id}:${offer.recipient_user_id}`,
       metadata: {
         notificationCategory: "schedule_changes",
         notificationUrl: `/${request.ministry_slug}?event=${request.event_id}`,
@@ -202,21 +223,13 @@ export const sendSubstitutionAcceptedNotifications = async (
           * INTERVAL '1 minute' AS duty_start_time,
         responsibility.name AS responsibility_name,
         ministry.slug AS ministry_slug,
-        COALESCE(original_guardian.guardian_user_id, request.subject_user_id)
-          AS original_recipient_user_id,
-        COALESCE(replacement_guardian.guardian_user_id, request.accepted_by_user_id)
-          AS replacement_recipient_user_id
+        request.subject_user_id AS original_profile_user_id,
+        request.accepted_by_user_id AS replacement_profile_user_id
       FROM assignment_change_requests request
       JOIN events event ON event.id = request.event_id
       JOIN event_responsibilities responsibility
         ON responsibility.id = request.responsibility_id
       JOIN ministries ministry ON ministry.id = request.ministry_id
-      LEFT JOIN managed_profiles original_guardian
-        ON original_guardian.child_user_id = request.subject_user_id
-       AND original_guardian.status IN ('active', 'separation_pending')
-      LEFT JOIN managed_profiles replacement_guardian
-        ON replacement_guardian.child_user_id = request.accepted_by_user_id
-       AND replacement_guardian.status IN ('active', 'separation_pending')
       WHERE request.id = $1
         AND request.status = 'accepted'
       LIMIT 1
@@ -244,21 +257,22 @@ export const sendSubstitutionAcceptedNotifications = async (
     [request.ministry_id],
   )
   const when = formatAssignmentDate(request.duty_start_time)
-  const recipients = new Map<string, any>([
-    [request.subject_user_id, {
-      subjectUserId: request.subject_user_id,
-      recipientUserId: request.original_recipient_user_id,
-      assignmentId: request.assignment_id,
-    }],
-    [request.accepted_by_user_id, {
-      subjectUserId: request.accepted_by_user_id,
-      recipientUserId: request.replacement_recipient_user_id,
-      assignmentId: request.replacement_assignment_id,
-    }],
-  ])
+  const recipients = new Map<string, any>()
+  for (const [subjectUserId, assignmentId] of [
+    [request.original_profile_user_id, request.assignment_id],
+    [request.replacement_profile_user_id, request.replacement_assignment_id],
+  ]) {
+    for (const recipientUserId of await notificationRecipientsForProfile(subjectUserId)) {
+      recipients.set(`${subjectUserId}:${recipientUserId}`, {
+        subjectUserId,
+        recipientUserId,
+        assignmentId,
+      })
+    }
+  }
   for (const leader of leaders.rows) {
-    if (!recipients.has(leader.id)) {
-      recipients.set(leader.id, {
+    if (![...recipients.values()].some((recipient) => recipient.recipientUserId === leader.id)) {
+      recipients.set(`leader:${leader.id}`, {
         subjectUserId: leader.id,
         recipientUserId: leader.id,
         assignmentId: request.replacement_assignment_id,
@@ -273,7 +287,7 @@ export const sendSubstitutionAcceptedNotifications = async (
       message: `${request.responsibility_name} · ${when} · substitution filled`,
       eventId: request.event_id,
       ministryId: request.ministry_id,
-      dedupeKey: `substitution-accepted:${request.id}:${recipient.subjectUserId}`,
+      dedupeKey: `substitution-accepted:${request.id}:${recipient.recipientUserId}`,
       metadata: {
         notificationCategory: "schedule_changes",
         notificationUrl: `/${request.ministry_slug}?event=${request.event_id}`,
@@ -307,81 +321,200 @@ const newYorkWeek = () => {
   const localDate = new Date(
     Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day)),
   )
+  const today = localDate.toISOString().slice(0, 10)
   const daysSinceMonday = (weekdayIndex + 6) % 7
   localDate.setUTCDate(localDate.getUTCDate() - daysSinceMonday)
   return {
     hour: Number(values.hour),
     weekdayIndex,
+    today,
     weekStart: localDate.toISOString().slice(0, 10),
   }
 }
 
-export const queueWeeklyAssignmentReviews = async () => {
-  const week = newYorkWeek()
-  if (week.weekdayIndex === 1 && week.hour < 9) return 0
-
+const loadHouseholdScheduleSummaries = async (
+  startDayOffset: number,
+  endDayOffset: number,
+) => {
   const result = await getPool().query(
     `
-      SELECT assignment.id AS assignment_id, assignment.status,
-        assignment.user_id AS subject_user_id,
-        COALESCE(guardian.guardian_user_id, assignment.user_id) AS recipient_user_id,
-        subject.first_name, subject.last_name,
-        event.id AS event_id, event.title AS event_title, event.start_time,
-        responsibility.name AS responsibility_name,
-        COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id,
-        ministry.name AS ministry_name,
-        GREATEST(assignment.created_at, assignment.updated_at,
-          event.updated_at, responsibility.updated_at) AS changed_at
-      FROM responsibility_assignments assignment
-      JOIN users subject ON subject.id = assignment.user_id
-      JOIN events event ON event.id = assignment.event_id
-      JOIN event_responsibilities responsibility
-        ON responsibility.id = assignment.responsibility_id
-      JOIN ministries ministry
-        ON ministry.id = COALESCE(responsibility.ministry_id, event.ministry_id)
-      LEFT JOIN managed_profiles guardian
-        ON guardian.child_user_id = assignment.user_id
-       AND guardian.status IN ('active', 'separation_pending')
-      WHERE assignment.user_id IS NOT NULL
-        AND assignment.status IN ('pending', 'assigned', 'confirmed', 'change_requested')
-        AND event.status = 'published'
-        AND event.start_time > now()
-        AND GREATEST(assignment.created_at, assignment.updated_at,
-          event.updated_at, responsibility.updated_at) >= now() - INTERVAL '7 days'
-      ORDER BY recipient_user_id, event.start_time, responsibility.name
+      WITH household_profiles AS (
+        SELECT
+          profile.id AS profile_user_id,
+          profile.id AS recipient_user_id,
+          profile.first_name,
+          profile.last_name
+        FROM users profile
+        WHERE profile.status = 'active'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM managed_profiles managed
+            WHERE managed.child_user_id = profile.id
+              AND managed.status IN ('active', 'separation_pending')
+          )
+        UNION ALL
+        SELECT
+          child.id AS profile_user_id,
+          managed.guardian_user_id AS recipient_user_id,
+          child.first_name,
+          child.last_name
+        FROM managed_profiles managed
+        JOIN users child ON child.id = managed.child_user_id
+        JOIN users guardian ON guardian.id = managed.guardian_user_id
+        WHERE managed.status IN ('active', 'separation_pending')
+          AND child.status = 'active'
+          AND guardian.status = 'active'
+      )
+      SELECT profile.*,
+        (
+          SELECT count(DISTINCT assignment.event_id)::INT
+          FROM responsibility_assignments assignment
+          JOIN events event ON event.id = assignment.event_id
+          JOIN event_responsibilities responsibility
+            ON responsibility.id = assignment.responsibility_id
+          WHERE assignment.user_id = profile.profile_user_id
+            AND assignment.status IN ('pending', 'assigned', 'confirmed', 'change_requested')
+            AND event.status = 'published'
+            AND ((event.start_time + COALESCE(responsibility.relative_start_minutes, 0)
+              * INTERVAL '1 minute') AT TIME ZONE 'America/New_York')::DATE
+              >= (now() AT TIME ZONE 'America/New_York')::DATE + $1::INT
+            AND ((event.start_time + COALESCE(responsibility.relative_start_minutes, 0)
+              * INTERVAL '1 minute') AT TIME ZONE 'America/New_York')::DATE
+              < (now() AT TIME ZONE 'America/New_York')::DATE + $2::INT
+        ) AS upcoming_events,
+        (
+          SELECT count(*)::INT
+          FROM ministry_message_recipients message_recipient
+          WHERE message_recipient.profile_user_id = profile.profile_user_id
+            AND message_recipient.read_at IS NULL
+        ) AS unread_messages,
+        (
+          SELECT count(*)::INT
+          FROM assignment_change_requests request
+          WHERE request.subject_user_id = profile.profile_user_id
+            AND request.status = 'pending'
+            AND request.request_type = 'change'
+        ) AS pending_requests,
+        (
+          SELECT count(*)::INT
+          FROM assignment_change_requests request
+          WHERE request.subject_user_id = profile.profile_user_id
+            AND request.status = 'pending'
+            AND request.request_type = 'substitute'
+            AND (request.expires_at IS NULL OR request.expires_at > now())
+        ) AS unfilled_sub_requests
+      FROM household_profiles profile
+      ORDER BY profile.recipient_user_id, lower(profile.last_name), lower(profile.first_name)
     `,
+    [startDayOffset, endDayOffset],
   )
   const byRecipient = new Map<string, any[]>()
-  for (const assignment of result.rows) {
-    const assignments = byRecipient.get(assignment.recipient_user_id) || []
-    assignments.push(assignment)
-    byRecipient.set(assignment.recipient_user_id, assignments)
-  }
-  let queued = 0
-  for (const [recipientUserId, assignments] of byRecipient) {
-    const reviewAssignments = assignments.slice(0, 50)
-    const lines = reviewAssignments.map((assignment) => {
-      const profileName = [assignment.first_name, assignment.last_name]
-        .filter(Boolean)
-        .join(" ")
-      return `• ${profileName}: ${assignment.responsibility_name} · ${assignment.event_title} · ${formatAssignmentDate(assignment.start_time)} · ${String(assignment.status).replaceAll("_", " ")}`
-    })
-    if (assignments.length > reviewAssignments.length) {
-      lines.push(`• ${assignments.length - reviewAssignments.length} more assignments are available in the app.`)
+  for (const row of result.rows) {
+    const profile = {
+      profileUserId: row.profile_user_id,
+      name: [row.first_name, row.last_name].filter(Boolean).join(" ") || "Profile",
+      upcomingEvents: Number(row.upcoming_events || 0),
+      unreadMessages: Number(row.unread_messages || 0),
+      pendingRequests: Number(row.pending_requests || 0),
+      unfilledSubRequests: Number(row.unfilled_sub_requests || 0),
     }
+    const profiles = byRecipient.get(row.recipient_user_id) || []
+    profiles.push(profile)
+    byRecipient.set(row.recipient_user_id, profiles)
+  }
+  return byRecipient
+}
+
+const plural = (count: number, singular: string, pluralLabel = `${singular}s`) =>
+  `${count} ${count === 1 ? singular : pluralLabel}`
+
+const possessive = (name: string) => `${name}${name.endsWith("s") ? "’" : "’s"}`
+
+const buildScheduleSummary = (profiles: any[], label: string) =>
+  profiles
+    .map((profile) => {
+      const counts = [
+        profile.upcomingEvents
+          ? `- ${plural(profile.upcomingEvents, "upcoming event")}`
+          : null,
+        profile.unreadMessages
+          ? `- ${plural(profile.unreadMessages, "unopened message")}`
+          : null,
+        profile.pendingRequests
+          ? `- ${plural(profile.pendingRequests, "pending request")}`
+          : null,
+        profile.unfilledSubRequests
+          ? `- ${plural(profile.unfilledSubRequests, "unfilled sub request")}`
+          : null,
+      ].filter(Boolean)
+      return `${possessive(profile.name)} ${label}\n${counts.join("\n")}`
+    })
+    .join("\n\n")
+
+export const queueWeeklyAssignmentReviews = async () => {
+  const week = newYorkWeek()
+  if (week.weekdayIndex !== 1 || week.hour < 9) return 0
+  const byRecipient = await loadHouseholdScheduleSummaries(0, 7)
+  let queued = 0
+  for (const [recipientUserId, allProfiles] of byRecipient) {
+    const profiles = allProfiles.filter(
+      (profile) =>
+        profile.upcomingEvents ||
+        profile.unreadMessages ||
+        profile.pendingRequests ||
+        profile.unfilledSubRequests,
+    )
+    if (!profiles.length) continue
     await enqueueAlert({
       subjectUserId: recipientUserId,
       recipientUserId,
-      kind: "assignment_weekly_review",
-      title: "Weekly assignment review",
-      message: `Review ${assignments.length} new or changed ${assignments.length === 1 ? "assignment" : "assignments"}:\n${lines.join("\n")}`,
-      dedupeKey: `assignment-weekly-review:${recipientUserId}:${week.weekStart}`,
+      kind: "weekly_schedule_summary",
+      title: "Your Weekly Schedule",
+      message: buildScheduleSummary(profiles, "Weekly Schedule"),
+      dedupeKey: `weekly-schedule:${recipientUserId}:${week.weekStart}`,
       metadata: {
         notificationCategory: "reminders",
-        notificationUrl: "/?section=events",
-        privacySafeMessage: "Your weekly ministry assignment review is ready.",
+        notificationUrl: "/",
+        privacySafeMessage: "Your weekly ministry schedule is ready. Open the app to review it.",
+        summaryType: "weekly",
         weekStart: week.weekStart,
-        assignmentIds: reviewAssignments.map((assignment) => assignment.assignment_id),
+        profiles,
+      },
+      immediate: true,
+    })
+    queued += 1
+  }
+  return queued
+}
+
+export const queueTomorrowSchedules = async () => {
+  const day = newYorkWeek()
+  if (day.hour < 9) return 0
+  const byRecipient = await loadHouseholdScheduleSummaries(1, 2)
+  let queued = 0
+  for (const [recipientUserId, allProfiles] of byRecipient) {
+    const profiles = allProfiles
+      .filter((profile) => profile.upcomingEvents > 0)
+      .map((profile) => ({
+        ...profile,
+        unreadMessages: 0,
+        pendingRequests: 0,
+        unfilledSubRequests: 0,
+      }))
+    if (!profiles.length) continue
+    await enqueueAlert({
+      subjectUserId: recipientUserId,
+      recipientUserId,
+      kind: "tomorrow_schedule_summary",
+      title: "Tomorrow Schedule",
+      message: buildScheduleSummary(profiles, "Tomorrow Schedule"),
+      dedupeKey: `tomorrow-schedule:${recipientUserId}:${day.today}`,
+      metadata: {
+        notificationCategory: "reminders",
+        notificationUrl: "/",
+        privacySafeMessage: "You have ministry service scheduled tomorrow. Open the app to review it.",
+        summaryType: "tomorrow",
+        profiles,
       },
       immediate: true,
     })
@@ -721,7 +854,10 @@ export const sendEventScheduleNotifications = async (
 ) => {
   const result = await getPool().query(
     `
-      SELECT DISTINCT ON (assignment.id)
+      SELECT DISTINCT ON (
+        assignment.id,
+        COALESCE(guardian.guardian_user_id, assignment.user_id)
+      )
         assignment.id AS assignment_id,
         assignment.user_id AS subject_user_id,
         COALESCE(guardian.guardian_user_id, assignment.user_id) AS recipient_user_id,
@@ -759,7 +895,8 @@ export const sendEventScheduleNotifications = async (
         AND assignment.user_id IS NOT NULL
         AND assignment.status <> 'declined'
         AND ($2::UUID IS NULL OR COALESCE(responsibility.ministry_id, event.ministry_id) = $2)
-      ORDER BY assignment.id
+      ORDER BY assignment.id,
+        COALESCE(guardian.guardian_user_id, assignment.user_id)
     `,
     [eventId, ministryId || null],
   )
@@ -812,7 +949,7 @@ export const sendEventScheduleNotifications = async (
       assignmentId: assignment.assignment_id,
       eventId: assignment.event_id,
       ministryId: assignment.ministry_id,
-      dedupeKey: `event-${changeKind}:${assignment.assignment_id}:${new Date(assignment.schedule_updated_at).toISOString()}`,
+      dedupeKey: `event-${changeKind}:${assignment.assignment_id}:${assignment.recipient_user_id}:${new Date(assignment.schedule_updated_at).toISOString()}`,
       metadata: {
         notificationCategory: "schedule_changes",
         notificationUrl: `/${assignment.ministry_slug}?event=${assignment.event_id}`,
@@ -878,6 +1015,7 @@ export const queueAssignmentReminderAlert = async (reminderId: string) => {
     `
       SELECT reminder.id, reminder.reminder_type, reminder.subject_user_id,
         reminder.recipient_user_id,
+        reminder.scheduled_for,
         reminder.event_id, reminder.assignment_id, event.title AS event_title,
         event.start_time,
         event.start_time + COALESCE(responsibility.relative_start_minutes, 0)
@@ -915,121 +1053,23 @@ export const queueAssignmentReminderAlert = async (reminderId: string) => {
     )
     return false
   }
-  const reminderCopy: Record<string, { kind: string; title: string; prefix: string; safe: string }> = {
-    confirmation_midpoint: {
-      kind: "confirmation_midpoint",
-      title: `Please confirm: ${reminder.event_title}`,
-      prefix: "Confirmation reminder",
-      safe: "Please review and confirm an upcoming ministry assignment.",
-    },
-    confirmation_deadline: {
-      kind: "confirmation_deadline",
-      title: `Confirmation due: ${reminder.event_title}`,
-      prefix: "Confirmation is due",
-      safe: "Confirmation is due for an upcoming ministry assignment.",
-    },
-    confirmation_overdue: {
-      kind: "confirmation_overdue",
-      title: `Confirmation overdue: ${reminder.event_title}`,
-      prefix: "Confirmation is overdue",
-      safe: "Confirmation is overdue for an upcoming ministry assignment.",
-    },
-    one_week: {
-      kind: "assignment_one_week_reminder",
-      title: `Assignment next week: ${reminder.event_title}`,
-      prefix: "One-week reminder",
-      safe: "You have a ministry assignment in one week.",
-    },
-    event_offset: {
-      kind: "assignment_reminder",
-      title: `Upcoming assignment: ${reminder.event_title}`,
-      prefix: "Upcoming assignment",
-      safe: "You have an upcoming ministry assignment.",
-    },
-  }
-  const copy = reminderCopy[reminder.reminder_type] || reminderCopy.event_offset
   await enqueueAlert({
-    subjectUserId: reminder.subject_user_id,
+    subjectUserId: reminder.recipient_user_id,
     recipientUserId: reminder.recipient_user_id,
-    kind: copy.kind,
-    title: copy.title,
-    message: `${copy.prefix}: ${reminder.responsibility_name} · ${formatAssignmentDate(reminder.duty_start_time)}${reminder.location ? ` · ${reminder.location}` : ""}`,
-    assignmentId: reminder.assignment_id,
+    kind: "final_schedule_reminder",
+    title: "Upcoming Ministry Schedule",
+    message: "A scheduled ministry duty begins soon. Open the app to review the details.",
     eventId: reminder.event_id,
     ministryId: reminder.ministry_id,
-    dedupeKey: `assignment-reminder:${reminderId}`,
+    dedupeKey: `final-schedule:${reminder.recipient_user_id}:${reminder.event_id}:${new Date(reminder.scheduled_for).toISOString()}`,
     metadata: {
       notificationCategory: "reminders",
-      notificationUrl: `/${reminder.ministry_slug}?event=${reminder.event_id}`,
-      privacySafeMessage: copy.safe,
-      reminderType: reminder.reminder_type,
+      notificationUrl: `/?event=${reminder.event_id}`,
+      privacySafeMessage: "A scheduled ministry duty begins soon. Open the app to review it.",
+      reminderType: "event_offset",
     },
-    immediate: reminder.reminder_type === "confirmation_overdue",
+    immediate: true,
   })
-  if (reminder.reminder_type === "confirmation_overdue") {
-    const marked = await getPool().query(
-      `
-        UPDATE responsibility_assignments
-        SET confirmation_overdue_at = COALESCE(confirmation_overdue_at, now()),
-            updated_at = now()
-        WHERE id = $1
-          AND status IN ('pending', 'assigned')
-        RETURNING id
-      `,
-      [reminder.assignment_id],
-    )
-    if (marked.rowCount) {
-      const leaders = await getPool().query(
-        `
-          SELECT DISTINCT leader.id
-          FROM users leader
-          WHERE leader.status = 'active'
-            AND leader.id <> $2
-            AND (
-              leader.global_role IN ('owner', 'super_admin')
-              OR EXISTS (
-                SELECT 1
-                FROM ministry_members membership
-                WHERE membership.user_id = leader.id
-                  AND membership.ministry_id = $1
-                  AND membership.status = 'active'
-                  AND membership.level IN ('owner', 'admin')
-              )
-            )
-        `,
-        [reminder.ministry_id, reminder.subject_user_id],
-      )
-      const subjectName = [
-        reminder.subject_first_name,
-        reminder.subject_last_name,
-      ]
-        .filter(Boolean)
-        .join(" ") || "A member"
-      for (const leader of leaders.rows) {
-        await enqueueAlert({
-          subjectUserId: leader.id,
-          recipientUserId: leader.id,
-          kind: reminder.is_managed_profile
-            ? "guardian_approval_overdue"
-            : "confirmation_overdue_leader",
-          title: reminder.is_managed_profile
-            ? `Guardian approval overdue: ${reminder.event_title}`
-            : `Confirmation overdue: ${reminder.event_title}`,
-          message: `${subjectName} has not confirmed ${reminder.responsibility_name} · ${formatAssignmentDate(reminder.start_time)}`,
-          assignmentId: reminder.assignment_id,
-          eventId: reminder.event_id,
-          ministryId: reminder.ministry_id,
-          dedupeKey: `confirmation-overdue-leader:${reminder.assignment_id}:${leader.id}:${reminder.id}`,
-          metadata: {
-            notificationCategory: "reminders",
-            notificationUrl: `/${reminder.ministry_slug}?event=${reminder.event_id}`,
-            privacySafeMessage: "An assignment confirmation is overdue and needs leader attention.",
-          },
-          immediate: true,
-        })
-      }
-    }
-  }
   await getPool().query(
     `UPDATE ministry_reminders SET status = 'sent', sent_at = now(), claimed_at = NULL, last_error = NULL, updated_at = now() WHERE id = $1`,
     [reminderId],
@@ -1075,6 +1115,9 @@ const claimDueAlerts = async () => {
 }
 
 const buildDigest = (alerts: any[]) => {
+  if (alerts.length === 1 && alerts[0].metadata?.summaryType) {
+    return `${alerts[0].title}\n\n${alerts[0].message}`
+  }
   const groups = new Map<string, { name: string; alerts: any[] }>()
   for (const alert of alerts) {
     const group = groups.get(alert.subject_user_id) || {
@@ -1093,6 +1136,39 @@ const buildDigest = (alerts: any[]) => {
     ...group.alerts.map((alert) => `• ${alert.title}\n  ${alert.message}`),
   ])
   return ["Ministry alerts", "", ...summary, ...details].join("\n")
+}
+
+const escapeHtml = (value: unknown) =>
+  String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+
+const buildDigestHtml = (alerts: any[], origin: string) => {
+  const summaryAlert = alerts.length === 1 && alerts[0].metadata?.summaryType
+    ? alerts[0]
+    : null
+  const profileCards = summaryAlert
+    ? (summaryAlert.metadata.profiles || []).map((profile: any) => {
+        const rows = [
+          profile.upcomingEvents
+            ? plural(profile.upcomingEvents, "upcoming event")
+            : null,
+          profile.unreadMessages
+            ? plural(profile.unreadMessages, "unopened message")
+            : null,
+          profile.pendingRequests
+            ? plural(profile.pendingRequests, "pending request")
+            : null,
+          profile.unfilledSubRequests
+            ? plural(profile.unfilledSubRequests, "unfilled sub request")
+            : null,
+        ].filter(Boolean)
+        return `<div style="margin:0 0 14px;padding:18px;border:1px solid #eadfd5;border-radius:12px;background:#fff"><h2 style="margin:0 0 10px;color:#6f4f34;font-size:19px">${escapeHtml(possessive(profile.name))} ${escapeHtml(summaryAlert.metadata.summaryType === "weekly" ? "Weekly Schedule" : "Tomorrow Schedule")}</h2>${rows.map((row) => `<div style="padding:4px 0;color:#374151">• ${escapeHtml(row)}</div>`).join("")}</div>`
+      }).join("")
+    : alerts.map((alert) => `<div style="margin:0 0 12px;padding:16px;border:1px solid #eadfd5;border-radius:12px;background:#fff"><strong style="color:#6f4f34">${escapeHtml(alert.title)}</strong><p style="margin:8px 0 0;color:#4b5563">${escapeHtml(alert.message)}</p></div>`).join("")
+  return `<!doctype html><html><body style="margin:0;background:#f7f3ef;font-family:Arial,sans-serif;color:#1f2937"><div style="max-width:640px;margin:auto;padding:28px 18px"><h1 style="margin:0 0 18px;color:#6f4f34;font-size:26px">${escapeHtml(summaryAlert?.title || "Ministry Update")}</h1>${profileCards}<p style="margin:24px 0 0;text-align:center"><a href="${escapeHtml(origin)}" style="display:inline-block;padding:13px 20px;border-radius:9px;background:#f97316;color:#fff;font-weight:700;text-decoration:none">Open Ministry App</a></p><p style="margin:18px 0 0;color:#6b7280;font-size:12px;text-align:center">Open the app for dates, duties, messages, and request details.</p></div></body></html>`
 }
 
 export const processNotificationDigests = async () => {
@@ -1235,8 +1311,12 @@ export const processNotificationDigests = async () => {
       const attempts = first.recipient_email
         ? await sendReliableEmail({
             to: first.recipient_email,
-            subject: `${emailAlerts.length} new ministry ${emailAlerts.length === 1 ? "alert" : "alerts"}`,
+            subject:
+              emailAlerts.length === 1
+                ? emailAlerts[0].title
+                : `${emailAlerts.length} ministry updates`,
             text: `${buildDigest(emailAlerts)}\n\nOpen the Ministry app: ${origin}`,
+            html: buildDigestHtml(emailAlerts, origin),
           })
         : [{ provider: "email", status: "skipped", errorCode: "email_address_missing" }]
       await recordAttempts(emailAlerts, "email", attempts)
@@ -1282,7 +1362,7 @@ export const processNotificationDigests = async () => {
     if (pushAlerts.length) {
       const attempts = await sendAccountPush({
         accountUserId: first.recipient_user_id,
-        title: pushAlerts.length === 1 ? "Ministry update" : "Ministry updates",
+        title: pushAlerts.length === 1 ? pushAlerts[0].title : "Ministry updates",
         body:
           pushAlerts.length === 1
             ? pushAlerts[0].metadata?.privacySafeMessage ||

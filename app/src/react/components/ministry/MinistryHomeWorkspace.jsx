@@ -666,15 +666,15 @@ const MinistryHomeWorkspace = ({ data }) => {
         </aside>
 
         <main className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
-          <header className="flex items-center border-b border-gray-100 bg-white px-4 py-2">
-            <div className="min-w-0">
+          <header className="ministry-responsive-header flex items-center border-b border-gray-100 bg-white px-4 py-2">
+            <div className="min-w-0 flex-1">
               <button
                 type="button"
                 onClick={() => setMobileMenuOpen(true)}
                 className="flex min-w-0 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-[#6f4f34] lg:hidden"
               >
                 <Bars3Icon className="size-5 shrink-0" />
-                <span className="truncate">{activeSection.label}</span>
+                <span className="text-left leading-tight">{activeSection.label}</span>
               </button>
               <p className="hidden text-xs font-semibold uppercase tracking-[0.16em] text-[#C1A387] lg:block">
                 Ministries
@@ -721,7 +721,7 @@ const MinistryHomeWorkspace = ({ data }) => {
               </button>
 
               {profileMenuOpen && (
-                <div className="absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-xl border border-gray-200 bg-white text-left shadow-xl">
+                <div className="ministry-profile-menu absolute right-0 top-full z-50 mt-2 rounded-xl border border-gray-200 bg-white text-left shadow-xl">
                   {familyData?.profiles?.length > 0 && (
                     <div className="max-h-72 overflow-y-auto p-2">
                       {familyData.profiles.map((profile) => {

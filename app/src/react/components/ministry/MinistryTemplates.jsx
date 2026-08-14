@@ -730,7 +730,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
                                 }`}
                               >
                                 <span
-                                  className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition-transform ${
+                                  className={`absolute left-0 top-0.5 size-5 rounded-full bg-white shadow transition-transform ${
                                     responsibility.substitutionAllowed !== false
                                       ? "translate-x-5"
                                       : "translate-x-0.5"

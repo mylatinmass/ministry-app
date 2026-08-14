@@ -131,6 +131,9 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
   const [isLoading, setIsLoading] = React.useState(true)
   const [isSaving, setIsSaving] = React.useState(false)
   const [templatePreview, setTemplatePreview] = React.useState(null)
+  const [assignmentCandidates, setAssignmentCandidates] = React.useState({})
+  const [assignmentSelections, setAssignmentSelections] = React.useState({})
+  const [isLoadingCandidates, setIsLoadingCandidates] = React.useState(false)
   const [recurrencePreview, setRecurrencePreview] = React.useState(null)
   const [conflictPreview, setConflictPreview] = React.useState(null)
   const closeConflictPreview = React.useCallback(() => setConflictPreview(null), [])
@@ -145,6 +148,10 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
   const repeatingDatePreview = React.useMemo(
     () => previewRepeatingDates(form),
     [form],
+  )
+  const selectedTemplate = React.useMemo(
+    () => templates.find((template) => template.id === form.templateId) || null,
+    [templates, form.templateId],
   )
 
   const loadData = React.useCallback(async () => {
@@ -198,10 +205,84 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
     setErrorMessage("")
   }, [activeAction.id])
 
+  React.useEffect(() => {
+    if (
+      form.eventId ||
+      form.sourceEventId ||
+      !form.templateId ||
+      !form.startTime ||
+      !form.endTime ||
+      creatingRepeatingEvent
+    ) {
+      setAssignmentCandidates({})
+      return undefined
+    }
+    const start = new Date(form.startTime)
+    const end = new Date(form.endTime)
+    if (
+      Number.isNaN(start.getTime()) ||
+      Number.isNaN(end.getTime()) ||
+      end <= start
+    ) {
+      setAssignmentCandidates({})
+      return undefined
+    }
+    const controller = new AbortController()
+    const timer = window.setTimeout(async () => {
+      setIsLoadingCandidates(true)
+      try {
+        const response = await fetch(getFunctionEndpoint("scheduling/events"), {
+          method: "POST",
+          headers: requestHeaders(),
+          signal: controller.signal,
+          body: JSON.stringify({
+            action: "preview_template_assignments",
+            templateId: form.templateId,
+            startTime: start.toISOString(),
+            endTime: end.toISOString(),
+          }),
+        })
+        const result = await response.json()
+        if (!response.ok) {
+          throw new Error(result.message || "Unable to load available members")
+        }
+        setAssignmentCandidates(
+          Object.fromEntries(
+            (result.responsibilities || []).map((responsibility) => [
+              responsibility.templateResponsibilityId,
+              responsibility.availableMembers || [],
+            ]),
+          ),
+        )
+      } catch (error) {
+        if (error.name !== "AbortError") setErrorMessage(error.message)
+      } finally {
+        if (!controller.signal.aborted) setIsLoadingCandidates(false)
+      }
+    }, 250)
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
+  }, [
+    creatingRepeatingEvent,
+    form.endTime,
+    form.eventId,
+    form.sourceEventId,
+    form.startTime,
+    form.templateId,
+  ])
+
   const updateField = (field, value) => {
     setRecurrencePreview(null)
     setConflictPreview(null)
     if (field !== "templateId") setTemplatePreview(null)
+    if (["startTime", "endTime"].includes(field)) {
+      setAssignmentSelections({})
+    }
+    if (field === "participationType" && value === "volunteers") {
+      setAssignmentSelections({})
+    }
     setForm((current) => ({ ...current, [field]: value }))
   }
 
@@ -218,6 +299,34 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       participationType: template?.participationType || "members",
       visibility: privateByDefault ? "private" : current.visibility,
     }))
+    setAssignmentSelections({})
+    setAssignmentCandidates({})
+  }
+
+  const updateAssignmentSelection = (slotKey, userId) => {
+    setAssignmentSelections((current) => ({ ...current, [slotKey]: userId }))
+  }
+
+  const autoAssign = () => {
+    const selected = new Set(
+      Object.values(assignmentSelections).filter(Boolean),
+    )
+    const next = { ...assignmentSelections }
+    for (const responsibility of selectedTemplate?.responsibilities || []) {
+      const candidates = assignmentCandidates[responsibility.id] || []
+      for (let index = 0; index < responsibility.quantityNeeded; index += 1) {
+        const slotKey = `${responsibility.id}:${index}`
+        if (next[slotKey]) continue
+        const member = candidates.find(
+          (candidate) => candidate.automaticEligible && !selected.has(candidate.userId),
+        )
+        if (member) {
+          next[slotKey] = member.userId
+          selected.add(member.userId)
+        }
+      }
+    }
+    setAssignmentSelections(next)
   }
 
   const editEvent = (event) => {
@@ -295,6 +404,10 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
     try {
       const editing = Boolean(form.eventId)
       const cloning = Boolean(form.sourceEventId)
+      const requestedStatus =
+        event.nativeEvent?.submitter?.value === "published"
+          ? "published"
+          : "draft"
       const body = {
         ...form,
         startTime: new Date(form.startTime).toISOString(),
@@ -311,6 +424,19 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
         },
         updateScope: form.updateScope,
         action: cloning ? "clone" : undefined,
+        status: editing ? undefined : requestedStatus,
+        assignments:
+          !editing &&
+          !cloning &&
+          !creatingRepeatingEvent &&
+          form.participationType !== "volunteers"
+            ? Object.entries(assignmentSelections)
+                .filter(([, userId]) => Boolean(userId))
+                .map(([slotKey, userId]) => ({
+                  templateResponsibilityId: slotKey.split(":")[0],
+                  userId,
+                }))
+            : [],
       }
       if (
         editing &&
@@ -509,6 +635,9 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
     activeAction.id === "add-event" ||
     (activeAction.id === "modify" &&
       Boolean(form.eventId || form.sourceEventId))
+  const selectedAssignmentUserIds = new Set(
+    Object.values(assignmentSelections).filter(Boolean),
+  )
 
   if (isLoading) {
     return <p className="p-6 text-center text-gray-500">Loading events...</p>
@@ -537,7 +666,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
             role="alertdialog"
             aria-modal="true"
             aria-labelledby="event-conflict-title"
-            className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl"
+            className="ministry-dialog-surface w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl"
           >
             <div className="flex items-start gap-3">
               <span className="rounded-xl bg-orange-500 p-2.5 text-white">
@@ -866,6 +995,100 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
             </div>
           )}
 
+          {!form.eventId &&
+            !form.sourceEventId &&
+            selectedTemplate?.responsibilities?.length > 0 && (
+              <section className="mt-5 rounded-xl border border-gray-100 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold text-gray-900">
+                      Position assignments
+                    </h3>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Choose every position now. Nothing is saved until you save the draft or publish the event.
+                    </p>
+                  </div>
+                  {form.participationType !== "volunteers" &&
+                    !creatingRepeatingEvent && (
+                      <button
+                        type="button"
+                        onClick={autoAssign}
+                        disabled={isLoadingCandidates || !form.startTime || !form.endTime}
+                        className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                      >
+                        {isLoadingCandidates ? "Checking members…" : "Auto Assignments"}
+                      </button>
+                    )}
+                </div>
+                {creatingRepeatingEvent ? (
+                  <p className="mt-4 rounded-lg bg-[#f7f3ef] p-3 text-sm text-gray-600">
+                    The app will fill each occurrence using eligible, available members and publish every conflict-free schedule. Dates with shortages or conflicts will be held for review.
+                  </p>
+                ) : form.participationType === "volunteers" ? (
+                  <p className="mt-4 rounded-lg bg-[#f7f3ef] p-3 text-sm text-gray-600">
+                    Volunteer positions remain blank for public signup and cannot be auto-assigned.
+                  </p>
+                ) : (
+                  <div className="mt-4 space-y-4">
+                    {selectedTemplate.responsibilities.map((responsibility) => (
+                      <div key={responsibility.id} className="rounded-xl border border-gray-100 p-4">
+                        <p className="font-semibold text-gray-900">
+                          {responsibility.name}
+                        </p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          {responsibility.requiredLevelName
+                            ? `${responsibility.requiredLevelName} or higher · `
+                            : ""}
+                          {responsibility.quantityNeeded} {responsibility.quantityNeeded === 1 ? "position" : "positions"}
+                        </p>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          {Array.from(
+                            { length: responsibility.quantityNeeded },
+                            (_, index) => {
+                              const slotKey = `${responsibility.id}:${index}`
+                              const selectedUserId = assignmentSelections[slotKey] || ""
+                              const candidates = assignmentCandidates[responsibility.id] || []
+                              return (
+                                <label key={slotKey} className="text-xs font-semibold text-gray-600">
+                                  Position {index + 1}
+                                  <select
+                                    value={selectedUserId}
+                                    onChange={(event) =>
+                                      updateAssignmentSelection(slotKey, event.target.value)
+                                    }
+                                    disabled={!form.startTime || !form.endTime || isLoadingCandidates}
+                                    className="mt-1 h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm font-normal"
+                                  >
+                                    <option value="">LEAVE BLANK</option>
+                                    {candidates.map((member) => (
+                                      <option
+                                        key={member.userId}
+                                        value={member.userId}
+                                        disabled={
+                                          member.userId !== selectedUserId &&
+                                          selectedAssignmentUserIds.has(member.userId)
+                                        }
+                                      >
+                                        {member.firstName} {member.lastName}
+                                        {member.highestLevelName ? ` · ${member.highestLevelName}` : ""}
+                                        {member.servingPreference && member.servingPreference !== "not_specified"
+                                          ? ` · ${member.servingPreference.replaceAll("_", " ")}`
+                                          : ""}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              )
+                            },
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+
           {canManageRecurrence &&
             ((creatingRepeatingEvent && !form.eventId && !form.sourceEventId) ||
               (form.eventId && form.recurrenceFrequency !== "none")) && (
@@ -1032,35 +1255,49 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
             </fieldset>
           )}
 
-          <button
-            type="submit"
-            disabled={
-              isSaving ||
-              (!form.eventId &&
-                !form.sourceEventId &&
-                !form.templateId)
-            }
-            className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#896542] px-5 py-3 font-semibold text-white hover:bg-[#6f4f34] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {form.eventId ? (
-              <CheckIcon className="size-5" />
-            ) : form.sourceEventId ? (
-              <DocumentDuplicateIcon className="size-5" />
-            ) : (
-              <PlusIcon className="size-5" />
+          <div className="mt-6 flex flex-wrap gap-2">
+            <button
+              type="submit"
+              name="eventStatus"
+              value="draft"
+              disabled={
+                isSaving ||
+                (!form.eventId && !form.sourceEventId && !form.templateId)
+              }
+              className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-5 py-3 font-semibold text-white hover:bg-[#6f4f34] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {form.eventId ? (
+                <CheckIcon className="size-5" />
+              ) : form.sourceEventId ? (
+                <DocumentDuplicateIcon className="size-5" />
+              ) : (
+                <PlusIcon className="size-5" />
+              )}
+              {isSaving
+                ? "Saving..."
+                : form.eventId
+                  ? form.updateScope === "this_and_future" && !recurrencePreview
+                    ? "Preview changes"
+                    : form.updateScope === "this_and_future"
+                      ? "Apply to this and future events"
+                      : "Update event"
+                  : form.sourceEventId
+                    ? "Create draft copy"
+                    : "SAVE DRAFT"}
+            </button>
+            {!form.eventId && !form.sourceEventId && (
+              <button
+                type="submit"
+                name="eventStatus"
+                value="published"
+                disabled={isSaving || !form.templateId}
+                className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <CheckIcon className="size-5" />
+                {isSaving ? "Saving..." : "PUBLISH EVENT"}
+              </button>
             )}
-            {isSaving
-              ? "Saving..."
-              : form.eventId
-                ? form.updateScope === "this_and_future" && !recurrencePreview
-                  ? "Preview changes"
-                  : form.updateScope === "this_and_future"
-                    ? "Apply to this and future events"
-                    : "Update event"
-                : form.sourceEventId
-                  ? "Create draft copy"
-                  : "Create event"}
-          </button>
+          </div>
         </form>
       )}
 

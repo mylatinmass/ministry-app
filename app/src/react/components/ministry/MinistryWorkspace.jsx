@@ -239,11 +239,11 @@ const MinistryWorkspace = ({ data }) => {
         </aside>
 
         <main
-          className="flex h-full min-w-0 flex-1 flex-col overflow-hidden pb-24 lg:pb-0"
+          className="ministry-workspace-main-with-actions flex h-full min-w-0 flex-1 flex-col overflow-hidden"
         >
-          <header className="ministry-workspace-header flex items-center border-b border-gray-100 px-4 py-2 bg-white">
+          <header className="ministry-workspace-header ministry-responsive-header flex items-center border-b border-gray-100 px-4 py-2 bg-white">
             <div className="contents">
-              <div className="order-1 min-w-0">
+              <div className="order-1 min-w-0 flex-1">
                 <div className="flex items-center gap-2 lg:hidden">
                   <button
                     type="button"
@@ -256,7 +256,7 @@ const MinistryWorkspace = ({ data }) => {
                   <button
                     type="button"
                     onClick={() => openWorkspaceArea("overview", "summary")}
-                    className="min-w-0 truncate text-sm font-semibold text-[#6f4f34]"
+                    className="min-w-0 text-left text-sm font-semibold leading-tight text-[#6f4f34]"
                   >
                     Ministry · {activeSection.label}
                   </button>
@@ -316,7 +316,7 @@ const MinistryWorkspace = ({ data }) => {
                   <UserCircleIcon className="size-7" />
                 </button>
                 {profileMenuOpen && familyData && (
-                  <div className="absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-xl border border-gray-200 bg-white text-left shadow-xl">
+                  <div className="ministry-profile-menu absolute right-0 top-full z-50 mt-2 rounded-xl border border-gray-200 bg-white text-left shadow-xl">
                     <button
                       type="button"
                       onClick={() => switchProfile(familyData.actor.id, true)}
@@ -495,7 +495,7 @@ const MinistryWorkspace = ({ data }) => {
 
       <nav
         aria-label={`${activeSection.label} actions`}
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 shadow-[0_-8px_30px_rgba(63,45,29,0.10)] backdrop-blur lg:hidden"
+        className="ministry-mobile-actions fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 shadow-[0_-8px_30px_rgba(63,45,29,0.10)] backdrop-blur lg:hidden"
       >
         <div className="mx-auto flex max-w-xl items-start justify-around gap-1">
           {activeSection.actions.map((item) => {

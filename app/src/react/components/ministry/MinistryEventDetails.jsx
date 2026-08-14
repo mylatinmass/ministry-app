@@ -63,6 +63,8 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
     React.useState({})
   const [savingAssignmentId, setSavingAssignmentId] =
     React.useState("")
+  const [matchingConflictPreview, setMatchingConflictPreview] =
+    React.useState(null)
   const [signupCode, setSignupCode] = React.useState("")
   const [generalVolunteerUnlimited, setGeneralVolunteerUnlimited] =
     React.useState(true)
@@ -103,6 +105,22 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
         throw new Error(result.message || "Unable to load event")
       }
       setDetails(result)
+      const nextSelections = {}
+      for (const responsibility of result.responsibilities || []) {
+        if (responsibility.isPublicAssignment) continue
+        const memberAssignments = (responsibility.assignments || []).filter(
+          (assignment) => !assignment.isVolunteer,
+        )
+        for (let index = 0; index < responsibility.quantityNeeded; index += 1) {
+          const assignment = memberAssignments[index]
+          nextSelections[`${responsibility.id}:${index}`] = {
+            assignmentId: assignment?.id || "",
+            userId: assignment?.userId || "",
+          }
+        }
+      }
+      setAssignmentSelections(nextSelections)
+      setMatchingConflictPreview(null)
       if (result.canSeeProtectedDetails) {
         const privateUrl = new URL(
           getFunctionEndpoint("scheduling/priest-appointment-details"),
@@ -445,10 +463,44 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
     }
   }
 
-  const assignMember = async (responsibility) => {
-    const userId = assignmentSelections[responsibility.id]
-    if (!userId) return
-    setSavingAssignmentId(responsibility.id)
+  const updateAssignmentSlot = (slotKey, userId) => {
+    setAssignmentSelections((current) => ({
+      ...current,
+      [slotKey]: {
+        assignmentId: current[slotKey]?.assignmentId || "",
+        userId,
+      },
+    }))
+  }
+
+  const autoAssign = () => {
+    const selected = new Set(
+      Object.values(assignmentSelections)
+        .map((slot) => slot?.userId)
+        .filter(Boolean),
+    )
+    const next = { ...assignmentSelections }
+    for (const responsibility of details?.responsibilities || []) {
+      if (responsibility.isPublicAssignment) continue
+      for (let index = 0; index < responsibility.quantityNeeded; index += 1) {
+        const slotKey = `${responsibility.id}:${index}`
+        if (next[slotKey]?.userId) continue
+        const member = (responsibility.availableMembers || []).find(
+          (candidate) =>
+            candidate.automaticEligible !== false &&
+            !selected.has(candidate.userId),
+        )
+        if (member) {
+          next[slotKey] = { assignmentId: "", userId: member.userId }
+          selected.add(member.userId)
+        }
+      }
+    }
+    setAssignmentSelections(next)
+  }
+
+  const saveAssignments = async () => {
+    setSavingAssignmentId("batch")
     setMessage("")
     setErrorMessage("")
     try {
@@ -463,10 +515,15 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
             )}`,
           },
           body: JSON.stringify({
-            action: "assign_member",
+            action: "save_assignments",
             eventId: displayedEvent.id,
-            responsibilityId: responsibility.id,
-            userId,
+            slots: Object.entries(assignmentSelections).map(
+              ([slotKey, selection]) => ({
+                responsibilityId: slotKey.split(":")[0],
+                assignmentId: selection?.assignmentId || null,
+                userId: selection?.userId || null,
+              }),
+            ),
           }),
         },
       )
@@ -475,10 +532,101 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
         throw new Error(result.message || "Unable to assign member")
       }
       setMessage(result.message)
-      setAssignmentSelections((current) => ({
-        ...current,
-        [responsibility.id]: "",
-      }))
+      await loadDetails()
+      return true
+    } catch (error) {
+      setErrorMessage(error.message)
+      return false
+    } finally {
+      setSavingAssignmentId("")
+    }
+  }
+
+  const previewMatchingConflicts = async () => {
+    const changed = []
+    for (const [slotKey, selection] of Object.entries(assignmentSelections)) {
+      if (!selection?.userId) continue
+      const responsibilityId = slotKey.split(":")[0]
+      const responsibility = details?.responsibilities?.find(
+        (item) => item.id === responsibilityId,
+      )
+      const current = responsibility?.assignments?.find(
+        (assignment) => assignment.id === selection.assignmentId,
+      )
+      if (!current || current.userId !== selection.userId) {
+        changed.push({
+          responsibilityId,
+          responsibilityName: responsibility?.name || "Position",
+          userId: selection.userId,
+          replacedUserId: current?.userId || null,
+        })
+      }
+    }
+    if (changed.length !== 1) {
+      setErrorMessage(
+        changed.length
+          ? "Change one position at a time to apply it to matching conflicts."
+          : "Select a replacement member first.",
+      )
+      return
+    }
+    setSavingAssignmentId("matching-preview")
+    setErrorMessage("")
+    try {
+      const response = await fetch(getFunctionEndpoint("scheduling/events"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${window.sessionStorage.getItem(MINISTRY_SESSION_KEY)}`,
+        },
+        body: JSON.stringify({
+          action: "preview_matching_conflicts",
+          eventId: displayedEvent.id,
+          responsibilityId: changed[0].responsibilityId,
+          userId: changed[0].userId,
+          replacedUserId: changed[0].replacedUserId,
+        }),
+      })
+      const result = await response.json()
+      if (!response.ok) {
+        throw new Error(result.message || "Unable to check matching schedules")
+      }
+      setMatchingConflictPreview({ ...changed[0], ...result })
+    } catch (error) {
+      setErrorMessage(error.message)
+    } finally {
+      setSavingAssignmentId("")
+    }
+  }
+
+  const applyMatchingConflicts = async () => {
+    if (!matchingConflictPreview) return
+    const selection = matchingConflictPreview
+    const saved = await saveAssignments()
+    if (!saved) return
+    setSavingAssignmentId("matching-apply")
+    setErrorMessage("")
+    try {
+      const response = await fetch(getFunctionEndpoint("scheduling/events"), {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${window.sessionStorage.getItem(MINISTRY_SESSION_KEY)}`,
+        },
+        body: JSON.stringify({
+          action: "apply_matching_conflicts",
+          eventId: displayedEvent.id,
+          responsibilityId: selection.responsibilityId,
+          userId: selection.userId,
+          replacedUserId: selection.replacedUserId,
+        }),
+      })
+      const result = await response.json()
+      if (!response.ok) {
+        throw new Error(result.message || "Unable to update matching schedules")
+      }
+      setMessage(result.message)
+      setMatchingConflictPreview(null)
       await loadDetails()
     } catch (error) {
       setErrorMessage(error.message)
@@ -591,6 +739,11 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
       return groups
     },
     {},
+  )
+  const selectedAssignmentUserIds = new Set(
+    Object.values(assignmentSelections)
+      .map((slot) => slot?.userId)
+      .filter(Boolean),
   )
   const readiness = (details?.responsibilities || []).reduce(
     (summary, responsibility) => {
@@ -1041,16 +1194,100 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
               )}
             </div>
             {eventCanChange && !responsibilityForm && (
-              <button
-                type="button"
-                onClick={startAddingResponsibility}
-                className="inline-flex items-center gap-2 rounded-lg bg-[#896542] px-3 py-2 text-sm font-semibold text-white hover:bg-[#6f4f34]"
-              >
-                <PlusIcon className="size-4" />
-                Add responsibility
-              </button>
+              <div className="flex flex-wrap gap-2">
+                {details?.participation_type !== "volunteers" && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={autoAssign}
+                      className="rounded-lg bg-orange-500 px-3 py-2 text-sm font-semibold text-white"
+                    >
+                      Auto Assignments
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveAssignments}
+                      disabled={savingAssignmentId === "batch"}
+                      className="rounded-lg border border-[#d8c7b8] bg-white px-3 py-2 text-sm font-semibold text-[#6f4f34] disabled:opacity-50"
+                    >
+                      {savingAssignmentId === "batch" ? "Saving…" : "Save assignments"}
+                    </button>
+                    {details?.recurrence_group_id && (
+                      <button
+                        type="button"
+                        onClick={previewMatchingConflicts}
+                        disabled={savingAssignmentId === "matching-preview"}
+                        className="rounded-lg border border-orange-500 bg-white px-3 py-2 text-sm font-semibold text-orange-600 disabled:opacity-50"
+                      >
+                        {savingAssignmentId === "matching-preview"
+                          ? "Checking…"
+                          : "Apply to matching conflicts"}
+                      </button>
+                    )}
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={startAddingResponsibility}
+                  className="inline-flex items-center gap-2 rounded-lg bg-[#896542] px-3 py-2 text-sm font-semibold text-white hover:bg-[#6f4f34]"
+                >
+                  <PlusIcon className="size-4" />
+                  Add responsibility
+                </button>
+              </div>
             )}
           </div>
+
+          {matchingConflictPreview && (
+            <div className="mt-4 rounded-xl border border-orange-200 bg-orange-50 p-4">
+              <p className="font-semibold text-gray-900">
+                Apply this {matchingConflictPreview.responsibilityName} change to matching dates?
+              </p>
+              <p className="mt-1 text-sm text-gray-600">
+                {matchingConflictPreview.eligible.length} future schedule
+                {matchingConflictPreview.eligible.length === 1 ? "" : "s"} can use this member.
+                {matchingConflictPreview.skipped.length > 0 &&
+                  ` ${matchingConflictPreview.skipped.length} will remain unchanged because the member is unavailable, already scheduled, below the required level, or the position is filled.`}
+              </p>
+              {matchingConflictPreview.eligible.length > 0 && (
+                <ul className="mt-3 max-h-40 space-y-1 overflow-y-auto text-sm text-gray-700">
+                  {matchingConflictPreview.eligible.map((item) => (
+                    <li key={item.eventId}>
+                      {new Intl.DateTimeFormat("en-US", {
+                        weekday: "short",
+                        month: "short",
+                        day: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      }).format(new Date(item.startTime))} — {item.title}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={applyMatchingConflicts}
+                  disabled={
+                    matchingConflictPreview.eligible.length === 0 ||
+                    savingAssignmentId === "matching-apply"
+                  }
+                  className="rounded-lg bg-orange-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {savingAssignmentId === "matching-apply"
+                    ? "Applying…"
+                    : "Save and apply"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMatchingConflictPreview(null)}
+                  className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
 
           {responsibilityForm && (
             <form
@@ -1237,7 +1474,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                       }`}
                     >
                       <span
-                        className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition-transform ${
+                        className={`absolute left-0 top-0.5 size-5 rounded-full bg-white shadow transition-transform ${
                           responsibilityForm.substitutionAllowed !== false
                             ? "translate-x-5"
                             : "translate-x-0.5"
@@ -1281,19 +1518,12 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                   </h3>
                   <div className="mt-3 space-y-2">
                     {group.items.map((responsibility) => {
-                      const canManage = responsibility.isPublicAssignment
+                      const canManage = details.canManageEvent || responsibility.isPublicAssignment
                         ? details.canManageEvent
                         : manageableMinistries.some(
                             (ministry) =>
                               ministry.ministryId ===
                               responsibility.ministryId,
-                          )
-                      const openSlots = responsibility.unlimitedCapacity
-                        ? Number.MAX_SAFE_INTEGER
-                        : Math.max(
-                            0,
-                            responsibility.quantityNeeded -
-                              responsibility.assignedQuantity,
                           )
                       return (
                         <article
@@ -1464,78 +1694,74 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                             )}
                             {canManage &&
                               eventCanChange &&
-                              responsibility.status !== "cancelled" &&
-                              openSlots > 0 && (
-                                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                                  <select
-                                    aria-label={`Available members for ${responsibility.name}`}
-                                    value={
-                                      assignmentSelections[
-                                        responsibility.id
-                                      ] || ""
-                                    }
-                                    onChange={(event) =>
-                                      setAssignmentSelections((current) => ({
-                                        ...current,
-                                        [responsibility.id]:
-                                          event.target.value,
-                                      }))
-                                    }
-                                    className="h-10 min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 text-sm"
-                                  >
-                                    <option value="">
-                                      {responsibility.availableMembers?.length
-                                        ? "Choose available member"
-                                        : "No available members"}
-                                    </option>
-                                    {responsibility.availableMembers?.map(
-                                      (member) => (
-                                        <option
-                                          key={member.userId}
-                                          value={member.userId}
-                                        >
-                                          {member.firstName} {member.lastName}
-                                          {member.highestLevelName
-                                            ? ` · ${member.highestLevelName}`
-                                            : ""}
-                                          {member.servingPreference &&
-                                          member.servingPreference !== "not_specified"
-                                            ? ` · ${servingPreferenceLabels[member.servingPreference] || member.servingPreference.replaceAll("_", " ")}`
-                                            : ""}
-                                          {member.monthlyFrequencyLimit
-                                            ? ` · ${member.monthlyFrequencyLimit}/month in ministry`
-                                            : ""}
-                                          {member.automaticAssignmentMonthlyLimit
-                                            ? ` · ${member.automaticAssignmentMonthlyLimit}/month overall`
-                                            : ""}
-                                          {member.sameTimeReliability?.recorded >= 2
-                                            ? ` · ${member.sameTimeReliability.percent}% at ${member.sameTimeReliability.time}`
-                                            : member.reliability?.recorded >= 3
-                                              ? ` · ${member.reliability.percent}% reliable`
-                                              : ""}
-                                        </option>
-                                      ),
-                                    )}
-                                  </select>
-                                  <button
-                                    type="button"
-                                    disabled={
-                                      !assignmentSelections[
-                                        responsibility.id
-                                      ] ||
-                                      savingAssignmentId ===
-                                        responsibility.id
-                                    }
-                                    onClick={() =>
-                                      assignMember(responsibility)
-                                    }
-                                    className="rounded-lg border border-[#d8c7b8] px-3 py-2 text-sm font-semibold text-[#6f4f34] disabled:opacity-50"
-                                  >
-                                    {savingAssignmentId ===
-                                    responsibility.id
-                                      ? "Assigning..."
-                                      : "Assign"}
-                                  </button>
+                              !responsibility.isPublicAssignment &&
+                              responsibility.status !== "cancelled" && (
+                                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                  {Array.from(
+                                    { length: responsibility.quantityNeeded },
+                                    (_, index) => {
+                                      const slotKey = `${responsibility.id}:${index}`
+                                      const selection = assignmentSelections[slotKey] || {
+                                        assignmentId: "",
+                                        userId: "",
+                                      }
+                                      const currentAssignment = responsibility.assignments?.find(
+                                        (assignment) => assignment.id === selection.assignmentId,
+                                      )
+                                      const candidates = [...(responsibility.availableMembers || [])]
+                                      if (
+                                        currentAssignment &&
+                                        !candidates.some(
+                                          (candidate) => candidate.userId === currentAssignment.userId,
+                                        )
+                                      ) {
+                                        candidates.unshift({
+                                          userId: currentAssignment.userId,
+                                          firstName: currentAssignment.firstName,
+                                          lastName: currentAssignment.lastName,
+                                          highestLevelName: "",
+                                        })
+                                      }
+                                      return (
+                                        <label key={slotKey} className="text-xs font-semibold text-gray-600">
+                                          Position {index + 1}
+                                          <select
+                                            aria-label={`${responsibility.name}, position ${index + 1}`}
+                                            value={selection.userId}
+                                            onChange={(event) =>
+                                              updateAssignmentSlot(slotKey, event.target.value)
+                                            }
+                                            className="mt-1 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm font-normal"
+                                          >
+                                            <option value="">LEAVE BLANK</option>
+                                            {candidates.map((member) => (
+                                              <option
+                                                key={member.userId}
+                                                value={member.userId}
+                                                disabled={
+                                                  member.userId !== selection.userId &&
+                                                  selectedAssignmentUserIds.has(member.userId)
+                                                }
+                                              >
+                                                {member.firstName} {member.lastName}
+                                                {member.highestLevelName
+                                                  ? ` · ${member.highestLevelName}`
+                                                  : ""}
+                                                {member.servingPreference && member.servingPreference !== "not_specified"
+                                                  ? ` · ${servingPreferenceLabels[member.servingPreference] || member.servingPreference.replaceAll("_", " ")}`
+                                                  : ""}
+                                                {member.sameTimeReliability?.recorded >= 2
+                                                  ? ` · ${member.sameTimeReliability.percent}% at ${member.sameTimeReliability.time}`
+                                                  : member.reliability?.recorded >= 3
+                                                    ? ` · ${member.reliability.percent}% reliable`
+                                                    : ""}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        </label>
+                                      )
+                                    },
+                                  )}
                                 </div>
                               )}
                           </div>

@@ -13,7 +13,9 @@ const {
   normalizeEmail,
 } = require("./helper/ministry-invitations")
 const {
+  buildGuardianLinkUrl,
   buildSeparationUrl,
+  sendGuardianLinkEmail,
   sendProfileSeparationEmail,
 } = require("./helper/managed-profile-email")
 const {
@@ -58,6 +60,7 @@ const loadUnreadAlertCounts = async (client, actorId) => {
         SELECT alert.subject_user_id, count(*)::INT AS unread_count
         FROM ministry_alerts alert
         WHERE alert.read_at IS NULL
+          AND alert.recipient_user_id = $1
           AND (
             alert.subject_user_id = $1
             OR EXISTS (
@@ -93,6 +96,20 @@ const listProfiles = async (client, context) => {
           child.global_role,
           child.appearance_theme,
           child.status,
+          (
+            SELECT count(*)::INT
+            FROM managed_profiles guardian_link
+            WHERE guardian_link.child_user_id = child.id
+              AND guardian_link.status IN ('active', 'separation_pending')
+          ) AS guardian_count,
+          EXISTS (
+            SELECT 1
+            FROM managed_profile_link_invitations link_invite
+            WHERE link_invite.child_user_id = child.id
+              AND link_invite.invited_by_guardian_user_id = $1
+              AND link_invite.status = 'pending'
+              AND link_invite.expires_at > now()
+          ) AS has_pending_guardian_invitation,
           (
             SELECT separation.new_email
             FROM managed_profile_separations separation
@@ -161,6 +178,8 @@ const listProfiles = async (client, context) => {
         isGuardian: false,
         relationshipId: row.relationship_id,
         relationshipStatus: row.relationship_status,
+        guardianCount: Number(row.guardian_count || 1),
+        hasPendingGuardianInvitation: Boolean(row.has_pending_guardian_invitation),
         separationEmail: row.separation_email || "",
         alertCount: unreadCounts.get(row.id) || 0,
       })),
@@ -216,6 +235,204 @@ const createChild = async (client, actor, body) => {
     await queueKlaviyoProfileSync(client, childId)
     await client.query("COMMIT")
     return jsonResponse(201, { success: true, profileId: childId, message: "Child profile added" })
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {})
+    throw error
+  }
+}
+
+const inviteGuardian = async (client, event, actor, body) => {
+  const childId = body.profileId?.toString()
+  const email = normalizeEmail(body.email)
+  if (!childId || !isValidEmail(email)) {
+    return jsonResponse(400, { message: "Child profile and a valid account email are required" })
+  }
+
+  const detailsResult = await client.query(
+    `
+      SELECT child.first_name, child.last_name
+      FROM managed_profiles profile
+      JOIN users child ON child.id = profile.child_user_id
+      WHERE profile.guardian_user_id = $1
+        AND profile.child_user_id = $2
+        AND profile.status = 'active'
+      LIMIT 1
+    `,
+    [actor.id, childId]
+  )
+  if (!detailsResult.rowCount) {
+    return jsonResponse(403, { message: "Child profile access denied" })
+  }
+
+  const inviteeResult = await client.query(
+    `
+      SELECT id, first_name, last_name
+      FROM users
+      WHERE lower(btrim(email)) = $1
+        AND status = 'active'
+      LIMIT 1
+    `,
+    [email]
+  )
+  if (!inviteeResult.rowCount) {
+    return jsonResponse(404, {
+      message: "No active Ministry account uses that email. Ask the other guardian to create an account first.",
+    })
+  }
+  const invitee = inviteeResult.rows[0]
+  if (invitee.id === actor.id) {
+    return jsonResponse(409, { message: "This child is already linked to your account" })
+  }
+  if (invitee.id === childId) {
+    return jsonResponse(409, { message: "A child profile cannot be its own guardian" })
+  }
+
+  const existingLink = await client.query(
+    `
+      SELECT 1
+      FROM managed_profiles
+      WHERE guardian_user_id = $1
+        AND child_user_id = $2
+        AND status IN ('active', 'separation_pending')
+      LIMIT 1
+    `,
+    [invitee.id, childId]
+  )
+  if (existingLink.rowCount) {
+    return jsonResponse(409, { message: "This child is already linked to that guardian" })
+  }
+
+  const token = createInvitationToken()
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+  const child = detailsResult.rows[0]
+  let invitationId
+  await client.query("BEGIN")
+  try {
+    await client.query(
+      `
+        UPDATE managed_profile_link_invitations
+        SET status = 'revoked', responded_at = now(), updated_at = now()
+        WHERE child_user_id = $1
+          AND lower(invitee_email) = $2
+          AND status = 'pending'
+      `,
+      [childId, email]
+    )
+    const invitationResult = await client.query(
+      `
+        INSERT INTO managed_profile_link_invitations (
+          child_user_id, invited_by_guardian_user_id, invitee_email,
+          token_hash, expires_at
+        ) VALUES ($1, $2, $3, $4, $5)
+        RETURNING id
+      `,
+      [childId, actor.id, email, hashInvitationToken(token), expiresAt]
+    )
+    invitationId = invitationResult.rows[0].id
+    await audit(
+      client,
+      actor.id,
+      childId,
+      "guardian_link.invited",
+      "managed_profile_link_invitation",
+      invitationId,
+      { inviteeUserId: invitee.id }
+    )
+    await client.query("COMMIT")
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {})
+    throw error
+  }
+
+  try {
+    await sendGuardianLinkEmail({
+      email,
+      guardianFirstName: invitee.first_name,
+      invitedByName: [actor.first_name, actor.last_name].filter(Boolean).join(" "),
+      childName: [child.first_name, child.last_name].filter(Boolean).join(" "),
+      responseUrl: buildGuardianLinkUrl(event, token),
+    })
+  } catch (error) {
+    await client.query(
+      `UPDATE managed_profile_link_invitations SET status = 'revoked', responded_at = now(), updated_at = now() WHERE id = $1`,
+      [invitationId]
+    )
+    throw error
+  }
+
+  return jsonResponse(201, {
+    success: true,
+    message: "Guardian profile invitation sent",
+  })
+}
+
+const unlinkGuardian = async (client, actor, body) => {
+  const childId = body.profileId?.toString()
+  if (!childId) return jsonResponse(400, { message: "Child profile is required" })
+
+  await client.query("BEGIN")
+  try {
+    const relationshipResult = await client.query(
+      `
+        SELECT id
+        FROM managed_profiles
+        WHERE guardian_user_id = $1
+          AND child_user_id = $2
+          AND status = 'active'
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [actor.id, childId]
+    )
+    if (!relationshipResult.rowCount) {
+      await client.query("ROLLBACK")
+      return jsonResponse(404, { message: "This child is not linked to your account" })
+    }
+    const remainingResult = await client.query(
+      `
+        SELECT count(*)::INT AS guardian_count
+        FROM managed_profiles
+        WHERE child_user_id = $1
+          AND guardian_user_id <> $2
+          AND status = 'active'
+      `,
+      [childId, actor.id]
+    )
+    if (Number(remainingResult.rows[0]?.guardian_count || 0) < 1) {
+      await client.query("ROLLBACK")
+      return jsonResponse(409, {
+        message: "Link another guardian first, or use independent account activation. A managed child must retain one guardian.",
+      })
+    }
+
+    const relationshipId = relationshipResult.rows[0].id
+    await client.query(
+      `UPDATE managed_profiles SET status = 'inactive', ended_at = now(), updated_at = now() WHERE id = $1`,
+      [relationshipId]
+    )
+    await client.query(
+      `
+        UPDATE managed_profile_link_invitations
+        SET status = 'revoked', responded_at = now(), updated_at = now()
+        WHERE child_user_id = $1
+          AND invited_by_guardian_user_id = $2
+          AND status = 'pending'
+      `,
+      [childId, actor.id]
+    )
+    await audit(
+      client,
+      actor.id,
+      childId,
+      "guardian_link.unlinked",
+      "managed_profile",
+      relationshipId
+    )
+    await client.query("COMMIT")
+    return jsonResponse(200, {
+      success: true,
+      message: "Child profile unlinked from your account",
+    })
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {})
     throw error
@@ -462,8 +679,8 @@ const startSeparation = async (client, event, actor, body) => {
     )
     separationId = result.rows[0].id
     await client.query(
-      `UPDATE managed_profiles SET status = 'separation_pending', updated_at = now() WHERE id = $1`,
-      [relationship.id]
+      `UPDATE managed_profiles SET status = 'separation_pending', updated_at = now() WHERE child_user_id = $1 AND status = 'active'`,
+      [childId]
     )
     await audit(client, actor.id, childId, "separation.started", "managed_profile_separation", separationId)
     await client.query("COMMIT")
@@ -484,8 +701,8 @@ const startSeparation = async (client, event, actor, body) => {
       [separationId]
     )
     await client.query(
-      `UPDATE managed_profiles SET status = 'active', updated_at = now() WHERE id = $1`,
-      [relationship.id]
+      `UPDATE managed_profiles SET status = 'active', updated_at = now() WHERE child_user_id = $1 AND status = 'separation_pending'`,
+      [childId]
     )
     throw error
   }
@@ -525,19 +742,19 @@ const cancelSeparation = async (client, actor, body) => {
       `
         UPDATE managed_profile_separations
         SET status = 'revoked', updated_at = now()
-        WHERE managed_profile_id = $1
-          AND child_user_id = $2
+        WHERE child_user_id = $1
           AND status = 'pending'
       `,
-      [relationshipId, childId]
+      [childId]
     )
     await client.query(
       `
         UPDATE managed_profiles
         SET status = 'active', updated_at = now()
-        WHERE id = $1
+        WHERE child_user_id = $1
+          AND status = 'separation_pending'
       `,
-      [relationshipId]
+      [childId]
     )
     await audit(
       client,
@@ -616,6 +833,12 @@ const handler = async (event) => {
     if (event.httpMethod === "POST" && body.action === "request_membership") {
       return await requestMembership(client, event, context.actor, body)
     }
+    if (event.httpMethod === "POST" && body.action === "invite_guardian") {
+      return await inviteGuardian(client, event, context.actor, body)
+    }
+    if (event.httpMethod === "POST" && body.action === "unlink_guardian") {
+      return await unlinkGuardian(client, context.actor, body)
+    }
     if (event.httpMethod === "POST" && body.action === "start_separation") {
       return await startSeparation(client, event, context.actor, body)
     }
@@ -629,6 +852,7 @@ const handler = async (event) => {
     const publicMessages = new Set([
       "No ministry leaders with email addresses are available",
       "Profile activation email is not configured",
+      "Guardian link email is not configured",
     ])
     return jsonResponse(500, {
       message: publicMessages.has(error.message)

@@ -204,7 +204,7 @@ const MinistryOrdoReference = ({
             role="dialog"
             aria-modal="true"
             aria-labelledby="ordo-verification-title"
-            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+            className="ministry-dialog-surface w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
           >
             <div className="flex items-start justify-between gap-4">
               <div>

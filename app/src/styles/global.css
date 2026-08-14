@@ -17,6 +17,11 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 html[data-ministry-theme="dark"],
 html[data-ministry-theme="dark"] body {
   background: #111827;
@@ -126,6 +131,89 @@ html[data-ministry-theme="dark"] ::selection {
   height: 100vh;
   height: 100dvh;
   min-height: -webkit-fill-available;
+}
+
+/*
+ * Keep the application shell usable when browser zoom or a device text-size
+ * preference makes controls taller. The colors and spacing remain owned by
+ * the components; these rules only remove assumptions about fixed line height.
+ */
+.ministry-responsive-header {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ministry-profile-menu {
+  width: min(18rem, calc(100vw - 1rem));
+  max-height: min(32rem, calc(100dvh - 5rem));
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+body :where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select
+) {
+  height: auto;
+  min-height: 2.5rem;
+  padding-block: 0.55rem;
+  line-height: 1.35;
+}
+
+body input.h-8,
+body select.h-8 {
+  height: auto;
+  min-height: 2rem;
+}
+
+body input.h-10,
+body select.h-10 {
+  height: auto;
+  min-height: 2.5rem;
+}
+
+body input.h-11,
+body select.h-11 {
+  height: auto;
+  min-height: 2.75rem;
+}
+
+body input.h-12,
+body select.h-12 {
+  height: auto;
+  min-height: 3rem;
+}
+
+.ministry-dialog-surface {
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ministry-mobile-actions {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ministry-mobile-actions > div {
+  min-width: 100%;
+}
+
+.ministry-mobile-actions button {
+  height: auto;
+}
+
+.ministry-workspace-main-with-actions {
+  padding-bottom: calc(env(safe-area-inset-bottom) + 6.5rem);
+}
+
+@media (min-width: 1024px) {
+  .ministry-workspace-main-with-actions {
+    padding-bottom: 0;
+  }
 }
 
 .ministry-scroll-region {

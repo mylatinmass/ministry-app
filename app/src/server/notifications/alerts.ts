@@ -16,9 +16,11 @@ export const handleAlerts = async (request: Request) => {
           `
             UPDATE ministry_alerts
             SET read_at = now(), updated_at = now()
-            WHERE subject_user_id = $1 AND read_at IS NULL
+            WHERE subject_user_id = $1
+              AND recipient_user_id = $2
+              AND read_at IS NULL
           `,
-          [context.user.id],
+          [context.user.id, context.actor.id],
         )
       } else if (body.action === "acknowledge" && body.alertId) {
         const alertResult = await client.query(
@@ -28,11 +30,12 @@ export const handleAlerts = async (request: Request) => {
             FROM ministry_alerts
             WHERE id = $1
               AND subject_user_id = $2
+              AND recipient_user_id = $3
               AND acknowledgment_required = true
               AND acknowledged_at IS NULL
             LIMIT 1
           `,
-          [String(body.alertId), context.user.id],
+          [String(body.alertId), context.user.id, context.actor.id],
         )
         const alert = alertResult.rows[0]
         if (!alert) {
@@ -103,10 +106,11 @@ export const handleAlerts = async (request: Request) => {
           acknowledged_at, escalation_sent_at
         FROM ministry_alerts
         WHERE subject_user_id = $1
+          AND recipient_user_id = $2
         ORDER BY (read_at IS NULL) DESC, created_at DESC
         LIMIT 50
       `,
-      [context.user.id],
+      [context.user.id, context.actor.id],
     )
     const alertIds = result.rows.map((alert) => alert.id)
     const deliveryResult = alertIds.length

@@ -155,8 +155,12 @@ const handler = async (event) => {
         [locked.id]
       )
       await client.query(
-        `UPDATE managed_profiles SET status = 'separated', ended_at = now(), updated_at = now() WHERE id = $1`,
-        [locked.managed_profile_id]
+        `UPDATE managed_profiles SET status = 'separated', ended_at = now(), updated_at = now() WHERE child_user_id = $1 AND status IN ('active', 'separation_pending')`,
+        [locked.child_user_id]
+      )
+      await client.query(
+        `UPDATE managed_profile_link_invitations SET status = 'revoked', responded_at = now(), updated_at = now() WHERE child_user_id = $1 AND status = 'pending'`,
+        [locked.child_user_id]
       )
       await client.query(
         `

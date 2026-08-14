@@ -109,7 +109,7 @@ const MinistryEventAgenda = ({
                           )}
                         </div>
                         {eventName && eventName !== templateName && (
-                          <p className="text-xs font-semibold uppercase sm:text-sm text-left w-full max-h-8 overflow-hidden text-ellipsis">
+                          <p className="w-full text-left text-xs font-semibold uppercase leading-snug sm:text-sm">
                             {eventName}
                           </p>
                         )}

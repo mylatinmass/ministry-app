@@ -48,10 +48,12 @@ export const sendReliableEmail = async ({
   to,
   subject,
   text,
+  html,
 }: {
   to: string
   subject: string
   text: string
+  html?: string
 }): Promise<ChannelAttempt[]> => {
   const providers = [
     {
@@ -93,6 +95,7 @@ export const sendReliableEmail = async ({
         to,
         subject,
         text,
+        html,
       })
       attempts.push({
         provider: provider.name,

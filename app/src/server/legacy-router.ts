@@ -21,6 +21,7 @@ const loadLegacyHandlers = async (): Promise<Record<string, LegacyHandler>> => {
     return {
       "ministry-access-request": freshHandler("./legacy/ministry-access-request.js"),
       "ministry-global-members": freshHandler("./legacy/ministry-global-members.js"),
+      "ministry-guardian-link-response": freshHandler("./legacy/ministry-guardian-link-response.js"),
       "ministry-detail": freshHandler("./legacy/ministry-detail.js"),
       "ministry-invitation-response": freshHandler("./legacy/ministry-invitation-response.js"),
       "ministry-list": freshHandler("./legacy/ministry-list.js"),
@@ -40,6 +41,7 @@ const loadLegacyHandlers = async (): Promise<Record<string, LegacyHandler>> => {
   const [
     ministryAccessRequest,
     ministryGlobalMembers,
+    ministryGuardianLinkResponse,
     ministryDetail,
     ministryInvitationResponse,
     ministryList,
@@ -56,6 +58,7 @@ const loadLegacyHandlers = async (): Promise<Record<string, LegacyHandler>> => {
   ] = await Promise.all([
     import("./legacy/ministry-access-request.js"),
     import("./legacy/ministry-global-members.js"),
+    import("./legacy/ministry-guardian-link-response.js"),
     import("./legacy/ministry-detail.js"),
     import("./legacy/ministry-invitation-response.js"),
     import("./legacy/ministry-list.js"),
@@ -74,6 +77,7 @@ const loadLegacyHandlers = async (): Promise<Record<string, LegacyHandler>> => {
   return {
     "ministry-access-request": unwrap(ministryAccessRequest).handler,
     "ministry-global-members": unwrap(ministryGlobalMembers).handler,
+    "ministry-guardian-link-response": unwrap(ministryGuardianLinkResponse).handler,
     "ministry-detail": unwrap(ministryDetail).handler,
     "ministry-invitation-response": unwrap(ministryInvitationResponse).handler,
     "ministry-list": unwrap(ministryList).handler,

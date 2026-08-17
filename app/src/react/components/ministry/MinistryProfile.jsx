@@ -5,6 +5,7 @@ import {
   CheckCircleIcon,
   PencilSquareIcon,
   PlusIcon,
+  ShieldCheckIcon,
   UserGroupIcon,
   UserPlusIcon,
 } from "@heroicons/react/24/outline"
@@ -421,6 +422,15 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
             <p className="mt-2 inline-flex items-center gap-2 text-base font-medium capitalize text-gray-900">
               <CheckCircleIcon className="size-5 text-green-600" />
               {profile.status}
+            </p>
+          </div>
+          <div>
+            <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-400">
+              Background check
+            </span>
+            <p className="mt-2 inline-flex items-center gap-2 text-base font-medium text-gray-900">
+              <ShieldCheckIcon className={`size-5 ${profile.backgroundCheckVerified ? "text-orange-500" : "text-gray-400"}`} />
+              {profile.backgroundCheckVerified ? "Verified" : "Not verified"}
             </p>
           </div>
           <label className="block">

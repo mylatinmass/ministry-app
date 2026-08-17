@@ -39,6 +39,7 @@ const initialForm = () => ({
   title: "",
   description: "",
   location: "",
+  roomIds: [],
   startTime: "",
   endTime: "",
   confirmationDeadline: "",
@@ -127,6 +128,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
   )
   const [templates, setTemplates] = React.useState([])
   const [events, setEvents] = React.useState([])
+  const [rooms, setRooms] = React.useState([])
   const [form, setForm] = React.useState(initialForm)
   const [isLoading, setIsLoading] = React.useState(true)
   const [isSaving, setIsSaving] = React.useState(false)
@@ -188,6 +190,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
         ),
       )
       setEvents(eventResult.events)
+      setRooms(eventResult.rooms || [])
     } catch (error) {
       setErrorMessage(error.message)
     } finally {
@@ -298,6 +301,12 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       description: current.description || template?.description || "",
       participationType: template?.participationType || "members",
       visibility: privateByDefault ? "private" : current.visibility,
+      roomIds:
+        data.ministry?.slug === "priests" && current.roomIds.length === 0
+          ? (rooms.find((room) => room.name === "Father's Office")
+              ? [rooms.find((room) => room.name === "Father's Office").id]
+              : [])
+          : current.roomIds,
     }))
     setAssignmentSelections({})
     setAssignmentCandidates({})
@@ -341,6 +350,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       title: event.title,
       description: event.description || "",
       location: event.location || "",
+      roomIds: event.room_ids || [],
       startTime: toInputValue(event.start_time),
       endTime: toInputValue(event.end_time),
       confirmationDeadline: toInputValue(event.confirmation_deadline_at),
@@ -363,6 +373,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       title: `${event.title} Copy`,
       description: event.description || "",
       location: event.location || "",
+      roomIds: event.room_ids || [],
       startTime: "",
       endTime: "",
       participationType: event.participation_type || "members",
@@ -686,6 +697,9 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                 <div key={conflict.id} className="rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm text-orange-900">
                   <span className="font-semibold">{conflict.title}</span>
                   <span> · {formatEventDate(conflict.startTime)}</span>
+                  {conflict.roomNames && (
+                    <span className="block text-xs">Rooms: {conflict.roomNames}</span>
+                  )}
                 </div>
               ))}
             </div>
@@ -976,6 +990,52 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                 className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-4 font-normal"
               />
             </label>
+            <fieldset className="sm:col-span-2">
+              <legend className="text-sm font-semibold text-gray-700">
+                Chapel rooms
+              </legend>
+              <div className="mt-2 rounded-xl border border-gray-200 p-4">
+                <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={rooms.length > 0 && form.roomIds.length === rooms.length}
+                    onChange={(event) =>
+                      updateField(
+                        "roomIds",
+                        event.target.checked ? rooms.map((room) => room.id) : [],
+                      )
+                    }
+                    className="size-4 accent-[#896542]"
+                  />
+                  Select all rooms
+                </label>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {rooms.map((room) => (
+                    <label key={room.id} className="flex items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={form.roomIds.includes(room.id)}
+                        onChange={() =>
+                          updateField(
+                            "roomIds",
+                            form.roomIds.includes(room.id)
+                              ? form.roomIds.filter((roomId) => roomId !== room.id)
+                              : [...form.roomIds, room.id],
+                          )
+                        }
+                        className="size-4 accent-[#896542]"
+                      />
+                      {room.name}
+                    </label>
+                  ))}
+                </div>
+                {!rooms.length && (
+                  <p className="mt-2 text-sm text-gray-500">
+                    A Super Admin can add rooms under Chapel Settings.
+                  </p>
+                )}
+              </div>
+            </fieldset>
             <label className="text-sm font-semibold text-gray-700 sm:col-span-2">
               Description
               <textarea
@@ -1344,6 +1404,11 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                         {event.responsibility_count} responsibilities
                         {event.recurrence_group_id ? " · Repeating" : ""}
                       </p>
+                      {event.rooms?.length > 0 && (
+                        <p className="mt-1 text-sm text-gray-500">
+                          {event.rooms.map((room) => room.name).join(", ")}
+                        </p>
+                      )}
                       {event.conflict_override && (
                         <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-orange-500 px-2 py-1 text-xs font-semibold text-white">
                           <ExclamationTriangleIcon className="size-3.5" /> Schedule overlap ignored

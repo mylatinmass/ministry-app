@@ -21,6 +21,14 @@ const emptyObservance = {
   status: "active",
 }
 
+const emptyRoom = {
+  id: "",
+  name: "",
+  description: "",
+  status: "active",
+  sortOrder: 0,
+}
+
 const sections = [
   {
     title: "Chapel information",
@@ -141,6 +149,9 @@ const ChapelSettings = () => {
   const [observance, setObservance] = React.useState(null)
   const closeObservance = React.useCallback(() => setObservance(null), [])
   const observanceDialogRef = useAccessibleDialog(Boolean(observance), closeObservance)
+  const [room, setRoom] = React.useState(null)
+  const closeRoom = React.useCallback(() => setRoom(null), [])
+  const roomDialogRef = useAccessibleDialog(Boolean(room), closeRoom)
   const [isSaving, setIsSaving] = React.useState(false)
   const [message, setMessage] = React.useState("")
   const [errorMessage, setErrorMessage] = React.useState("")
@@ -182,6 +193,7 @@ const ChapelSettings = () => {
       setSettings(result.settings)
       setEditing(false)
       setObservance(null)
+      setRoom(null)
       setMessage(result.message)
     } catch (error) {
       setErrorMessage(error.message)
@@ -212,6 +224,44 @@ const ChapelSettings = () => {
           {errorMessage || message}
         </p>
       )}
+
+      <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="century-font text-2xl text-gray-950">Chapel rooms</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Rooms listed here are available for event and appointment reservations.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setRoom({ ...emptyRoom, sortOrder: (data.rooms.length + 1) * 10 })}
+            className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-4 py-2 text-sm font-semibold text-white hover:bg-[#6f4f34]"
+          >
+            <PlusIcon className="size-5" /> Add room
+          </button>
+        </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {data.rooms.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setRoom({ ...item })}
+              className="rounded-xl border border-gray-200 p-4 text-left hover:border-[#C1A387]"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <h3 className="font-semibold text-gray-900">{item.name}</h3>
+                <span className="rounded-full bg-gray-100 px-2 py-1 text-xs uppercase text-gray-500">
+                  {item.status}
+                </span>
+              </div>
+              <p className="mt-2 text-sm text-gray-500">
+                {item.description || "No description added."}
+              </p>
+            </button>
+          ))}
+        </div>
+      </section>
 
       <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -409,6 +459,74 @@ const ChapelSettings = () => {
             >
               <CheckIcon className="size-5" /> {isSaving ? "Updating..." : "Update observance"}
             </button>
+          </div>
+        </div>
+      )}
+
+      {room && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4">
+          <div
+            ref={roomDialogRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="chapel-room-dialog-title"
+            className="ministry-dialog-surface w-full max-w-xl rounded-2xl bg-white p-5 shadow-xl"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 id="chapel-room-dialog-title" className="century-font text-2xl text-gray-950">
+                  {room.id ? "Edit room" : "Add room"}
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Archived rooms disappear from new reservations while existing history remains intact.
+                </p>
+              </div>
+              <button type="button" onClick={closeRoom} className="rounded-full p-2 text-gray-500 hover:bg-gray-100" aria-label="Close room editor">
+                <XMarkIcon className="size-5" />
+              </button>
+            </div>
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <label className="sm:col-span-2 text-sm font-semibold text-gray-700">
+                Room name
+                <input value={room.name} onChange={(event) => setRoom((current) => ({ ...current, name: event.target.value }))} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2.5 font-normal" />
+              </label>
+              <label className="sm:col-span-2 text-sm font-semibold text-gray-700">
+                Description
+                <textarea rows="3" value={room.description} onChange={(event) => setRoom((current) => ({ ...current, description: event.target.value }))} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2.5 font-normal" />
+              </label>
+              <label className="text-sm font-semibold text-gray-700">
+                Display order
+                <input type="number" min="0" max="10000" value={room.sortOrder} onChange={(event) => setRoom((current) => ({ ...current, sortOrder: event.target.value }))} className="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2.5 font-normal" />
+              </label>
+              <label className="text-sm font-semibold text-gray-700">
+                Status
+                <select value={room.status} onChange={(event) => setRoom((current) => ({ ...current, status: event.target.value }))} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 font-normal">
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </label>
+            </div>
+            <div className="mt-5 flex flex-wrap gap-3">
+              <button
+                type="button"
+                disabled={isSaving || !room.name.trim()}
+                onClick={() => save({ action: "save_room", room })}
+                className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#6f4f34] disabled:opacity-60"
+              >
+                <CheckIcon className="size-5" /> {isSaving ? "Updating..." : "Update room"}
+              </button>
+              {room.id && (
+                <button
+                  type="button"
+                  disabled={isSaving}
+                  onClick={() => window.confirm(`Delete ${room.name} from future reservations?`) && save({ action: "archive_room", roomId: room.id })}
+                  className="rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 disabled:opacity-60"
+                >
+                  Delete room
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

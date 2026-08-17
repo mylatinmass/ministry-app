@@ -222,6 +222,12 @@ const MinistryGlobalMembers = () => {
             <div>
               <h2 className="century-font text-3xl text-gray-950">
                 {selectedMember.firstName} {selectedMember.lastName}
+                {selectedMember.backgroundCheckVerified && (
+                  <ShieldCheckIcon
+                    className="ml-2 inline size-7 text-orange-500"
+                    aria-label="Background check verified"
+                  />
+                )}
               </h2>
             </div>
             <span className="self-start rounded-full bg-[#f4ede6] px-3 py-1 text-xs font-semibold text-[#896542]">
@@ -229,6 +235,46 @@ const MinistryGlobalMembers = () => {
             </span>
           </div>
         </header>
+
+        {data.canManageBackgroundChecks && (
+          <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <ShieldCheckIcon className={`mt-0.5 size-6 ${selectedMember.backgroundCheckVerified ? "text-orange-500" : "text-gray-400"}`} />
+                <div>
+                  <h3 className="font-semibold text-gray-900">Background check</h3>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Only the verification result is stored. Reports and private reasons remain outside the app.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={selectedMember.backgroundCheckVerified}
+                disabled={isSaving}
+                onClick={() =>
+                  runMemberAction({
+                    action: "set_background_check_verified",
+                    userId: selectedMember.id,
+                    verified: !selectedMember.backgroundCheckVerified,
+                  })
+                }
+                className={`relative inline-flex h-8 w-14 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${selectedMember.backgroundCheckVerified ? "bg-orange-500" : "bg-gray-300"}`}
+              >
+                <span className={`inline-block size-6 rounded-full bg-white shadow transition-transform ${selectedMember.backgroundCheckVerified ? "translate-x-7" : "translate-x-1"}`} />
+                <span className="sr-only">
+                  {selectedMember.backgroundCheckVerified ? "Remove verification" : "Mark verified"}
+                </span>
+              </button>
+            </div>
+            <p className="mt-3 text-xs font-semibold text-gray-500">
+              {selectedMember.backgroundCheckVerified
+                ? `Verified${selectedMember.backgroundCheckVerifiedAt ? ` · ${new Date(selectedMember.backgroundCheckVerifiedAt).toLocaleDateString()}` : ""}`
+                : "Not verified"}
+            </p>
+          </section>
+        )}
 
         {data.canManageAll && <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
           <div className="flex items-center gap-3">
@@ -544,6 +590,12 @@ const MinistryGlobalMembers = () => {
               <span>
                 <span className="block font-semibold text-gray-900">
                   {member.firstName} {member.lastName}
+                  {member.backgroundCheckVerified && (
+                    <ShieldCheckIcon
+                      className="ml-1.5 inline size-5 text-orange-500"
+                      aria-label="Background check verified"
+                    />
+                  )}
                 </span>
               </span>
               <span className="text-sm font-semibold text-[#6f4f34]">

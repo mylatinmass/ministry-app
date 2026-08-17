@@ -1037,6 +1037,11 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
               <p className="mt-1 font-semibold text-gray-900">
                 {displayedEvent.location || "Location not set"}
               </p>
+              {details?.rooms?.length > 0 && (
+                <p className="mt-1 text-sm text-gray-500">
+                  Rooms: {details.rooms.map((room) => room.name).join(", ")}
+                </p>
+              )}
             </div>
           </div>
         </div>

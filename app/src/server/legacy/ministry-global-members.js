@@ -82,6 +82,9 @@ const handler = async (event) => {
     const managedMinistryIds = ministriesResult.rows.map(
       (ministry) => ministry.id
     )
+    const canManageBackgroundChecks =
+      canManageAll ||
+      ministriesResult.rows.some((ministry) => ministry.slug === "security")
 
     const [membershipsResult, levelsResult, invitationsResult] =
       await Promise.all([
@@ -93,7 +96,9 @@ const handler = async (event) => {
               user_account.first_name,
               user_account.last_name,
               user_account.global_role,
-              user_account.status
+              user_account.status,
+              user_account.background_check_verified,
+              user_account.background_check_verified_at
             FROM users user_account
             JOIN ministry_members existing_membership
               ON existing_membership.user_id = user_account.id
@@ -115,6 +120,8 @@ const handler = async (event) => {
             user_account.last_name,
             user_account.global_role,
             user_account.status AS user_status,
+            user_account.background_check_verified,
+            user_account.background_check_verified_at,
             membership.id AS membership_id,
             membership.level AS membership_role,
             membership.can_serve,
@@ -196,6 +203,8 @@ const handler = async (event) => {
           lastName: row.last_name,
           globalRole: row.global_role,
           status: row.user_status,
+          backgroundCheckVerified: Boolean(row.background_check_verified),
+          backgroundCheckVerifiedAt: row.background_check_verified_at || null,
           memberships: [],
         })
       }
@@ -218,6 +227,7 @@ const handler = async (event) => {
     return jsonResponse(200, {
       currentUserId: context.user.id,
       canManageAll,
+      canManageBackgroundChecks,
       members: Array.from(membersById.values()),
       ministries: ministriesResult.rows.map((ministry) => ({
         id: ministry.id,

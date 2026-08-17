@@ -152,6 +152,114 @@ const parseDate = (value: unknown, fieldName: string) => {
   return date
 }
 
+const normalizeRoomIds = (value: unknown) =>
+  Array.from(
+    new Set(
+      (Array.isArray(value) ? value : [])
+        .map((roomId) => cleanText(roomId, 100))
+        .filter(Boolean),
+    ),
+  )
+
+const loadActiveRooms = async (client: PoolClient) => {
+  const result = await client.query(
+    `
+      SELECT id, name, description, sort_order
+      FROM chapel_rooms
+      WHERE status = 'active'
+      ORDER BY sort_order, lower(name)
+    `,
+  )
+  return result.rows.map((room) => ({
+    id: room.id,
+    name: room.name,
+    description: room.description || "",
+    sortOrder: Number(room.sort_order) || 0,
+  }))
+}
+
+const validateRoomIds = async (client: PoolClient, roomIds: string[]) => {
+  if (!roomIds.length) return
+  const result = await client.query(
+    `SELECT id FROM chapel_rooms WHERE id = ANY($1::UUID[]) AND status = 'active'`,
+    [roomIds],
+  )
+  if (result.rowCount !== roomIds.length) {
+    throw Object.assign(new Error("Select only active chapel rooms"), {
+      status: 400,
+    })
+  }
+}
+
+const replaceEventRooms = async (
+  client: PoolClient,
+  eventId: string,
+  roomIds: string[],
+  actorUserId: string,
+) => {
+  await client.query(`DELETE FROM event_room_reservations WHERE event_id = $1`, [
+    eventId,
+  ])
+  for (const roomId of roomIds) {
+    await client.query(
+      `
+        INSERT INTO event_room_reservations (event_id, room_id, created_by)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (event_id, room_id) DO NOTHING
+      `,
+      [eventId, roomId, actorUserId],
+    )
+  }
+}
+
+const excludeReservationMinistry = async (
+  client: PoolClient,
+  ministryIds: string[],
+) => {
+  if (!ministryIds.length) return []
+  const result = await client.query(
+    `SELECT id FROM ministries WHERE id = ANY($1::UUID[]) AND slug <> 'reservations'`,
+    [ministryIds],
+  )
+  return result.rows.map((row) => row.id)
+}
+
+const findRoomConflicts = async (
+  client: PoolClient,
+  roomIds: string[],
+  start: Date,
+  end: Date,
+  excludeEventIds: string[] = [],
+) => {
+  if (!roomIds.length) return []
+  const result = await client.query(
+    `
+      SELECT event.id, event.title, event.start_time, event.end_time,
+        string_agg(room.name, ', ' ORDER BY room.sort_order, room.name) AS room_names
+      FROM events event
+      JOIN event_room_reservations reservation ON reservation.event_id = event.id
+      JOIN chapel_rooms room ON room.id = reservation.room_id
+      WHERE reservation.room_id = ANY($1::UUID[])
+        AND event.status IN ('draft', 'published')
+        AND event.start_time < $3
+        AND event.end_time > $2
+        AND NOT (event.id = ANY($4::UUID[]))
+      GROUP BY event.id, event.title, event.start_time, event.end_time
+      ORDER BY event.start_time, event.id
+      LIMIT 20
+    `,
+    [roomIds, start, end, excludeEventIds],
+  )
+  return result.rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    startTime: row.start_time,
+    endTime: row.end_time,
+    kind: "room",
+    roomNames: row.room_names || "",
+  }))
+}
+
 const findEventConflicts = async (
   client: PoolClient,
   ministryIds: string[],
@@ -200,6 +308,8 @@ const previewEventConflicts = async (
     })
   }
   const eventId = cleanText(body.eventId, 100)
+  const roomIds = normalizeRoomIds(body.roomIds)
+  await validateRoomIds(client, roomIds)
   let ministryIds: string[] = []
   if (eventId) {
     const eventResult = await client.query(
@@ -234,15 +344,24 @@ const previewEventConflicts = async (
       ]),
     ).filter(Boolean) as string[]
   }
-  return {
-    conflicts: await findEventConflicts(
+  ministryIds = await excludeReservationMinistry(client, ministryIds)
+  const [scheduleConflicts, roomConflicts] = await Promise.all([
+    findEventConflicts(
       client,
       ministryIds,
       start,
       end,
       eventId ? [eventId] : [],
     ),
-  }
+    findRoomConflicts(
+      client,
+      roomIds,
+      start,
+      end,
+      eventId ? [eventId] : [],
+    ),
+  ])
+  return { conflicts: [...scheduleConflicts, ...roomConflicts] }
 }
 
 const toChapelDateKey = (value: string | Date) => {
@@ -1162,6 +1281,7 @@ const createEventFromStructure = async (
     sourceEventId = null,
     conflictOverride = false,
     conflictOverrideReason = null,
+    roomIds = [],
   }: any,
 ) => {
   const resolvedParticipationType = PARTICIPATION_TYPES.has(participationType)
@@ -1230,6 +1350,7 @@ const createEventFromStructure = async (
     ],
   )
   const eventId = eventResult.rows[0].id
+  await replaceEventRooms(client, eventId, roomIds, context.actor.id)
 
   for (const block of structure.blocks) {
     await client.query(
@@ -1321,6 +1442,7 @@ const createEventFromStructure = async (
       generatedResponsibilities: structure.responsibilities.length,
       conflictOverride: Boolean(conflictOverride),
       conflictOverrideReason: conflictOverrideReason || null,
+      roomIds,
     },
   })
   return eventId
@@ -1390,6 +1512,25 @@ const loadEventList = async (
     `,
     [ministryId, access.canManage],
   )
+  const eventIds = result.rows.map((event) => event.id)
+  const roomResult = eventIds.length
+    ? await client.query(
+        `
+          SELECT reservation.event_id, room.id, room.name
+          FROM event_room_reservations reservation
+          JOIN chapel_rooms room ON room.id = reservation.room_id
+          WHERE reservation.event_id = ANY($1::UUID[])
+          ORDER BY room.sort_order, lower(room.name)
+        `,
+        [eventIds],
+      )
+    : { rows: [] }
+  const roomsByEvent = new Map<string, any[]>()
+  for (const room of roomResult.rows) {
+    const rooms = roomsByEvent.get(room.event_id) || []
+    rooms.push({ id: room.id, name: room.name })
+    roomsByEvent.set(room.event_id, rooms)
+  }
   return Promise.all(result.rows.map(async (event) => {
     const privacy = await getPriestPrivacyAccess(client, context.user, event)
     if (!privacy.canSeeEvent) return null
@@ -1407,6 +1548,14 @@ const loadEventList = async (
       template_version: Number(event.template_version || 0) || null,
       version: Number(event.version),
       responsibility_count: Number(event.responsibility_count),
+      rooms:
+        event.visibility === "private" && !privacy.canSeeProtectedDetails
+          ? []
+          : roomsByEvent.get(event.id) || [],
+      room_ids:
+        event.visibility === "private" && !privacy.canSeeProtectedDetails
+          ? []
+          : (roomsByEvent.get(event.id) || []).map((room) => room.id),
     }
   })).then((events) => events.filter(Boolean))
 }
@@ -1957,10 +2106,29 @@ const loadEventDetails = async (
       )
     : { rows: [] }
 
+  const roomResult = await client.query(
+    `
+      SELECT room.id, room.name
+      FROM event_room_reservations reservation
+      JOIN chapel_rooms room ON room.id = reservation.room_id
+      WHERE reservation.event_id = $1
+      ORDER BY room.sort_order, lower(room.name)
+    `,
+    [eventId],
+  )
+
   return {
     ...event,
     version: Number(event.version),
     template_version: Number(event.template_version || 0) || null,
+    rooms:
+      event.visibility === "private" && !privacyAccess.canSeeProtectedDetails
+        ? []
+        : roomResult.rows,
+    room_ids:
+      event.visibility === "private" && !privacyAccess.canSeeProtectedDetails
+        ? []
+        : roomResult.rows.map((room) => room.id),
     ministries: participantResult.rows.map((participant, index) => ({
       ministryId: participant.ministry_id,
       ministryName: participant.ministry_name,
@@ -2178,16 +2346,19 @@ export const createEvents = async (
     : privateByDefault
       ? "private"
       : "public"
+  const roomIds = normalizeRoomIds(body.roomIds)
+  await validateRoomIds(client, roomIds)
   if (visibility === "private") {
     description = ""
     location = ""
   }
-  const ministryIds = Array.from(
+  let ministryIds = Array.from(
     new Set([
       structure.template.ministry_id,
       ...structure.blocks.map((block: any) => block.ministry_id),
     ]),
   ).filter(Boolean) as string[]
+  ministryIds = await excludeReservationMinistry(client, ministryIds)
   const conflictOverride = body.conflictOverride === true
   const conflictOverrideReason = conflictOverride
     ? cleanText(body.conflictOverrideReason, 500) || "Overlap reviewed by ministry administrator"
@@ -2233,13 +2404,23 @@ export const createEvents = async (
 
   for (const occurrenceStart of occurrenceStarts) {
     const occurrenceEnd = new Date(occurrenceStart.getTime() + duration)
-    const conflicts = await findEventConflicts(
-      client,
-      ministryIds,
-      occurrenceStart,
-      occurrenceEnd,
-      [],
-    )
+    const [scheduleConflicts, roomConflicts] = await Promise.all([
+      findEventConflicts(
+        client,
+        ministryIds,
+        occurrenceStart,
+        occurrenceEnd,
+        [],
+      ),
+      findRoomConflicts(
+        client,
+        roomIds,
+        occurrenceStart,
+        occurrenceEnd,
+        [],
+      ),
+    ])
+    const conflicts = [...scheduleConflicts, ...roomConflicts]
     if (
       conflicts.length &&
       !conflictOverride &&
@@ -2270,6 +2451,7 @@ export const createEvents = async (
             : new Date(occurrenceStart.getTime() + confirmationOffset),
         conflictOverride: conflicts.length > 0 && conflictOverride,
         conflictOverrideReason,
+        roomIds,
       })
     eventIds.push(eventId)
     if (occurrenceStarts.length > 1) {
@@ -2488,7 +2670,7 @@ const cloneEvent = async (
   if (!source) throw Object.assign(new Error("Event not found"), { status: 404 })
   await requireMinistryAccess(client, context.user, source.ministry_id, true)
 
-  const [blocks, responsibilities] = await Promise.all([
+  const [blocks, responsibilities, sourceRooms] = await Promise.all([
     client.query(
       `SELECT * FROM event_ministries WHERE event_id = $1 ORDER BY created_at`,
       [sourceEventId],
@@ -2501,6 +2683,10 @@ const cloneEvent = async (
           AND status <> 'cancelled'
         ORDER BY sort_order
       `,
+      [sourceEventId],
+    ),
+    client.query(
+      `SELECT room_id FROM event_room_reservations WHERE event_id = $1`,
       [sourceEventId],
     ),
   ])
@@ -2551,19 +2737,22 @@ const cloneEvent = async (
       sort_order: responsibility.sort_order,
     })),
   }
-  const ministryIds = Array.from(
+  let ministryIds = Array.from(
     new Set([
       source.ministry_id,
       ...blocks.rows.map((block) => block.ministry_id),
     ]),
   ).filter(Boolean) as string[]
-  const conflicts = await findEventConflicts(
-    client,
-    ministryIds,
-    start,
-    end,
-    [],
-  )
+  ministryIds = await excludeReservationMinistry(client, ministryIds)
+  const roomIds = body.roomIds === undefined
+    ? sourceRooms.rows.map((room) => room.room_id)
+    : normalizeRoomIds(body.roomIds)
+  await validateRoomIds(client, roomIds)
+  const [scheduleConflicts, roomConflicts] = await Promise.all([
+    findEventConflicts(client, ministryIds, start, end, []),
+    findRoomConflicts(client, roomIds, start, end, []),
+  ])
+  const conflicts = [...scheduleConflicts, ...roomConflicts]
   const conflictOverride = body.conflictOverride === true
   if (conflicts.length && !conflictOverride) {
     throw Object.assign(
@@ -2591,6 +2780,7 @@ const cloneEvent = async (
     conflictOverrideReason: conflictOverride
       ? cleanText(body.conflictOverrideReason, 500) || "Overlap reviewed by ministry administrator"
       : null,
+    roomIds,
   })
 }
 
@@ -4269,6 +4459,8 @@ const updateEvent = async (
       { status: 400 },
     )
   }
+  const roomIds = normalizeRoomIds(body.roomIds)
+  await validateRoomIds(client, roomIds)
   const updateScope = body.updateScope === "this_and_future"
     ? "this_and_future"
     : "this_event"
@@ -4324,15 +4516,31 @@ const updateEvent = async (
       context,
       body,
     )
+    const affectedEventIds = affected.map((item) => item.id)
+    const roomConflictGroups = await Promise.all(
+      occurrenceStarts.map((occurrenceStart) =>
+        findRoomConflicts(
+          client,
+          roomIds,
+          occurrenceStart,
+          new Date(occurrenceStart.getTime() + duration),
+          affectedEventIds,
+        ),
+      ),
+    )
+    const allConflicts = [
+      ...recurrenceConflictPreview.conflicts,
+      ...roomConflictGroups.flat(),
+    ]
     const conflictOverride = body.conflictOverride === true
-    if (recurrenceConflictPreview.conflicts.length && !conflictOverride) {
+    if (allConflicts.length && !conflictOverride) {
       throw Object.assign(
         new Error("These changes overlap other events. Fix the schedule or explicitly ignore the warning."),
-        { status: 409, conflicts: recurrenceConflictPreview.conflicts },
+        { status: 409, conflicts: allConflicts },
       )
     }
     const conflictOverrideReason =
-      recurrenceConflictPreview.conflicts.length && conflictOverride
+      allConflicts.length && conflictOverride
         ? cleanText(body.conflictOverrideReason, 500) ||
           "Overlap reviewed by ministry administrator"
         : null
@@ -4383,10 +4591,16 @@ const updateEvent = async (
           nextGroupId,
           JSON.stringify(nextRule),
           event.recurrence_group_id,
-          recurrenceConflictPreview.conflicts.length > 0 && conflictOverride,
+          allConflicts.length > 0 && conflictOverride,
           conflictOverrideReason,
           context.user.id,
         ],
+      )
+      await replaceEventRooms(
+        client,
+        affectedEvent.id,
+        roomIds,
+        context.actor.id,
       )
       if (
         toChapelDateKey(affectedEvent.start_time) !==
@@ -4413,8 +4627,9 @@ const updateEvent = async (
           recurrenceGroupId: nextGroupId,
           recurrenceRule: nextRule,
           conflictOverride:
-            recurrenceConflictPreview.conflicts.length > 0 && conflictOverride,
+            allConflicts.length > 0 && conflictOverride,
           conflictOverrideReason,
+          roomIds,
         },
         metadata: {
           effectiveFromEventId: eventId,
@@ -4432,19 +4647,18 @@ const updateEvent = async (
     `SELECT ministry_id FROM event_ministries WHERE event_id = $1`,
     [eventId],
   )
-  const ministryIds = Array.from(
+  let ministryIds = Array.from(
     new Set([
       event.ministry_id,
       ...participantResult.rows.map((row) => row.ministry_id),
     ]),
   ).filter(Boolean) as string[]
-  const conflicts = await findEventConflicts(
-    client,
-    ministryIds,
-    start,
-    end,
-    [eventId],
-  )
+  ministryIds = await excludeReservationMinistry(client, ministryIds)
+  const [scheduleConflicts, roomConflicts] = await Promise.all([
+    findEventConflicts(client, ministryIds, start, end, [eventId]),
+    findRoomConflicts(client, roomIds, start, end, [eventId]),
+  ])
+  const conflicts = [...scheduleConflicts, ...roomConflicts]
   const conflictOverride = body.conflictOverride === true
   if (conflicts.length && !conflictOverride) {
     throw Object.assign(
@@ -4514,6 +4728,7 @@ const updateEvent = async (
       context.user.id,
     ],
   )
+  await replaceEventRooms(client, eventId, roomIds, context.actor.id)
   if (["volunteers", "both"].includes(participationType)) {
     await ensureDefaultGeneralVolunteer(client, eventId)
   }
@@ -4534,6 +4749,7 @@ const updateEvent = async (
       confirmationDeadline,
       conflictOverride: conflicts.length > 0 && conflictOverride,
       conflictOverrideReason,
+      roomIds,
     },
   })
   return { message: "Event updated", eventIds: [eventId] }
@@ -4658,7 +4874,11 @@ export const handleEvents = async (request: Request) => {
       if (eventId) return json(await loadEventDetails(client, context, eventId))
       const ministryId = url.searchParams.get("ministryId")
       if (!ministryId) return json({ message: "Ministry is required" }, 400)
-      return json({ events: await loadEventList(client, context, ministryId) })
+      const [events, rooms] = await Promise.all([
+        loadEventList(client, context, ministryId),
+        loadActiveRooms(client),
+      ])
+      return json({ events, rooms })
     }
 
     const body = await request.json().catch(() => ({}))

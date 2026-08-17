@@ -121,6 +121,8 @@ const listMembers = async (client, user, ministryId) => {
           membership.monthly_frequency_limit,
           membership.highest_level_id,
           member.automatic_assignment_monthly_limit,
+          member.background_check_verified,
+          member.background_check_verified_at,
           ministry_level.name AS highest_level_name,
           ministry_level.icon_key AS highest_level_icon_key,
           ministry_level.rank_order AS highest_level_rank
@@ -160,6 +162,11 @@ const listMembers = async (client, user, ministryId) => {
             : Number(
                 membershipResult.rows[0].automatic_assignment_monthly_limit
               ),
+        backgroundCheckVerified: Boolean(
+          membershipResult.rows[0].background_check_verified
+        ),
+        backgroundCheckVerifiedAt:
+          membershipResult.rows[0].background_check_verified_at || null,
         highestLevelId: membershipResult.rows[0].highest_level_id,
         highestLevelName: membershipResult.rows[0].highest_level_name,
         highestLevelIconKey: membershipResult.rows[0].highest_level_icon_key,
@@ -190,6 +197,8 @@ const listMembers = async (client, user, ministryId) => {
           mm.monthly_frequency_limit,
           mm.highest_level_id,
           u.automatic_assignment_monthly_limit,
+          u.background_check_verified,
+          u.background_check_verified_at,
           ministry_level.name AS highest_level_name,
           ministry_level.icon_key AS highest_level_icon_key,
           ministry_level.rank_order AS highest_level_rank,
@@ -290,6 +299,8 @@ const listMembers = async (client, user, ministryId) => {
         member.automatic_assignment_monthly_limit == null
           ? null
           : Number(member.automatic_assignment_monthly_limit),
+      backgroundCheckVerified: Boolean(member.background_check_verified),
+      backgroundCheckVerifiedAt: member.background_check_verified_at || null,
       highestLevelId: member.highest_level_id,
       highestLevelName: member.highest_level_name,
       highestLevelIconKey: member.highest_level_icon_key,
@@ -715,6 +726,75 @@ const updateMembership = async (
       managedMinistries,
       body
     )
+  }
+
+  if (action === "set_background_check_verified") {
+    const securityMinistry = managedMinistries.find(
+      (ministry) => ministry.slug === "security"
+    )
+    if (!isGlobalManager(user) && !securityMinistry) {
+      return jsonResponse(403, {
+        message:
+          "Only Security Ministry Admins or Super Admins can change verification",
+      })
+    }
+    if (!targetUserId) {
+      return jsonResponse(400, { message: "Member is required" })
+    }
+    const verified = body.verified === true
+    await client.query("BEGIN")
+    try {
+      const existingResult = await client.query(
+        `
+          SELECT id, background_check_verified,
+            background_check_verified_at, background_check_verified_by
+          FROM users
+          WHERE id = $1 AND status = 'active'
+          FOR UPDATE
+        `,
+        [targetUserId]
+      )
+      const existing = existingResult.rows[0]
+      if (!existing) {
+        await client.query("ROLLBACK")
+        return jsonResponse(404, { message: "Active Ministry member not found" })
+      }
+      const updatedResult = await client.query(
+        `
+          UPDATE users
+          SET background_check_verified = $2,
+              background_check_verified_at = CASE WHEN $2 THEN now() ELSE NULL END,
+              background_check_verified_by = CASE WHEN $2 THEN $3 ELSE NULL END,
+              updated_at = now()
+          WHERE id = $1
+          RETURNING id, background_check_verified,
+            background_check_verified_at, background_check_verified_by
+        `,
+        [targetUserId, verified, actor.id]
+      )
+      await writeLevelAudit(client, {
+        actor,
+        user,
+        action: verified
+          ? "member.background_check_verified"
+          : "member.background_check_verification_removed",
+        entityType: "user_background_check",
+        entityId: targetUserId,
+        ministryId: securityMinistry?.id || null,
+        beforeData: existing,
+        afterData: updatedResult.rows[0],
+      })
+      await client.query("COMMIT")
+      return jsonResponse(200, {
+        success: true,
+        message: verified
+          ? "Background check marked verified"
+          : "Background check verification removed",
+      })
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {})
+      throw error
+    }
   }
 
   if (action === "set_global_role") {

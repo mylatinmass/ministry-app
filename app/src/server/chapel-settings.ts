@@ -114,8 +114,24 @@ const normalizeObservance = (body: any) => {
   }
 }
 
+const normalizeRoom = (body: any) => {
+  const name = cleanText(body.name, 150)
+  if (!name) {
+    throw Object.assign(new Error("Room name is required"), { status: 400 })
+  }
+  return {
+    id: cleanText(body.id, 100),
+    name,
+    description: cleanText(body.description, 1000) || null,
+    status: ["active", "inactive"].includes(body.status)
+      ? body.status
+      : "active",
+    sortOrder: Math.min(10000, Math.max(0, Number(body.sortOrder) || 0)),
+  }
+}
+
 const loadSettings = async (client: PoolClient) => {
-  const [settingsResult, observancesResult, templatesResult, ministriesResult, auditResult] =
+  const [settingsResult, observancesResult, roomsResult, templatesResult, ministriesResult, auditResult] =
     await Promise.all([
       client.query(
         `SELECT settings, updated_at FROM chapel_settings WHERE setting_key = 'primary'`,
@@ -126,6 +142,14 @@ const loadSettings = async (client: PoolClient) => {
           FROM chapel_observances observance
           LEFT JOIN templates template ON template.id = observance.default_template_id
           ORDER BY observance.month, observance.day, lower(observance.name)
+        `,
+      ),
+      client.query(
+        `
+          SELECT id, name, description, status, sort_order, updated_at
+          FROM chapel_rooms
+          WHERE status <> 'archived'
+          ORDER BY sort_order, lower(name)
         `,
       ),
       client.query(
@@ -146,7 +170,7 @@ const loadSettings = async (client: PoolClient) => {
             audit.created_at, actor.first_name, actor.last_name
           FROM ministry_audit_log audit
           JOIN users actor ON actor.id = audit.actor_user_id
-          WHERE audit.entity_type IN ('chapel_settings', 'chapel_observance')
+          WHERE audit.entity_type IN ('chapel_settings', 'chapel_observance', 'chapel_room')
           ORDER BY audit.created_at DESC
           LIMIT 20
         `,
@@ -172,6 +196,14 @@ const loadSettings = async (client: PoolClient) => {
       effectiveStartYear: row.effective_start_year || "",
       notes: row.notes || "",
       status: row.status,
+    })),
+    rooms: roomsResult.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      description: row.description || "",
+      status: row.status,
+      sortOrder: Number(row.sort_order) || 0,
+      updatedAt: row.updated_at,
     })),
     templates: templatesResult.rows.map((row) => ({
       id: row.id,
@@ -281,6 +313,75 @@ export const handleChapelSettings = async (request: Request) => {
           entityType: "chapel_observance",
           entityId: result.rows[0].id,
           beforeData: previousResult.rows[0] || null,
+          afterData: result.rows[0],
+        })
+      } else if (body.action === "save_room") {
+        const input = normalizeRoom(body.room)
+        const previousResult = input.id
+          ? await client.query(
+              `SELECT * FROM chapel_rooms WHERE id = $1 FOR UPDATE`,
+              [input.id],
+            )
+          : { rows: [] }
+        const result = input.id
+          ? await client.query(
+              `
+                UPDATE chapel_rooms
+                SET name = $2, description = $3, status = $4,
+                  sort_order = $5, updated_by = $6, updated_at = now()
+                WHERE id = $1 AND status <> 'archived'
+                RETURNING *
+              `,
+              [
+                input.id, input.name, input.description, input.status,
+                input.sortOrder, context.user.id,
+              ],
+            )
+          : await client.query(
+              `
+                INSERT INTO chapel_rooms (
+                  name, description, status, sort_order, created_by, updated_by
+                ) VALUES ($1, $2, $3, $4, $5, $5)
+                RETURNING *
+              `,
+              [
+                input.name, input.description, input.status,
+                input.sortOrder, context.user.id,
+              ],
+            )
+        if (!result.rowCount) {
+          throw Object.assign(new Error("Room not found"), { status: 404 })
+        }
+        await writeSchedulingAudit(client, context, {
+          action: input.id ? "chapel.room_updated" : "chapel.room_created",
+          entityType: "chapel_room",
+          entityId: result.rows[0].id,
+          beforeData: previousResult.rows[0] || null,
+          afterData: result.rows[0],
+        })
+      } else if (body.action === "archive_room") {
+        const roomId = cleanText(body.roomId, 100)
+        const previousResult = await client.query(
+          `SELECT * FROM chapel_rooms WHERE id = $1 AND status <> 'archived' FOR UPDATE`,
+          [roomId],
+        )
+        if (!previousResult.rowCount) {
+          throw Object.assign(new Error("Room not found"), { status: 404 })
+        }
+        const result = await client.query(
+          `
+            UPDATE chapel_rooms
+            SET status = 'archived', updated_by = $2, updated_at = now()
+            WHERE id = $1
+            RETURNING *
+          `,
+          [roomId, context.user.id],
+        )
+        await writeSchedulingAudit(client, context, {
+          action: "chapel.room_archived",
+          entityType: "chapel_room",
+          entityId: roomId,
+          beforeData: previousResult.rows[0],
           afterData: result.rows[0],
         })
       } else {

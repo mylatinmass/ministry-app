@@ -133,7 +133,12 @@ const handler = async (event) => {
           [user.id]
         )
 
-    const [calendarEventsResult, assignmentsResult] = await Promise.all([
+    const [
+      calendarEventsResult,
+      assignmentsResult,
+      pendingSubRequestsResult,
+      unfilledPositionsResult,
+    ] = await Promise.all([
       client.query(
         `
           SELECT
@@ -201,6 +206,70 @@ const handler = async (event) => {
         `,
         [user.id]
       ),
+      client.query(
+        `
+          SELECT request.event_id, count(DISTINCT request.id)::INT AS request_count
+          FROM assignment_change_requests request
+          JOIN events event ON event.id = request.event_id
+          WHERE request.status = 'pending'
+            AND request.request_type = 'substitute'
+            AND (request.expires_at IS NULL OR request.expires_at > now())
+            AND event.status = 'published'
+            AND event.start_time > now()
+            AND (
+              $2::BOOL
+              OR EXISTS (
+                SELECT 1 FROM ministry_members membership
+                WHERE membership.user_id = $1
+                  AND membership.ministry_id = request.ministry_id
+                  AND membership.status = 'active'
+                  AND membership.level IN ('owner', 'admin')
+              )
+            )
+          GROUP BY request.event_id
+          ORDER BY min(event.start_time)
+        `,
+        [user.id, hasGlobalAccess]
+      ),
+      client.query(
+        `
+          SELECT responsibility.event_id,
+            sum(GREATEST(
+              responsibility.quantity_needed - COALESCE(assigned.assigned_quantity, 0),
+              0
+            ))::INT AS missing_count
+          FROM event_responsibilities responsibility
+          JOIN events event ON event.id = responsibility.event_id
+          LEFT JOIN LATERAL (
+            SELECT COALESCE(sum(assignment.quantity), 0)::INT AS assigned_quantity
+            FROM responsibility_assignments assignment
+            WHERE assignment.responsibility_id = responsibility.id
+              AND assignment.status IN ('pending', 'assigned', 'confirmed', 'change_requested')
+          ) assigned ON true
+          WHERE event.status = 'published'
+            AND event.start_time > now()
+            AND responsibility.status <> 'cancelled'
+            AND responsibility.is_required = true
+            AND responsibility.unlimited_capacity = false
+            AND (
+              $2::BOOL
+              OR EXISTS (
+                SELECT 1 FROM ministry_members membership
+                WHERE membership.user_id = $1
+                  AND membership.ministry_id = COALESCE(responsibility.ministry_id, event.ministry_id)
+                  AND membership.status = 'active'
+                  AND membership.level IN ('owner', 'admin')
+              )
+            )
+          GROUP BY responsibility.event_id
+          HAVING sum(GREATEST(
+            responsibility.quantity_needed - COALESCE(assigned.assigned_quantity, 0),
+            0
+          )) > 0
+          ORDER BY min(event.start_time)
+        `,
+        [user.id, hasGlobalAccess]
+      ),
     ])
 
     const assignmentsByEvent = assignmentsResult.rows.reduce(
@@ -235,6 +304,12 @@ const handler = async (event) => {
         visibleProfileAssignments,
       }
     })
+    const pendingSubRequestEventIds = pendingSubRequestsResult.rows.map(
+      (row) => row.event_id
+    )
+    const unfilledPositionEventIds = unfilledPositionsResult.rows.map(
+      (row) => row.event_id
+    )
 
     return jsonResponse(200, {
       actor: toPublicMinistryUser(context.actor),
@@ -242,6 +317,18 @@ const handler = async (event) => {
       isManagedProfile: context.isManagedProfile,
       ministries: result.rows.map(toMinistry),
       calendarEvents,
+      attention: {
+        pendingSubRequests: pendingSubRequestsResult.rows.reduce(
+          (total, row) => total + Number(row.request_count || 0),
+          0
+        ),
+        unfilledPositions: unfilledPositionsResult.rows.reduce(
+          (total, row) => total + Number(row.missing_count || 0),
+          0
+        ),
+        pendingSubRequestEventIds,
+        unfilledPositionEventIds,
+      },
     })
   } catch (error) {
     console.error("Unable to list ministries:", error)

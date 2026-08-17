@@ -3,10 +3,13 @@ import { Link } from "../../compat/gatsby"
 import {
   Bars3Icon,
   BellAlertIcon,
+  CalendarDaysIcon,
   ChatBubbleLeftRightIcon,
   ChevronRightIcon,
+  ExclamationTriangleIcon,
   PlusIcon,
   UserCircleIcon,
+  UserMinusIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
@@ -54,6 +57,34 @@ const DashboardBlock = ({ icon: Icon, title, children }) => (
     </div>
     {children}
   </section>
+)
+
+const DashboardAction = ({ icon: Icon, count, label, onClick, urgent = false }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-label={`${count} ${label}. Open ${label}.`}
+    className={`group flex min-h-24 items-center gap-3 rounded-2xl border p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 sm:min-h-28 sm:gap-4 sm:p-4 ${
+      count > 0
+        ? urgent
+          ? "border-orange-200 bg-orange-50"
+          : "border-gray-100 bg-white"
+        : "border-gray-100 bg-gray-50"
+    }`}
+  >
+    <span className={`rounded-xl p-2 sm:rounded-2xl sm:p-3 ${count > 0 ? "bg-orange-500 text-white" : "bg-gray-200 text-gray-500"}`}>
+      <Icon className="size-6 sm:size-7" aria-hidden="true" />
+    </span>
+    <span className="min-w-0">
+      <span className="block century-font text-3xl leading-none text-gray-950 sm:text-4xl">
+        {count}
+      </span>
+      <span className="mt-2 block text-sm font-semibold leading-snug text-gray-600">
+        {label}
+      </span>
+    </span>
+    <ChevronRightIcon className="ml-auto hidden size-5 shrink-0 text-gray-300 transition group-hover:text-orange-500 sm:block" aria-hidden="true" />
+  </button>
 )
 
 const MinistryCards = ({ ministries, isManagedProfile, actor, onReturn }) => {
@@ -159,6 +190,8 @@ const MinistryHomeWorkspace = ({ data }) => {
     unreadCount: 0,
   })
   const [showCreateEvent, setShowCreateEvent] = React.useState(false)
+  const [eventView, setEventView] = React.useState("all")
+  const alertsSectionRef = React.useRef(null)
   const manageableMinistries = React.useMemo(
     () =>
       data.ministries.filter(
@@ -201,6 +234,23 @@ const MinistryHomeWorkspace = ({ data }) => {
           new Date(second.assignment_start_time || second.start_time).getTime()
       )
   }, [myEvents])
+  const attention = data.attention || {
+    pendingSubRequests: 0,
+    unfilledPositions: 0,
+    pendingSubRequestEventIds: [],
+    unfilledPositionEventIds: [],
+  }
+  const eventSectionEvents = React.useMemo(() => {
+    if (eventView === "mine") return upcomingAssignments
+    const ids = eventView === "sub_requests"
+      ? attention.pendingSubRequestEventIds
+      : eventView === "unfilled"
+        ? attention.unfilledPositionEventIds
+        : null
+    if (!ids) return upcomingEvents
+    const idSet = new Set(ids)
+    return upcomingEvents.filter((event) => idSet.has(event.id))
+  }, [attention.pendingSubRequestEventIds, attention.unfilledPositionEventIds, eventView, upcomingAssignments, upcomingEvents])
   const today = React.useMemo(() => new Date(), [])
   const todayLabel = React.useMemo(
     () =>
@@ -321,12 +371,20 @@ const MinistryHomeWorkspace = ({ data }) => {
     setAlertsData(result)
   }
 
-  const selectSection = (id) => {
+  const selectSection = (id, requestedEventView = "all") => {
     setSectionId(id)
-    if (id === "events") setShowCreateEvent(false)
+    if (id === "events") {
+      setShowCreateEvent(false)
+      setEventView(requestedEventView)
+    }
     setMobileMenuOpen(false)
     setProfileMenuOpen(false)
     window.history.replaceState({}, "", id === "home" ? "/" : `/?section=${id}`)
+  }
+
+  const openAlerts = () => {
+    alertsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    window.setTimeout(() => alertsSectionRef.current?.focus({ preventScroll: true }), 350)
   }
 
   const switchProfile = async (profileId) => {
@@ -366,6 +424,51 @@ const MinistryHomeWorkspace = ({ data }) => {
   if (sectionId === "home") {
     content = (
       <div className="space-y-8">
+        <section aria-labelledby="dashboard-actions-title">
+          <h2 id="dashboard-actions-title" className="mb-3 century-font text-2xl text-gray-950">
+            Your Ministry
+          </h2>
+          <div className={`grid grid-cols-2 gap-3 ${canManageMembers ? "xl:grid-cols-5" : "xl:grid-cols-3"}`}>
+            <DashboardAction
+              icon={ChatBubbleLeftRightIcon}
+              count={messageSummary.unreadCount || 0}
+              label="Unread Messages"
+              onClick={() => selectSection("messages")}
+              urgent={messageSummary.unreadCount > 0}
+            />
+            <DashboardAction
+              icon={CalendarDaysIcon}
+              count={upcomingAssignments.length}
+              label="My Assignments"
+              onClick={() => selectSection("events", "mine")}
+            />
+            <DashboardAction
+              icon={BellAlertIcon}
+              count={alertsData.unreadCount || 0}
+              label="Pending Alerts"
+              onClick={openAlerts}
+              urgent={alertsData.unreadCount > 0}
+            />
+            {canManageMembers && (
+              <DashboardAction
+                icon={UserMinusIcon}
+                count={attention.pendingSubRequests || 0}
+                label="Sub Requests"
+                onClick={() => selectSection("events", "sub_requests")}
+                urgent={attention.pendingSubRequests > 0}
+              />
+            )}
+            {canManageMembers && (
+              <DashboardAction
+                icon={ExclamationTriangleIcon}
+                count={attention.unfilledPositions || 0}
+                label="Unfilled Positions"
+                onClick={() => selectSection("events", "unfilled")}
+                urgent={attention.unfilledPositions > 0}
+              />
+            )}
+          </div>
+        </section>
         <div className="grid gap-5 lg:grid-cols-[0.7fr_1.3fr]">
           <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
             <p className="text-xs font-semibold uppercase tracking-wider text-[#896542]">
@@ -403,6 +506,7 @@ const MinistryHomeWorkspace = ({ data }) => {
           />
         </section>
         <div className="grid gap-5 lg:grid-cols-2">
+          <div ref={alertsSectionRef} tabIndex={-1} className="scroll-mt-4 rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500">
           <DashboardBlock icon={BellAlertIcon} title="Alerts & Reminders">
             {alertsData.alerts.length ? (
               <div className="space-y-3">
@@ -470,6 +574,7 @@ const MinistryHomeWorkspace = ({ data }) => {
               />
             )}
           </DashboardBlock>
+          </div>
           <DashboardBlock
             icon={ChatBubbleLeftRightIcon}
             title="Ministry Notices"
@@ -562,9 +667,23 @@ const MinistryHomeWorkspace = ({ data }) => {
       <div className="space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="century-font text-3xl text-gray-950">Events</h2>
+            <h2 className="century-font text-3xl text-gray-950">
+              {eventView === "mine"
+                ? "My Events"
+                : eventView === "sub_requests"
+                  ? "Sub Requests"
+                  : eventView === "unfilled"
+                    ? "Unfilled Positions"
+                    : "Events"}
+            </h2>
             <p className="mt-1 text-sm text-gray-500">
-              Public events, ministry events visible to this profile, and assigned duties.
+              {eventView === "mine"
+                ? "Upcoming events assigned to this profile."
+                : eventView === "sub_requests"
+                  ? "Events with substitute requests that need an administrator."
+                  : eventView === "unfilled"
+                    ? "Published events with required positions still open."
+                    : "Public events, ministry events visible to this profile, and assigned duties."}
             </p>
           </div>
           {(hasGlobalAccess || manageableMinistries.length > 0) && (
@@ -578,13 +697,35 @@ const MinistryHomeWorkspace = ({ data }) => {
             </button>
           )}
         </div>
+        <div className="flex flex-wrap gap-2" aria-label="Filter events">
+          <button
+            type="button"
+            onClick={() => setEventView("all")}
+            className={`rounded-lg border px-3 py-2 text-sm font-semibold ${eventView === "all" ? "border-[#896542] bg-[#f7f3ef] text-[#6f4f34]" : "border-gray-200 bg-white text-gray-600"}`}
+          >
+            All Events
+          </button>
+          <button
+            type="button"
+            onClick={() => setEventView("mine")}
+            className={`rounded-lg border px-3 py-2 text-sm font-semibold ${eventView === "mine" ? "border-[#896542] bg-[#f7f3ef] text-[#6f4f34]" : "border-gray-200 bg-white text-gray-600"}`}
+          >
+            My Events
+          </button>
+          {["sub_requests", "unfilled"].includes(eventView) && (
+            <span className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-700">
+              Needs Attention
+            </span>
+          )}
+        </div>
         {hasGlobalAccess && <VolunteerEvents />}
         <MinistryEventAgenda
-          events={upcomingEvents}
-          label="Available events"
-          emptyTitle="No available events"
-          emptyText="Public events and events for this profile's ministries will appear here."
+          events={eventSectionEvents}
+          label={eventView === "mine" ? "My events" : "Available events"}
+          emptyTitle={eventView === "mine" ? "No assigned events" : "Nothing needs attention"}
+          emptyText={eventView === "mine" ? "Upcoming duties assigned to this profile will appear here." : "There are no events matching this filter."}
           onEventSelect={setSelectedEvent}
+          useAssignmentTime={eventView === "mine"}
         />
       </div>
     )

@@ -4,16 +4,13 @@ import { json } from "../request"
 import { verifySchedulerRequest } from "./scheduler-auth"
 import { processKlaviyoProfileSyncs } from "./klaviyo-profiles"
 import {
-  processUrgentAcknowledgmentEscalations,
-  processUrgentStaffingShortages,
   processNotificationDigests,
   queueAssignmentReminderAlert,
-  queueTomorrowSchedules,
+  queueDailyAdminAlerts,
   queueWeeklyAssignmentReviews,
 } from "./assignment-notifications"
 import { processMinistryMessageDeliveries } from "./messages"
 import { expireAssignmentSubstitutionRequests } from "../scheduling/substitutions"
-import { processWeeklyEmergencySchedules } from "./emergency-schedules"
 
 const ASSIGNMENT_STATUSES = [
   "pending",
@@ -242,12 +239,9 @@ export const handleReminderProcessing = async (request: Request) => {
   }
 
   const weeklyReviews = await queueWeeklyAssignmentReviews()
-  const tomorrowSchedules = await queueTomorrowSchedules()
-  const urgentShortages = await processUrgentStaffingShortages()
-  const urgentEscalations = await processUrgentAcknowledgmentEscalations()
+  const dailyAdminAlerts = await queueDailyAdminAlerts()
   const processedAlerts = await processNotificationDigests()
   const processedMessages = await processMinistryMessageDeliveries()
-  const emergencySchedules = await processWeeklyEmergencySchedules()
 
   return json({
     klaviyoProfiles,
@@ -255,11 +249,8 @@ export const handleReminderProcessing = async (request: Request) => {
     reconciledAssignments: reconciled,
     processedReminders: reminders.length,
     weeklyReviews,
-    tomorrowSchedules,
-    urgentShortages,
-    urgentEscalations,
+    dailyAdminAlerts,
     processedAlerts,
     processedMessages,
-    emergencySchedules,
   })
 }

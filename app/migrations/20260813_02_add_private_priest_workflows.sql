@@ -12,15 +12,15 @@ CREATE TABLE IF NOT EXISTS priest_appointment_details (
   address STRING NULL,
   instructions STRING NULL,
   private_notes STRING NULL,
-  created_by UUID NOT NULL REFERENCES users(id),
-  updated_by UUID NOT NULL REFERENCES users(id),
+  created_by UUID NOT NULL REFERENCES ministry_accounts(id),
+  updated_by UUID NOT NULL REFERENCES ministry_accounts(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS telegram_event_drafts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  account_user_id UUID NOT NULL REFERENCES users(id),
+  account_user_id UUID NOT NULL REFERENCES ministry_accounts(id),
   ministry_id UUID NOT NULL REFERENCES ministries(id),
   template_id UUID NULL REFERENCES templates(id),
   chat_id STRING NOT NULL,
@@ -43,7 +43,7 @@ CREATE INDEX IF NOT EXISTS telegram_event_drafts_pending_idx
 CREATE TABLE IF NOT EXISTS ministry_emergency_schedule_deliveries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   ministry_id UUID NOT NULL REFERENCES ministries(id),
-  recipient_user_id UUID NOT NULL REFERENCES users(id),
+  recipient_user_id UUID NOT NULL REFERENCES ministry_accounts(id),
   week_start DATE NOT NULL,
   status STRING NOT NULL DEFAULT 'sent',
   provider_results JSONB NOT NULL DEFAULT '[]'::JSONB,

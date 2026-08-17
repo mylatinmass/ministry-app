@@ -43,7 +43,7 @@ const handler = async (event) => {
     })
   }
 
-  const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+  const connectionString = process.env.MINISTRY_DATABASE_URL
   if (!connectionString) {
     return jsonResponse(500, { message: "Access requests are not configured" })
   }
@@ -59,7 +59,7 @@ const handler = async (event) => {
     const eligibleAccount = await client.query(
       `
         SELECT 1
-        FROM users user_account
+        FROM ministry_accounts user_account
         WHERE lower(btrim(user_account.email)) = $1
           AND user_account.status = 'active'
           AND (

@@ -13,7 +13,7 @@ ALTER TABLE ministry_alerts
   ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMPTZ NULL;
 
 ALTER TABLE ministry_alerts
-  ADD COLUMN IF NOT EXISTS acknowledged_by_user_id UUID NULL REFERENCES users(id);
+  ADD COLUMN IF NOT EXISTS acknowledged_by_user_id UUID NULL REFERENCES ministry_accounts(id);
 
 ALTER TABLE ministry_alerts
   ADD COLUMN IF NOT EXISTS escalation_sent_at TIMESTAMPTZ NULL;

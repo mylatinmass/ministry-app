@@ -3,7 +3,7 @@ const queueKlaviyoProfileSync = (client, userId) =>
     `
       INSERT INTO klaviyo_profile_syncs (account_user_id)
       SELECT related_user.id
-      FROM users user_account
+      FROM ministry_accounts user_account
       CROSS JOIN LATERAL (
         SELECT user_account.id
         UNION

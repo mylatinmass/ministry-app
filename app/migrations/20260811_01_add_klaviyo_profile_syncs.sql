@@ -3,7 +3,7 @@
 -- guardian; notifications and external contact data belong to the guardian.
 
 CREATE TABLE IF NOT EXISTS klaviyo_profile_syncs (
-  account_user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  account_user_id UUID PRIMARY KEY REFERENCES ministry_accounts(id) ON DELETE CASCADE,
   status STRING NOT NULL DEFAULT 'pending',
   attempt_count INT NOT NULL DEFAULT 0,
   next_attempt_at TIMESTAMPTZ NULL,
@@ -25,7 +25,7 @@ CREATE INDEX IF NOT EXISTS klaviyo_profile_syncs_due_idx
 -- Queue existing independent Ministry accounts and registered volunteers.
 INSERT INTO klaviyo_profile_syncs (account_user_id)
 SELECT user_account.id
-FROM users user_account
+FROM ministry_accounts user_account
 WHERE user_account.status = 'active'
   AND (
     user_account.global_role IN ('owner', 'super_admin')

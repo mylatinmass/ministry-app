@@ -226,7 +226,7 @@ export const handleTelegramConnection = async (request: Request) => {
     )
     await pool.query(
       `
-        UPDATE users
+        UPDATE ministry_accounts
         SET notification_telegram_enabled = false, updated_at = now()
         WHERE id = $1
       `,
@@ -391,7 +391,7 @@ const createTelegramDraft = async (message: any, accountUserId: string, sourceTy
       `SELECT 1 FROM ministry_members WHERE ministry_id = $1 AND user_id = $2 AND status = 'active' AND level IN ('owner', 'admin') LIMIT 1`,
       [ministryId, accountUserId],
     )
-    const global = await client.query(`SELECT global_role FROM users WHERE id = $1 LIMIT 1`, [accountUserId])
+    const global = await client.query(`SELECT global_role FROM ministry_accounts WHERE id = $1 LIMIT 1`, [accountUserId])
     if (!access.rowCount && !["owner", "super_admin"].includes(global.rows[0]?.global_role)) {
       throw Object.assign(new Error("Only a Priest Ministry administrator can create events with Telegram"), { status: 403 })
     }
@@ -429,7 +429,7 @@ const handleEventDraftCallback = async (callback: any) => {
   try {
     await client.query("BEGIN")
     const result = await client.query(
-      `SELECT draft.*, member.id AS actor_id, member.global_role FROM telegram_event_drafts draft JOIN telegram_connections connection ON connection.account_user_id = draft.account_user_id JOIN users member ON member.id = draft.account_user_id WHERE draft.id = $1 AND draft.chat_id = $2 AND connection.telegram_user_id = $3 AND draft.status = 'pending' AND draft.expires_at > now() LIMIT 1 FOR UPDATE`,
+      `SELECT draft.*, member.id AS actor_id, member.global_role FROM telegram_event_drafts draft JOIN telegram_connections connection ON connection.account_user_id = draft.account_user_id JOIN ministry_accounts member ON member.id = draft.account_user_id WHERE draft.id = $1 AND draft.chat_id = $2 AND connection.telegram_user_id = $3 AND draft.status = 'pending' AND draft.expires_at > now() LIMIT 1 FOR UPDATE`,
       [match[2], chatId, telegramUserId],
     )
     const draft = result.rows[0]

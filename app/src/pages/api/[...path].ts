@@ -1,4 +1,5 @@
 import type { APIRoute } from "astro"
+import { assertMinistryDatabaseIsolation } from "../../server/database"
 import { runLegacyHandler } from "../../server/legacy-router"
 import {
   handleSubscriptions,
@@ -24,10 +25,12 @@ import { handleVolunteerEvents } from "../../server/scheduling/volunteer-events"
 import { handleSupport } from "../../server/support"
 import { handleChapelSettings } from "../../server/chapel-settings"
 import { handlePriestAppointmentDetails } from "../../server/scheduling/priest-appointments"
+import { handlePrioryAllocations } from "../../server/scheduling/priory-allocations"
 
 export const prerender = false
 
 const route: APIRoute = async ({ params, request }) => {
+  await assertMinistryDatabaseIsolation()
   const path = (params.path || "").replace(/^\/+|\/+$/g, "")
 
   if (path === "push/vapid-public-key" && request.method === "GET") {
@@ -65,6 +68,9 @@ const route: APIRoute = async ({ params, request }) => {
   }
   if (path === "scheduling/priest-appointment-details") {
     return handlePriestAppointmentDetails(request)
+  }
+  if (path === "scheduling/priory-allocations") {
+    return handlePrioryAllocations(request)
   }
   if (path === "scheduling/availability") {
     return handleAvailability(request)

@@ -138,6 +138,15 @@ const messagesComponent = await read(
 const cadenceMigration = await read(
   "migrations/20260814_01_simplify_member_notification_cadence.sql",
 )
+const prioryAllocationMigration = await read(
+  "migrations/20260817_03_add_priory_priest_allocations.sql",
+)
+const prioryAllocations = await read(
+  "src/server/scheduling/priory-allocations.ts",
+)
+const priorySettings = await read(
+  "src/react/components/ministry/PrioryScheduleSettings.jsx",
+)
 
 const [
   massScheduleMigration,
@@ -192,6 +201,21 @@ assert.match(apiRoute, /scheduling\/templates/)
 assert.match(apiRoute, /scheduling\/events/)
 assert.match(apiRoute, /scheduling\/availability/)
 assert.match(apiRoute, /scheduling\/ordo/)
+assert.match(apiRoute, /scheduling\/priory-allocations/)
+assert.match(apiRoute, /handlePrioryAllocations/)
+assert.match(prioryAllocationMigration, /CREATE TABLE IF NOT EXISTS priory_integration_settings/)
+assert.match(prioryAllocationMigration, /CREATE TABLE IF NOT EXISTS priory_priest_mappings/)
+assert.match(prioryAllocationMigration, /CREATE TABLE IF NOT EXISTS priory_allocation_cache/)
+assert.match(prioryAllocationMigration, /CREATE TABLE IF NOT EXISTS priory_allocation_requests/)
+assert.match(prioryAllocationMigration, /priory_allocation_conflict BOOL NOT NULL DEFAULT false/)
+assert.match(prioryAllocations, /GOOGLE_PRIORY_SCHEDULE_CREDENTIALS_JSON/)
+assert.match(prioryAllocations, /PRIORY_SCHEDULE_NOTIFICATION_EMAILS/)
+assert.match(prioryAllocations, /PRIORY_SCHEDULE_TELEGRAM_CHAT_IDS/)
+assert.match(prioryAllocations, /last verified cached Priory schedule|last_sync_error/)
+assert.match(prioryAllocations, /assertPriestAllocation/)
+assert.match(prioryAllocations, /request_allocation/)
+assert.match(priorySettings, /Use the shared Priory schedule/)
+assert.match(priorySettings, /Priest profile mappings/)
 assert.match(appearanceMigration, /appearance_theme STRING NOT NULL DEFAULT 'light'/)
 assert.match(appearanceMigration, /appearance_theme IN \('light', 'dark'\)/)
 assert.match(ministryProfileServer, /appearanceTheme: profile\.appearance_theme \|\| "light"/)
@@ -226,7 +250,7 @@ assert.match(massScheduleLibrary, /"Torchbearer 4"/)
 assert.match(massScheduleLibrary, /"Usher"/)
 assert.match(massScheduleSync, /MASS_SCHEDULE_SYNC_REQUIRED/)
 
-const notificationChannelsMigration = await read(
+const independentNotificationChannelsMigration = await read(
   "migrations/20260807_04_add_notification_channels.sql",
 )
 const pushNotificationsComponent = await read(
@@ -235,12 +259,12 @@ const pushNotificationsComponent = await read(
 const notificationDelivery = await read(
   "src/server/notifications/delivery.ts",
 )
-assert.match(notificationChannelsMigration, /notification_email_enabled/)
-assert.match(notificationChannelsMigration, /notification_telegram_enabled/)
-assert.match(notificationChannelsMigration, /notification_sms_enabled/)
-assert.match(notificationChannelsMigration, /notification_push_enabled/)
-assert.match(notificationChannelsMigration, /last_test_at/)
-assert.match(notificationChannelsMigration, /'email', 'telegram', 'sms', 'push'/)
+assert.match(independentNotificationChannelsMigration, /notification_email_enabled/)
+assert.match(independentNotificationChannelsMigration, /notification_telegram_enabled/)
+assert.match(independentNotificationChannelsMigration, /notification_sms_enabled/)
+assert.match(independentNotificationChannelsMigration, /notification_push_enabled/)
+assert.match(independentNotificationChannelsMigration, /last_test_at/)
+assert.match(independentNotificationChannelsMigration, /'email', 'telegram', 'sms', 'push'/)
 assert.match(profile, /Notification methods/)
 assert.match(profile, /notificationChannelOptions/)
 assert.match(ministryProfileServer, /profile\.notification_preferences_updated/)
@@ -851,7 +875,7 @@ const [
 assert.match(volunteerAccountMigration, /public_profile_id UUID NOT NULL DEFAULT gen_random_uuid/)
 assert.match(volunteerAccountMigration, /is_volunteer_profile BOOL NOT NULL DEFAULT false/)
 assert.match(volunteerAccountMigration, /CREATE TABLE IF NOT EXISTS volunteer_account_invitations/)
-assert.match(schedulingVolunteers, /INSERT INTO users/)
+assert.match(schedulingVolunteers, /INSERT INTO ministry_accounts/)
 assert.match(schedulingVolunteers, /user\.id/)
 assert.match(schedulingVolunteers, /public_profile_id/)
 assert.match(schedulingVolunteers, /accountInvitationSent/)
@@ -923,6 +947,44 @@ for (const file of serverFiles) {
     `Runtime schema DDL found in ${path.relative(root, file)}`
   )
 }
+
+const migrationFiles = (await fs.readdir(path.join(root, "migrations")))
+  .filter((file) => file.endsWith(".sql"))
+  .map((file) => path.join(root, "migrations", file))
+const forbiddenParishAccountReference =
+  /\b(?:FROM|JOIN|UPDATE|INTO|REFERENCES|ALTER\s+TABLE|DELETE\s+FROM)\s+(?:public\.)?users\b/i
+for (const file of [...serverFiles, ...migrationFiles]) {
+  const source = await fs.readFile(file, "utf8")
+  assert.doesNotMatch(
+    source,
+    forbiddenParishAccountReference,
+    `Parish account-table dependency found in ${path.relative(root, file)}`,
+  )
+}
+
+const databaseSource = await read("src/server/database.ts")
+const accountMigration = await read(
+  "migrations/20260716_01_create_ministry_scheduling.sql",
+)
+assert.match(databaseSource, /process\.env\.MINISTRY_DATABASE_URL/)
+assert.doesNotMatch(databaseSource, /process\.env\.COCKROACHDB_CONNECTION_STRING/)
+assert.match(databaseSource, /assertMinistryDatabaseIsolation/)
+assert.match(migrationRunner, /Migration refused:[\s\S]*parish users table/)
+assert.match(accountMigration, /CREATE TABLE IF NOT EXISTS ministry_accounts/)
+assert.doesNotMatch(accountMigration, /REFERENCES\s+users/i)
+assert.match(
+  independentNotificationChannelsMigration,
+  /notification_email_enabled BOOL NOT NULL DEFAULT false/,
+)
+assert.match(
+  assignmentNotifications,
+  /MINISTRY_OUTBOUND_DELIVERY_ENABLED === "true"/,
+)
+assert.match(assignmentNotifications, /MINISTRY_MAX_NOTIFICATION_RECIPIENTS/)
+assert.match(
+  assignmentNotifications,
+  /FROM ministry_members membership[\s\S]*membership\.status = 'active'/,
+)
 
 console.log(
   "Verified Astro base path, one API dispatcher, active-profile authorization, multi-ministry templates and events, template versioning, ministry-level publication, reminder timing, Web Push scope, OIDC checks, durable deduplication, and migration-only schema changes."

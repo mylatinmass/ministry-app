@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS template_versions (
   template_id UUID NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
   version INT NOT NULL,
   snapshot JSONB NOT NULL,
-  created_by UUID NOT NULL REFERENCES users(id),
+  created_by UUID NOT NULL REFERENCES ministry_accounts(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT template_versions_template_version_key
     UNIQUE (template_id, version)
@@ -78,9 +78,9 @@ CREATE TABLE IF NOT EXISTS event_ministries (
     REFERENCES template_ministries(id) ON DELETE SET NULL,
   is_required BOOL NOT NULL DEFAULT true,
   schedule_status STRING NOT NULL DEFAULT 'generated',
-  reviewed_by UUID NULL REFERENCES users(id),
+  reviewed_by UUID NULL REFERENCES ministry_accounts(id),
   reviewed_at TIMESTAMPTZ NULL,
-  published_by UUID NULL REFERENCES users(id),
+  published_by UUID NULL REFERENCES ministry_accounts(id),
   published_at TIMESTAMPTZ NULL,
   instructions STRING NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -119,8 +119,8 @@ ALTER TABLE event_responsibilities
 
 CREATE TABLE IF NOT EXISTS ministry_audit_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  actor_user_id UUID NOT NULL REFERENCES users(id),
-  active_profile_user_id UUID NOT NULL REFERENCES users(id),
+  actor_user_id UUID NOT NULL REFERENCES ministry_accounts(id),
+  active_profile_user_id UUID NOT NULL REFERENCES ministry_accounts(id),
   action STRING NOT NULL,
   entity_type STRING NOT NULL,
   entity_id UUID NULL,

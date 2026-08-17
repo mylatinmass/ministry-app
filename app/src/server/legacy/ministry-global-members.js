@@ -16,7 +16,7 @@ const handler = async (event) => {
     return jsonResponse(405, { message: "Method not allowed" })
   }
 
-  const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+  const connectionString = process.env.MINISTRY_DATABASE_URL
   const jwtSecret = process.env.JWT_SECRET_KEY
   if (!connectionString || !jwtSecret) {
     return jsonResponse(500, {
@@ -99,7 +99,7 @@ const handler = async (event) => {
               user_account.status,
               user_account.background_check_verified,
               user_account.background_check_verified_at
-            FROM users user_account
+            FROM ministry_accounts user_account
             JOIN ministry_members existing_membership
               ON existing_membership.user_id = user_account.id
              AND existing_membership.status = 'active'
@@ -173,7 +173,7 @@ const handler = async (event) => {
               ON item.invitation_id = invitation.id
             JOIN ministries ministry
               ON ministry.id = item.ministry_id
-            JOIN users requester
+            JOIN ministry_accounts requester
               ON requester.id = invitation.requested_by
             WHERE invitation.status = 'pending'
               AND item.ministry_id = ANY($1::UUID[])

@@ -1,14 +1,14 @@
 -- Add profile-level background-check verification and chapel room reservations.
 -- Sensitive screening records and reasons remain outside the Ministry App.
 
-ALTER TABLE users
+ALTER TABLE ministry_accounts
   ADD COLUMN IF NOT EXISTS background_check_verified BOOL NOT NULL DEFAULT false;
 
-ALTER TABLE users
+ALTER TABLE ministry_accounts
   ADD COLUMN IF NOT EXISTS background_check_verified_at TIMESTAMPTZ NULL;
 
-ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS background_check_verified_by UUID NULL REFERENCES users(id);
+ALTER TABLE ministry_accounts
+  ADD COLUMN IF NOT EXISTS background_check_verified_by UUID NULL REFERENCES ministry_accounts(id);
 
 CREATE TABLE IF NOT EXISTS chapel_rooms (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -16,8 +16,8 @@ CREATE TABLE IF NOT EXISTS chapel_rooms (
   description STRING NULL,
   status STRING NOT NULL DEFAULT 'active',
   sort_order INT NOT NULL DEFAULT 0,
-  created_by UUID NULL REFERENCES users(id),
-  updated_by UUID NULL REFERENCES users(id),
+  created_by UUID NULL REFERENCES ministry_accounts(id),
+  updated_by UUID NULL REFERENCES ministry_accounts(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT chapel_rooms_status_check
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS event_room_reservations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
   room_id UUID NOT NULL REFERENCES chapel_rooms(id),
-  created_by UUID NULL REFERENCES users(id),
+  created_by UUID NULL REFERENCES ministry_accounts(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT event_room_reservations_event_room_key UNIQUE (event_id, room_id)
 );
@@ -45,7 +45,7 @@ SELECT
   actor.id
 FROM (
   SELECT id
-  FROM users
+  FROM ministry_accounts
   ORDER BY
     CASE global_role WHEN 'owner' THEN 0 WHEN 'super_admin' THEN 1 ELSE 2 END,
     created_at,
@@ -79,7 +79,7 @@ SELECT
 FROM ministries ministry
 CROSS JOIN (
   SELECT id
-  FROM users
+  FROM ministry_accounts
   ORDER BY
     CASE global_role WHEN 'owner' THEN 0 WHEN 'super_admin' THEN 1 ELSE 2 END,
     created_at,

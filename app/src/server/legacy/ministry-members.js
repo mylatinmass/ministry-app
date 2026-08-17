@@ -127,7 +127,7 @@ const listMembers = async (client, user, ministryId) => {
           ministry_level.icon_key AS highest_level_icon_key,
           ministry_level.rank_order AS highest_level_rank
         FROM ministry_members membership
-        JOIN users member ON member.id = membership.user_id
+        JOIN ministry_accounts member ON member.id = membership.user_id
         LEFT JOIN ministry_levels ministry_level
           ON ministry_level.id = membership.highest_level_id
         WHERE membership.ministry_id = $1
@@ -204,7 +204,7 @@ const listMembers = async (client, user, ministryId) => {
           ministry_level.rank_order AS highest_level_rank,
           mm.joined_at
         FROM ministry_members mm
-        JOIN users u ON u.id = mm.user_id
+        JOIN ministry_accounts u ON u.id = mm.user_id
         LEFT JOIN ministry_levels ministry_level
           ON ministry_level.id = mm.highest_level_id
         WHERE mm.ministry_id = $1
@@ -248,8 +248,8 @@ const listMembers = async (client, user, ministryId) => {
           guardian.last_name AS guardian_last_name,
           request.requested_at
         FROM managed_profile_membership_requests request
-        JOIN users child ON child.id = request.child_user_id
-        JOIN users guardian ON guardian.id = request.guardian_user_id
+        JOIN ministry_accounts child ON child.id = request.child_user_id
+        JOIN ministry_accounts guardian ON guardian.id = request.guardian_user_id
         WHERE request.ministry_id = $1 AND request.status = 'pending'
         ORDER BY request.requested_at
       `,
@@ -379,7 +379,7 @@ const createInvitation = async (
     ? await client.query(
         `
           SELECT target.id, target.email, target.username, target.password_hash, target.status
-          FROM users target
+          FROM ministry_accounts target
           WHERE target.id = $1
             AND target.status = 'active'
             AND EXISTS (
@@ -404,7 +404,7 @@ const createInvitation = async (
     : await client.query(
         `
           SELECT id, email, username, password_hash, status
-          FROM users
+          FROM ministry_accounts
           WHERE lower(btrim(email)) = $1
           ORDER BY
             CASE WHEN status = 'active' THEN 0 ELSE 1 END,
@@ -748,7 +748,7 @@ const updateMembership = async (
         `
           SELECT id, background_check_verified,
             background_check_verified_at, background_check_verified_by
-          FROM users
+          FROM ministry_accounts
           WHERE id = $1 AND status = 'active'
           FOR UPDATE
         `,
@@ -761,7 +761,7 @@ const updateMembership = async (
       }
       const updatedResult = await client.query(
         `
-          UPDATE users
+          UPDATE ministry_accounts
           SET background_check_verified = $2,
               background_check_verified_at = CASE WHEN $2 THEN now() ELSE NULL END,
               background_check_verified_by = CASE WHEN $2 THEN $3 ELSE NULL END,
@@ -819,7 +819,7 @@ const updateMembership = async (
       const existingResult = await client.query(
         `
           SELECT target.id, target.global_role, target.status
-          FROM users target
+          FROM ministry_accounts target
           WHERE target.id = $1
             AND target.status = 'active'
             AND target.global_role <> 'owner'
@@ -840,7 +840,7 @@ const updateMembership = async (
       }
       const result = await client.query(
         `
-          UPDATE users
+          UPDATE ministry_accounts
           SET global_role = $1, updated_at = now()
           WHERE id = $2
           RETURNING id, global_role, status
@@ -891,7 +891,7 @@ const updateMembership = async (
       const targetResult = await client.query(
         `
           SELECT id, first_name, last_name, email, global_role, status
-          FROM users
+          FROM ministry_accounts
           WHERE id = $1
             AND status = 'active'
             AND global_role <> 'owner'
@@ -957,7 +957,7 @@ const updateMembership = async (
       )
       await client.query(
         `
-          UPDATE users
+          UPDATE ministry_accounts
           SET global_role = 'regular', updated_at = now()
           WHERE id = $1
             AND global_role <> 'owner'
@@ -1621,7 +1621,7 @@ const updateMembership = async (
         const previousAccountResult = await client.query(
           `
             SELECT automatic_assignment_monthly_limit
-            FROM users
+            FROM ministry_accounts
             WHERE id = $1
             FOR UPDATE
           `,
@@ -1632,7 +1632,7 @@ const updateMembership = async (
           null
         const accountResult = await client.query(
           `
-            UPDATE users
+            UPDATE ministry_accounts
             SET automatic_assignment_monthly_limit = $2,
                 updated_at = now()
             WHERE id = $1
@@ -1891,7 +1891,7 @@ const handler = async (event) => {
     return jsonResponse(405, { message: "Method not allowed" })
   }
 
-  const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+  const connectionString = process.env.MINISTRY_DATABASE_URL
   const jwtSecret = process.env.JWT_SECRET_KEY
   if (!connectionString || !jwtSecret) {
     return jsonResponse(500, {

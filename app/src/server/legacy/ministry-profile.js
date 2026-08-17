@@ -71,8 +71,8 @@ const loadProfile = async (client, context) => {
             WHERE telegram_connection.account_user_id = contact.id
               AND telegram_connection.status = 'active'
           ) AS telegram_connected
-        FROM users profile
-        JOIN users contact ON contact.id = $2
+        FROM ministry_accounts profile
+        JOIN ministry_accounts contact ON contact.id = $2
         WHERE profile.id = $1
         LIMIT 1
       `,
@@ -224,7 +224,7 @@ const handler = async (event) => {
     return jsonResponse(405, { message: "Method not allowed" })
   }
 
-  const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+  const connectionString = process.env.MINISTRY_DATABASE_URL
   const jwtSecret = process.env.JWT_SECRET_KEY
   if (!connectionString || !jwtSecret) {
     return jsonResponse(500, { message: "Ministry profiles are not configured" })
@@ -264,7 +264,7 @@ const handler = async (event) => {
         const appearanceTheme = body.appearanceTheme === "dark" ? "dark" : "light"
         const beforeTheme = context.user.appearance_theme || "light"
         await client.query(
-          `UPDATE users SET first_name = $1, last_name = $2, appearance_theme = $3, updated_at = now() WHERE id = $4`,
+          `UPDATE ministry_accounts SET first_name = $1, last_name = $2, appearance_theme = $3, updated_at = now() WHERE id = $4`,
           [firstName, lastName, appearanceTheme, context.user.id]
         )
         await client.query(
@@ -308,7 +308,7 @@ const handler = async (event) => {
       }
 
       const duplicateUsername = await client.query(
-        `SELECT 1 FROM users WHERE lower(username) = $1 AND id <> $2 LIMIT 1`,
+        `SELECT 1 FROM ministry_accounts WHERE lower(username) = $1 AND id <> $2 LIMIT 1`,
         [fields.username, context.user.id]
       )
       if (duplicateUsername.rowCount) {
@@ -329,7 +329,7 @@ const handler = async (event) => {
             notification_volunteer_opportunities_enabled,
             sms_transactional_consent_at,
             appearance_theme
-          FROM users
+          FROM ministry_accounts
           WHERE id = $1
           LIMIT 1
         `,
@@ -338,7 +338,7 @@ const handler = async (event) => {
 
       await client.query(
         `
-          UPDATE users
+          UPDATE ministry_accounts
           SET
             first_name = $1,
             last_name = $2,

@@ -29,9 +29,9 @@ CREATE TABLE IF NOT EXISTS event_ordo_selections (
   selected_mass_option_snapshot JSONB NULL,
   source_hash_at_selection STRING NULL,
   sacristy_notes STRING NULL,
-  selected_by UUID NULL REFERENCES users(id),
+  selected_by UUID NULL REFERENCES ministry_accounts(id),
   selected_at TIMESTAMPTZ NULL,
-  updated_by UUID NOT NULL REFERENCES users(id),
+  updated_by UUID NOT NULL REFERENCES ministry_accounts(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

@@ -61,7 +61,7 @@ const listMessages = async (client: any, context: any) => {
         FROM ministry_message_recipients recipient
         JOIN ministry_messages message ON message.id = recipient.message_id
         LEFT JOIN ministries ministry ON ministry.id = message.ministry_id
-        JOIN users sender ON sender.id = message.created_by_profile_id
+        JOIN ministry_accounts sender ON sender.id = message.created_by_profile_id
         WHERE recipient.profile_user_id = $1
           AND recipient.delivery_account_user_id = $2
         ORDER BY recipient.read_at IS NULL DESC, message.created_at DESC
@@ -106,7 +106,7 @@ const listMessages = async (client: any, context: any) => {
           )::INT AS pending_count
         FROM ministry_messages message
         LEFT JOIN ministries ministry ON ministry.id = message.ministry_id
-        JOIN users sender ON sender.id = message.created_by_profile_id
+        JOIN ministry_accounts sender ON sender.id = message.created_by_profile_id
         LEFT JOIN ministry_message_recipients recipient
           ON recipient.message_id = message.id
         WHERE $2::BOOL
@@ -238,7 +238,7 @@ const createMessage = async (client: any, context: any, body: any) => {
           SELECT DISTINCT member.id AS profile_user_id,
             COALESCE(managed.guardian_user_id, member.id) AS delivery_account_user_id,
             managed.guardian_user_id IS NOT NULL AS is_managed_profile
-          FROM users member
+          FROM ministry_accounts member
           LEFT JOIN managed_profiles managed
             ON managed.child_user_id = member.id
            AND managed.status IN ('active', 'separation_pending')
@@ -438,7 +438,7 @@ export const processMinistryMessageDeliveries = async () => {
         telegram.chat_id
       FROM ministry_message_recipients recipient
       JOIN ministry_messages message ON message.id = recipient.message_id
-      JOIN users account ON account.id = recipient.delivery_account_user_id
+      JOIN ministry_accounts account ON account.id = recipient.delivery_account_user_id
       LEFT JOIN telegram_connections telegram
         ON telegram.account_user_id = account.id
        AND telegram.status = 'active'

@@ -16,7 +16,7 @@ const buildMode = process.argv.includes("--build")
 const required =
   process.argv.includes("--required") ||
   process.env.MASS_SCHEDULE_SYNC_REQUIRED === "true"
-const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+const connectionString = process.env.MINISTRY_DATABASE_URL
 
 const retryableStatuses = new Set([404, 408, 425, 429, 500, 502, 503, 504])
 
@@ -57,7 +57,7 @@ const skipOrThrow = (message, error) => {
 
 if (!connectionString) {
   skipOrThrow(
-    "Mass Schedule sync skipped because COCKROACHDB_CONNECTION_STRING is not configured",
+    "Mass Schedule sync skipped because MINISTRY_DATABASE_URL is not configured",
   )
 } else {
   const sourceUrl = process.env.MASS_SCHEDULE_URL || DEFAULT_SOURCE_URL

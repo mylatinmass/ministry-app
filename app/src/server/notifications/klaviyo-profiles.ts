@@ -162,11 +162,11 @@ const loadProfile = async (userId: string) => {
             AND membership.status = 'active'
         ) AS has_active_membership,
         managed_profile.child_user_id IS NOT NULL AS is_managed_child
-      FROM users user_account
+      FROM ministry_accounts user_account
       LEFT JOIN managed_profiles managed_profile
         ON managed_profile.child_user_id = user_account.id
        AND managed_profile.status IN ('active', 'separation_pending')
-      LEFT JOIN users guardian
+      LEFT JOIN ministry_accounts guardian
         ON guardian.id = managed_profile.guardian_user_id
        AND guardian.status = 'active'
       WHERE user_account.id = $1

@@ -2,10 +2,10 @@ import pg from "pg"
 import jwt from "jsonwebtoken"
 
 const { Client } = pg
-const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+const connectionString = process.env.MINISTRY_DATABASE_URL
 const jwtSecret = process.env.JWT_SECRET_KEY
 if (!connectionString || !jwtSecret) {
-  throw new Error("COCKROACHDB_CONNECTION_STRING and JWT_SECRET_KEY are required")
+  throw new Error("MINISTRY_DATABASE_URL and JWT_SECRET_KEY are required")
 }
 
 const client = new Client({
@@ -19,7 +19,7 @@ try {
     await client.query(
       `
         SELECT id, username, global_role
-        FROM users
+        FROM ministry_accounts
         WHERE status = 'active'
           AND global_role IN ('owner', 'super_admin')
         ORDER BY created_at

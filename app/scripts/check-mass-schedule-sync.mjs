@@ -2,9 +2,9 @@ import pg from "pg"
 import { MASS_SCHEDULE_SOURCE } from "./lib/mass-schedule-sync.mjs"
 
 const { Client } = pg
-const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+const connectionString = process.env.MINISTRY_DATABASE_URL
 if (!connectionString) {
-  throw new Error("COCKROACHDB_CONNECTION_STRING is required")
+  throw new Error("MINISTRY_DATABASE_URL is required")
 }
 
 const client = new Client({

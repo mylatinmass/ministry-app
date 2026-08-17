@@ -1,14 +1,14 @@
 import pg from "pg"
 
 const { Client } = pg
-const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+const connectionString = process.env.MINISTRY_DATABASE_URL
 
 if (!connectionString) {
-  throw new Error("COCKROACHDB_CONNECTION_STRING is required")
+  throw new Error("MINISTRY_DATABASE_URL is required")
 }
 
 const tables = [
-  "users",
+  "ministry_accounts",
   "ministries",
   "ministry_members",
   "templates",

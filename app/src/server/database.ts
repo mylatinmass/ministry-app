@@ -7,10 +7,14 @@ declare global {
   var ministryDatabasePool: pg.Pool | undefined
 }
 
+let isolationCheck: Promise<void> | undefined
+
 export const getPool = () => {
-  const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+  const connectionString = process.env.MINISTRY_DATABASE_URL
   if (!connectionString) {
-    throw new Error("COCKROACHDB_CONNECTION_STRING is not configured")
+    throw new Error(
+      "MINISTRY_DATABASE_URL is not configured. The Ministry app will not fall back to the parish database.",
+    )
   }
 
   if (!globalThis.ministryDatabasePool) {
@@ -24,4 +28,37 @@ export const getPool = () => {
   }
 
   return globalThis.ministryDatabasePool
+}
+
+export const assertMinistryDatabaseIsolation = async () => {
+  if (!isolationCheck) {
+    isolationCheck = (async () => {
+      const result = await getPool().query(
+        `
+          SELECT table_name
+          FROM information_schema.tables
+          WHERE table_schema = 'public'
+            AND table_name = ANY($1)
+        `,
+        [["ministry_accounts", "users"]],
+      )
+      const visibleTables = new Set(
+        result.rows.map((row: { table_name: string }) => row.table_name),
+      )
+      if (visibleTables.has("users")) {
+        throw new Error(
+          "Database isolation check failed: the Ministry database role can see the parish users table.",
+        )
+      }
+      if (!visibleTables.has("ministry_accounts")) {
+        throw new Error(
+          "Database isolation check failed: ministry_accounts is missing. Run Ministry migrations against the dedicated database.",
+        )
+      }
+    })().catch((error) => {
+      isolationCheck = undefined
+      throw error
+    })
+  }
+  return isolationCheck
 }

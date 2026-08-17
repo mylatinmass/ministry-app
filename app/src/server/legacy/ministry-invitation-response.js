@@ -44,7 +44,7 @@ const isUsernameAvailable = async (client, username, excludedUserId = null) => {
   const result = await client.query(
     `
       SELECT 1
-      FROM users
+      FROM ministry_accounts
       WHERE lower(username) = $1
         AND ($2::UUID IS NULL OR id <> $2)
       LIMIT 1
@@ -201,7 +201,7 @@ const acceptInvitation = async (client, token, body, jwtSecret) => {
       const matchingUserResult = await client.query(
         `
           SELECT id, first_name, last_name, username, password_hash, global_role, status
-          FROM users
+          FROM ministry_accounts
           WHERE lower(btrim(email)) = $1
           ORDER BY
             CASE WHEN status = 'active' THEN 0 ELSE 1 END,
@@ -217,7 +217,7 @@ const acceptInvitation = async (client, token, body, jwtSecret) => {
       const userResult = await client.query(
         `
           SELECT id, first_name, last_name, username, password_hash, global_role, status
-          FROM users WHERE id = $1 LIMIT 1
+          FROM ministry_accounts WHERE id = $1 LIMIT 1
         `,
         [userId]
       )
@@ -243,7 +243,7 @@ const acceptInvitation = async (client, token, body, jwtSecret) => {
       if (userId) {
         const updatedUser = await client.query(
           `
-            UPDATE users
+            UPDATE ministry_accounts
             SET
               first_name = $1,
               last_name = $2,
@@ -272,7 +272,7 @@ const acceptInvitation = async (client, token, body, jwtSecret) => {
       } else {
         const insertedUser = await client.query(
           `
-            INSERT INTO users (
+            INSERT INTO ministry_accounts (
               first_name, last_name, email, phone, telephone,
               username, password_hash, global_role, status
             )
@@ -395,7 +395,7 @@ const handler = async (event) => {
   if (!["GET", "POST"].includes(event.httpMethod)) {
     return jsonResponse(405, { message: "Method not allowed" })
   }
-  const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+  const connectionString = process.env.MINISTRY_DATABASE_URL
   const jwtSecret = process.env.JWT_SECRET_KEY
   if (!connectionString || !jwtSecret) {
     return jsonResponse(500, { message: "Ministry invitations are not configured" })

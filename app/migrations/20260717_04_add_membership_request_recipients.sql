@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS managed_profile_membership_request_recipients (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   request_id UUID NOT NULL
     REFERENCES managed_profile_membership_requests(id) ON DELETE CASCADE,
-  reviewer_user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  reviewer_user_id UUID NOT NULL REFERENCES ministry_accounts(id) ON DELETE RESTRICT,
   token_hash STRING NOT NULL UNIQUE,
   expires_at TIMESTAMPTZ NOT NULL,
   emailed_at TIMESTAMPTZ NULL,

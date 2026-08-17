@@ -38,7 +38,7 @@ const availableUsername = async (client: PoolClient, name: string) => {
     const suffix = crypto.randomBytes(3).toString("hex")
     const candidate = `${base}.${suffix}`
     const exists = await client.query(
-      `SELECT 1 FROM users WHERE lower(username) = $1 LIMIT 1`,
+      `SELECT 1 FROM ministry_accounts WHERE lower(username) = $1 LIMIT 1`,
       [candidate],
     )
     if (!exists.rowCount) return candidate
@@ -293,7 +293,7 @@ const createVolunteerSignup = async (
   const status = responsibility.approval_required ? "pending" : "confirmed"
   const matchingUsers = await client.query(
     `SELECT id, first_name, last_name, username, password_hash, public_profile_id
-     FROM users
+     FROM ministry_accounts
      WHERE lower(btrim(email)) = $1 AND status = 'active'
      ORDER BY CASE WHEN password_hash IS NOT NULL THEN 0 ELSE 1 END, created_at
      LIMIT 1`,
@@ -304,7 +304,7 @@ const createVolunteerSignup = async (
     const { firstName, lastName } = splitName(name)
     const username = await availableUsername(client, name)
     const created = await client.query(
-      `INSERT INTO users (
+      `INSERT INTO ministry_accounts (
          first_name, last_name, email, phone, telephone, username,
          global_role, status, notification_lead_minutes, is_volunteer_profile
        )
@@ -315,7 +315,7 @@ const createVolunteerSignup = async (
     user = created.rows[0]
   } else {
     await client.query(
-      `UPDATE users
+      `UPDATE ministry_accounts
        SET phone = COALESCE(NULLIF(phone, ''), $2),
            telephone = COALESCE(NULLIF(telephone, ''), $2),
            is_volunteer_profile = true,

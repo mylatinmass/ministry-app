@@ -252,7 +252,7 @@ const ensureImportActor = async (client) => {
   const result = await client.query(
     `
       SELECT id
-      FROM users
+      FROM ministry_accounts
       WHERE status = 'active'
         AND global_role IN ('owner', 'super_admin')
       ORDER BY CASE global_role WHEN 'owner' THEN 0 ELSE 1 END, created_at

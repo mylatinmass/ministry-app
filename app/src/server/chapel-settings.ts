@@ -169,7 +169,7 @@ const loadSettings = async (client: PoolClient) => {
           SELECT audit.id, audit.action, audit.entity_type, audit.after_data,
             audit.created_at, actor.first_name, actor.last_name
           FROM ministry_audit_log audit
-          JOIN users actor ON actor.id = audit.actor_user_id
+          JOIN ministry_accounts actor ON actor.id = audit.actor_user_id
           WHERE audit.entity_type IN ('chapel_settings', 'chapel_observance', 'chapel_room')
           ORDER BY audit.created_at DESC
           LIMIT 20

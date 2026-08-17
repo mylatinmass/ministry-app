@@ -49,13 +49,13 @@ const getInvitationByToken = async (client, token, options = {}) => {
         invitation.responded_at,
         invitation.created_at,
         (
-          SELECT u.username FROM users u
+          SELECT u.username FROM ministry_accounts u
           WHERE u.id = invitation.invited_user_id
         ) AS username,
         coalesce(
           (
             SELECT u.username IS NULL OR u.password_hash IS NULL
-            FROM users u
+            FROM ministry_accounts u
             WHERE u.id = invitation.invited_user_id
           ),
           true

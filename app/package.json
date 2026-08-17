@@ -13,6 +13,7 @@
     "check": "astro check",
     "snapshot": "node scripts/snapshot-data.mjs",
     "migrate": "node --env-file-if-exists=.env.local scripts/migrate.mjs",
+    "verify:database-isolation": "node --env-file-if-exists=.env.local scripts/verify-database-isolation.mjs",
     "sync:mass-schedule": "node --env-file-if-exists=.env.local scripts/sync-mass-schedule.mjs --required",
     "check:mass-schedule-sync": "node --env-file-if-exists=.env.local scripts/check-mass-schedule-sync.mjs",
     "test:mass-schedule": "node scripts/test-mass-schedule.mjs",

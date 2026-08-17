@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS ministry_access_requests (
   phone STRING NULL,
   message STRING NULL,
   status STRING NOT NULL DEFAULT 'pending',
-  reviewed_by UUID NULL REFERENCES users(id),
+  reviewed_by UUID NULL REFERENCES ministry_accounts(id),
   assigned_ministry_id UUID NULL REFERENCES ministries(id),
   reviewed_at TIMESTAMPTZ NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

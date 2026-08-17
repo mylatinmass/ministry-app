@@ -133,7 +133,7 @@ export const requestAssignmentSubstitute = async (
       )
       SELECT $1, membership.user_id
       FROM ministry_members membership
-      JOIN users member ON member.id = membership.user_id
+      JOIN ministry_accounts member ON member.id = membership.user_id
       LEFT JOIN ministry_levels granted_level
         ON granted_level.id = membership.highest_level_id
       WHERE membership.ministry_id = $2
@@ -272,7 +272,7 @@ export const acceptAssignmentSubstitute = async (
     `
       SELECT membership.user_id
       FROM ministry_members membership
-      JOIN users member ON member.id = membership.user_id
+      JOIN ministry_accounts member ON member.id = membership.user_id
       LEFT JOIN ministry_levels granted_level
         ON granted_level.id = membership.highest_level_id
       WHERE membership.ministry_id = $1
@@ -503,7 +503,7 @@ export const loadEventSubstitutionState = async (
         JOIN event_responsibilities responsibility
           ON responsibility.id = request.responsibility_id
         JOIN events event ON event.id = request.event_id
-        JOIN users requester ON requester.id = request.subject_user_id
+        JOIN ministry_accounts requester ON requester.id = request.subject_user_id
         WHERE offer.recipient_user_id = $1
           AND offer.status = 'offered'
           AND request.status = 'pending'

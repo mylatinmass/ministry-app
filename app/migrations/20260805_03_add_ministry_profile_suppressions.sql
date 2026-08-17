@@ -1,15 +1,15 @@
 -- Soft-removal history for Ministry App profiles.
 --
--- A suppression is intentionally separate from users.status because the shared
--- users row may still be used by other applications. Ministry memberships and
+-- A suppression is intentionally separate from ministry_accounts.status because the shared
+-- ministry_accounts row may still be used by other applications. Ministry memberships and
 -- historical scheduling records remain intact.
 
 CREATE TABLE IF NOT EXISTS ministry_profile_suppressions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id),
-  suppressed_by UUID NOT NULL REFERENCES users(id),
+  user_id UUID NOT NULL REFERENCES ministry_accounts(id),
+  suppressed_by UUID NOT NULL REFERENCES ministry_accounts(id),
   suppressed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  reactivated_by UUID NULL REFERENCES users(id),
+  reactivated_by UUID NULL REFERENCES ministry_accounts(id),
   reactivated_at TIMESTAMPTZ NULL,
   reason STRING NULL
 );

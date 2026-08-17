@@ -6,8 +6,8 @@ CREATE TABLE IF NOT EXISTS ministry_messages (
   channel STRING NOT NULL,
   subject STRING NULL,
   body STRING NOT NULL,
-  created_by_actor_id UUID NOT NULL REFERENCES users(id),
-  created_by_profile_id UUID NOT NULL REFERENCES users(id),
+  created_by_actor_id UUID NOT NULL REFERENCES ministry_accounts(id),
+  created_by_profile_id UUID NOT NULL REFERENCES ministry_accounts(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT ministry_messages_audience_check
     CHECK (audience_scope IN ('ministry', 'all_members')),
@@ -38,8 +38,8 @@ CREATE INDEX IF NOT EXISTS ministry_messages_creator_created_idx
 CREATE TABLE IF NOT EXISTS ministry_message_recipients (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   message_id UUID NOT NULL REFERENCES ministry_messages(id) ON DELETE CASCADE,
-  profile_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  delivery_account_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  profile_user_id UUID NOT NULL REFERENCES ministry_accounts(id) ON DELETE CASCADE,
+  delivery_account_user_id UUID NOT NULL REFERENCES ministry_accounts(id) ON DELETE CASCADE,
   is_delivery_target BOOL NOT NULL DEFAULT true,
   delivery_status STRING NOT NULL DEFAULT 'pending',
   attempt_count INT NOT NULL DEFAULT 0,

@@ -14,7 +14,7 @@ const handler = async (event) => {
   let body
   try { body = JSON.parse(event.body || "{}") } catch { return jsonResponse(400, { message: "Invalid request" }) }
   if (!body.token || body.token.toString().length < 32) return jsonResponse(400, { message: "Sign-in link is incomplete" })
-  const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+  const connectionString = process.env.MINISTRY_DATABASE_URL
   const jwtSecret = process.env.JWT_SECRET_KEY
   if (!connectionString || !jwtSecret) return jsonResponse(500, { message: "Ministries login is not configured" })
   const client = new Client({ connectionString, ssl: { rejectUnauthorized: false } })
@@ -29,7 +29,7 @@ const handler = async (event) => {
                 SELECT 1 FROM ministry_members mm JOIN ministries m ON m.id = mm.ministry_id
                 WHERE mm.user_id = u.id AND mm.status = 'active' AND m.status = 'active'
               ) AS has_active_membership
-       FROM ministry_login_links link JOIN users u ON u.id = link.user_id
+       FROM ministry_login_links link JOIN ministry_accounts u ON u.id = link.user_id
        WHERE link.token_hash = $1 LIMIT 1 FOR UPDATE`,
       [hashLoginLinkToken(body.token)]
     )

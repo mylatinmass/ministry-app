@@ -2,8 +2,8 @@
 -- grouped for the account contact (for example, a parent managing children).
 CREATE TABLE IF NOT EXISTS ministry_alerts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  subject_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  recipient_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  subject_user_id UUID NOT NULL REFERENCES ministry_accounts(id) ON DELETE CASCADE,
+  recipient_user_id UUID NOT NULL REFERENCES ministry_accounts(id) ON DELETE CASCADE,
   kind STRING NOT NULL,
   title STRING NOT NULL,
   message STRING NOT NULL,

@@ -43,11 +43,11 @@ const loadResponseContext = async (client, token) => {
         decided_by.last_name AS decided_last_name
       FROM managed_profile_membership_request_recipients recipient
       JOIN managed_profile_membership_requests request ON request.id = recipient.request_id
-      JOIN users reviewer ON reviewer.id = recipient.reviewer_user_id
-      JOIN users child ON child.id = request.child_user_id
-      JOIN users guardian ON guardian.id = request.guardian_user_id
+      JOIN ministry_accounts reviewer ON reviewer.id = recipient.reviewer_user_id
+      JOIN ministry_accounts child ON child.id = request.child_user_id
+      JOIN ministry_accounts guardian ON guardian.id = request.guardian_user_id
       JOIN ministries ministry ON ministry.id = request.ministry_id
-      LEFT JOIN users decided_by ON decided_by.id = request.reviewed_by
+      LEFT JOIN ministry_accounts decided_by ON decided_by.id = request.reviewed_by
       WHERE recipient.token_hash = $1
       LIMIT 1
     `,
@@ -72,7 +72,7 @@ const handler = async (event) => {
   if (event.httpMethod !== "POST") return jsonResponse(405, { message: "Method not allowed" })
   const body = parseBody(event)
   if (!body?.token) return jsonResponse(400, { message: "Request token is required" })
-  const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+  const connectionString = process.env.MINISTRY_DATABASE_URL
   const jwtSecret = process.env.JWT_SECRET_KEY
   if (!connectionString || !jwtSecret) return jsonResponse(500, { message: "Membership requests are not configured" })
 

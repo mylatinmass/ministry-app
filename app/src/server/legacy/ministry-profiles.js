@@ -119,7 +119,7 @@ const listProfiles = async (client, context) => {
             LIMIT 1
           ) AS separation_email
         FROM managed_profiles mp
-        JOIN users child ON child.id = mp.child_user_id
+        JOIN ministry_accounts child ON child.id = mp.child_user_id
         WHERE mp.guardian_user_id = $1
           AND mp.status IN ('active', 'separation_pending')
         ORDER BY lower(child.first_name), lower(child.last_name)
@@ -209,7 +209,7 @@ const createChild = async (client, actor, body) => {
   try {
     const userResult = await client.query(
       `
-        INSERT INTO users (first_name, last_name, global_role, status)
+        INSERT INTO ministry_accounts (first_name, last_name, global_role, status)
         VALUES ($1, $2, 'regular', 'active')
         RETURNING id
       `,
@@ -252,7 +252,7 @@ const inviteGuardian = async (client, event, actor, body) => {
     `
       SELECT child.first_name, child.last_name
       FROM managed_profiles profile
-      JOIN users child ON child.id = profile.child_user_id
+      JOIN ministry_accounts child ON child.id = profile.child_user_id
       WHERE profile.guardian_user_id = $1
         AND profile.child_user_id = $2
         AND profile.status = 'active'
@@ -267,7 +267,7 @@ const inviteGuardian = async (client, event, actor, body) => {
   const inviteeResult = await client.query(
     `
       SELECT id, first_name, last_name
-      FROM users
+      FROM ministry_accounts
       WHERE lower(btrim(email)) = $1
         AND status = 'active'
       LIMIT 1
@@ -454,7 +454,7 @@ const createReviewerNotifications = async (
           child.first_name AS child_first_name,
           child.last_name AS child_last_name
         FROM ministries m
-        JOIN users child ON child.id = $2
+        JOIN ministry_accounts child ON child.id = $2
         WHERE m.id = $1
       `,
       [ministryId, childId]
@@ -462,7 +462,7 @@ const createReviewerNotifications = async (
     client.query(
       `
         SELECT DISTINCT u.id, u.first_name, lower(btrim(u.email)) AS email
-        FROM users u
+        FROM ministry_accounts u
         WHERE u.status = 'active'
           AND NULLIF(btrim(u.email), '') IS NOT NULL
           AND (
@@ -641,7 +641,7 @@ const startSeparation = async (client, event, actor, body) => {
     `
       SELECT mp.id, child.first_name
       FROM managed_profiles mp
-      JOIN users child ON child.id = mp.child_user_id
+      JOIN ministry_accounts child ON child.id = mp.child_user_id
       WHERE mp.guardian_user_id = $1
         AND mp.child_user_id = $2
         AND mp.status IN ('active', 'separation_pending')
@@ -652,7 +652,7 @@ const startSeparation = async (client, event, actor, body) => {
   if (!relationshipResult.rowCount) return jsonResponse(403, { message: "Profile access denied" })
 
   const emailOwner = await client.query(
-    `SELECT 1 FROM users WHERE lower(btrim(email)) = $1 AND id <> $2 LIMIT 1`,
+    `SELECT 1 FROM ministry_accounts WHERE lower(btrim(email)) = $1 AND id <> $2 LIMIT 1`,
     [email, childId]
   )
   if (emailOwner.rowCount) return jsonResponse(409, { message: "That email is already in use" })
@@ -779,7 +779,7 @@ const handler = async (event) => {
   if (!["GET", "POST", "PATCH"].includes(event.httpMethod)) {
     return jsonResponse(405, { message: "Method not allowed" })
   }
-  const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+  const connectionString = process.env.MINISTRY_DATABASE_URL
   const jwtSecret = process.env.JWT_SECRET_KEY
   if (!connectionString || !jwtSecret) return jsonResponse(500, { message: "Profiles are not configured" })
 
@@ -813,7 +813,7 @@ const handler = async (event) => {
       )).rowCount
       if (!allowed) return jsonResponse(403, { message: "Profile access denied" })
       const targetResult = await client.query(
-        `SELECT id, first_name, last_name, username, global_role, appearance_theme, status FROM users WHERE id = $1 AND status = 'active'`,
+        `SELECT id, first_name, last_name, username, global_role, appearance_theme, status FROM ministry_accounts WHERE id = $1 AND status = 'active'`,
         [profileId]
       )
       if (!targetResult.rowCount) return jsonResponse(404, { message: "Profile not found" })

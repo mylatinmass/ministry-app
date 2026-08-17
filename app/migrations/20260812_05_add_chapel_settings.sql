@@ -5,7 +5,7 @@
 CREATE TABLE IF NOT EXISTS chapel_settings (
   setting_key STRING PRIMARY KEY,
   settings JSONB NOT NULL DEFAULT '{}'::JSONB,
-  updated_by UUID NULL REFERENCES users(id),
+  updated_by UUID NULL REFERENCES ministry_accounts(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT chapel_settings_object_check
@@ -22,8 +22,8 @@ CREATE TABLE IF NOT EXISTS chapel_observances (
   effective_start_year INT NULL,
   notes STRING NULL,
   status STRING NOT NULL DEFAULT 'active',
-  created_by UUID NULL REFERENCES users(id),
-  updated_by UUID NULL REFERENCES users(id),
+  created_by UUID NULL REFERENCES ministry_accounts(id),
+  updated_by UUID NULL REFERENCES ministry_accounts(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT chapel_observances_month_check CHECK (month BETWEEN 1 AND 12),

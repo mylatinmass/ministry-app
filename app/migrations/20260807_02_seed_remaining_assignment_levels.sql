@@ -48,7 +48,7 @@ levels_to_insert AS (
 ),
 global_administrator AS (
   SELECT id
-  FROM users
+  FROM ministry_accounts
   WHERE global_role IN ('owner', 'super_admin')
   ORDER BY CASE global_role WHEN 'owner' THEN 0 ELSE 1 END, id
   LIMIT 1

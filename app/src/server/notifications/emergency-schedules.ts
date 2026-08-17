@@ -47,14 +47,14 @@ export const processWeeklyEmergencySchedules = async () => {
         ON membership.ministry_id = ministry.id
        AND membership.status = 'active'
        AND membership.level IN ('owner', 'admin')
-      JOIN users member ON member.id = membership.user_id
+      JOIN ministry_accounts member ON member.id = membership.user_id
       WHERE ministry.status = 'active'
         AND member.status = 'active'
         AND member.email IS NOT NULL
       UNION
       SELECT ministry.id, ministry.name, member.id, member.email
       FROM ministries ministry
-      JOIN users member ON member.global_role IN ('owner', 'super_admin')
+      JOIN ministry_accounts member ON member.global_role IN ('owner', 'super_admin')
       WHERE ministry.status = 'active'
         AND member.status = 'active'
         AND member.email IS NOT NULL

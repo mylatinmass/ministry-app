@@ -4,10 +4,10 @@ import path from "node:path"
 import pg from "pg"
 
 const { Client } = pg
-const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+const connectionString = process.env.MINISTRY_DATABASE_URL
 
 if (!connectionString) {
-  throw new Error("COCKROACHDB_CONNECTION_STRING is required")
+  throw new Error("MINISTRY_DATABASE_URL is required")
 }
 
 const migrationsDirectory = path.resolve("migrations")
@@ -32,6 +32,21 @@ const client = new Client({
 await client.connect()
 
 try {
+  const isolationResult = await client.query(
+    `
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name = $1
+    `,
+    ["users"],
+  )
+  if (isolationResult.rowCount) {
+    throw new Error(
+      "Migration refused: MINISTRY_DATABASE_URL exposes the parish users table. Use a dedicated Ministry database and role.",
+    )
+  }
+
   await client.query(`
     CREATE TABLE IF NOT EXISTS ministry_schema_migrations (
       filename STRING PRIMARY KEY,

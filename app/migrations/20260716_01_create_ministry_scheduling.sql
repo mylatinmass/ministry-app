@@ -1,35 +1,35 @@
--- Ministries scheduling schema for CockroachDB.
+-- Independent Ministry application schema for CockroachDB.
 --
--- The public.users table predates this feature and contains parish profile data.
--- Extend it in place so existing UUID user IDs remain the application identity.
+-- Ministry identities are owned by this database. The application must never
+-- read from or reference the parish profile database.
 
-ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS phone STRING NULL;
+CREATE TABLE IF NOT EXISTS ministry_accounts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  first_name STRING NOT NULL,
+  last_name STRING NOT NULL,
+  email STRING NULL,
+  telephone STRING NULL,
+  phone STRING NULL,
+  global_role STRING NOT NULL DEFAULT 'regular',
+  status STRING NOT NULL DEFAULT 'active',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT ministry_accounts_global_role_check
+    CHECK (global_role IN ('owner', 'super_admin', 'regular')),
+  CONSTRAINT ministry_accounts_status_check
+    CHECK (status IN ('active', 'inactive'))
+);
 
-ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS global_role STRING NOT NULL DEFAULT 'regular'
-  CHECK (global_role IN ('owner', 'super_admin', 'regular'));
-
-ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS status STRING NOT NULL DEFAULT 'active'
-  CHECK (status IN ('active', 'inactive'));
-
-ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
-
-ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
-
-UPDATE users
-SET phone = telephone
-WHERE phone IS NULL AND telephone IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ministry_accounts_email_key
+  ON ministry_accounts (lower(btrim(email)))
+  WHERE email IS NOT NULL AND btrim(email) <> '';
 
 CREATE TABLE IF NOT EXISTS ministries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name STRING NOT NULL UNIQUE,
   description STRING NULL,
   status STRING NOT NULL DEFAULT 'active',
-  created_by UUID NOT NULL REFERENCES users(id),
+  created_by UUID NOT NULL REFERENCES ministry_accounts(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT ministries_status_check
@@ -39,10 +39,10 @@ CREATE TABLE IF NOT EXISTS ministries (
 CREATE TABLE IF NOT EXISTS ministry_members (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   ministry_id UUID NOT NULL REFERENCES ministries(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES ministry_accounts(id) ON DELETE CASCADE,
   level STRING NOT NULL DEFAULT 'member',
   status STRING NOT NULL DEFAULT 'active',
-  notify_email BOOL NOT NULL DEFAULT true,
+  notify_email BOOL NOT NULL DEFAULT false,
   notify_push BOOL NOT NULL DEFAULT false,
   notify_sms BOOL NOT NULL DEFAULT false,
   notify_telegram BOOL NOT NULL DEFAULT false,
@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS templates (
   participation_type STRING NOT NULL DEFAULT 'members',
   responsibilities JSONB NOT NULL DEFAULT '[]'::JSONB,
   status STRING NOT NULL DEFAULT 'active',
-  created_by UUID NOT NULL REFERENCES users(id),
+  created_by UUID NOT NULL REFERENCES ministry_accounts(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT templates_participation_type_check
@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS events (
   signup_code STRING NULL UNIQUE,
   signup_open BOOL NOT NULL DEFAULT false,
   status STRING NOT NULL DEFAULT 'draft',
-  created_by UUID NOT NULL REFERENCES users(id),
+  created_by UUID NOT NULL REFERENCES ministry_accounts(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT events_participation_type_check
@@ -124,16 +124,16 @@ CREATE TABLE IF NOT EXISTS responsibility_assignments (
   event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
   responsibility_id UUID NOT NULL
     REFERENCES event_responsibilities(id) ON DELETE CASCADE,
-  user_id UUID NULL REFERENCES users(id),
+  user_id UUID NULL REFERENCES ministry_accounts(id),
   volunteer_name STRING NULL,
   volunteer_email STRING NULL,
   volunteer_phone STRING NULL,
   quantity INT NOT NULL DEFAULT 1,
   notes STRING NULL,
   status STRING NOT NULL DEFAULT 'pending',
-  assigned_by UUID NULL REFERENCES users(id),
+  assigned_by UUID NULL REFERENCES ministry_accounts(id),
   signup_source STRING NOT NULL,
-  notify_email BOOL NOT NULL DEFAULT true,
+  notify_email BOOL NOT NULL DEFAULT false,
   notify_push BOOL NOT NULL DEFAULT false,
   notify_sms BOOL NOT NULL DEFAULT false,
   confirmed_at TIMESTAMPTZ NULL,
@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS responsibility_assignments (
 
 CREATE TABLE IF NOT EXISTS member_availability (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES ministry_accounts(id) ON DELETE CASCADE,
   ministry_id UUID NOT NULL REFERENCES ministries(id) ON DELETE CASCADE,
   availability_type STRING NOT NULL,
   day_of_week INT NULL,

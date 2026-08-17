@@ -5,8 +5,26 @@ import { sendTelegramMessage } from "./telegram"
 import { sendAccountPush, sendReliableEmail } from "./delivery"
 
 const deliveryAllowed = () =>
-  process.env.VERCEL_ENV === "production" ||
-  process.env.ALLOW_PREVIEW_DELIVERY === "true"
+  process.env.MINISTRY_OUTBOUND_DELIVERY_ENABLED === "true" &&
+  (process.env.VERCEL_ENV === "production" ||
+    process.env.ALLOW_PREVIEW_DELIVERY === "true")
+
+const recipientBatchLimit = () => {
+  const configured = Number.parseInt(
+    process.env.MINISTRY_MAX_NOTIFICATION_RECIPIENTS || "25",
+    10,
+  )
+  return Number.isFinite(configured) && configured > 0 ? configured : 25
+}
+
+const assertRecipientBatchWithinLimit = (label: string, count: number) => {
+  const limit = recipientBatchLimit()
+  if (count > limit) {
+    throw new Error(
+      `${label} aborted: ${count} recipients exceeds the configured limit of ${limit}`,
+    )
+  }
+}
 
 const OUTBOUND_ALERT_KINDS = new Set([
   "weekly_schedule_summary",
@@ -143,7 +161,7 @@ export const sendSubstitutionRequestNotifications = async (
   const leaders = await getPool().query(
     `
       SELECT DISTINCT leader.id
-      FROM users leader
+      FROM ministry_accounts leader
       WHERE leader.status = 'active'
         AND (
           leader.global_role IN ('owner', 'super_admin')
@@ -247,7 +265,7 @@ export const sendSubstitutionAcceptedNotifications = async (
   const leaders = await getPool().query(
     `
       SELECT DISTINCT leader.id
-      FROM users leader
+      FROM ministry_accounts leader
       WHERE leader.status = 'active'
         AND (
           leader.global_role IN ('owner', 'super_admin')
@@ -342,9 +360,19 @@ const loadWeeklyScheduleSummaries = async () => {
   const result = await getPool().query(
     `
       WITH recipients AS (
-        SELECT account.id AS recipient_user_id
-        FROM users account
-        WHERE account.status = 'active'
+        SELECT DISTINCT
+          COALESCE(managed.guardian_user_id, membership.user_id)
+            AS recipient_user_id
+        FROM ministry_members membership
+        JOIN ministries ministry ON ministry.id = membership.ministry_id
+        LEFT JOIN managed_profiles managed
+          ON managed.child_user_id = membership.user_id
+         AND managed.status IN ('active', 'separation_pending')
+        JOIN ministry_accounts account
+          ON account.id = COALESCE(managed.guardian_user_id, membership.user_id)
+        WHERE membership.status = 'active'
+          AND ministry.status = 'active'
+          AND account.status = 'active'
           AND NOT EXISTS (
             SELECT 1
             FROM managed_profiles managed
@@ -363,7 +391,7 @@ const loadWeeklyScheduleSummaries = async () => {
         FROM managed_profiles managed
         JOIN recipients recipient
           ON recipient.recipient_user_id = managed.guardian_user_id
-        JOIN users child ON child.id = managed.child_user_id
+        JOIN ministry_accounts child ON child.id = managed.child_user_id
         WHERE managed.status IN ('active', 'separation_pending')
           AND child.status = 'active'
       ), parish_events AS (
@@ -423,10 +451,12 @@ const loadWeeklyScheduleSummaries = async () => {
 export const queueWeeklyAssignmentReviews = async () => {
   const week = newYorkWeek()
   if (week.weekdayIndex !== 1 || week.hour < 9) return 0
-  const summaries = await loadWeeklyScheduleSummaries()
+  const summaries = (await loadWeeklyScheduleSummaries()).filter(
+    (summary) => summary.assignedEvents || summary.pendingAlerts,
+  )
+  assertRecipientBatchWithinLimit("Weekly Ministry summary", summaries.length)
   let queued = 0
   for (const summary of summaries) {
-    if (!summary.totalParishEvents && !summary.assignedEvents && !summary.pendingAlerts) continue
     await enqueueAlert({
       subjectUserId: summary.recipientUserId,
       recipientUserId: summary.recipientUserId,
@@ -456,7 +486,7 @@ export const queueDailyAdminAlerts = async () => {
     WITH admin_recipients AS (
       SELECT account.id AS recipient_user_id,
         account.global_role IN ('owner', 'super_admin') AS is_global_admin
-      FROM users account
+      FROM ministry_accounts account
       WHERE account.status = 'active'
         AND (
           account.global_role IN ('owner', 'super_admin')
@@ -621,7 +651,7 @@ export const processUrgentStaffingShortages = async () => {
     const leaders = await getPool().query(
       `
         SELECT DISTINCT leader.id
-        FROM users leader
+        FROM ministry_accounts leader
         WHERE leader.status = 'active'
           AND (
             leader.global_role IN ('owner', 'super_admin')
@@ -706,7 +736,7 @@ export const processUrgentAcknowledgmentEscalations = async () => {
     const leaders = await getPool().query(
       `
         SELECT DISTINCT leader.id
-        FROM users leader
+        FROM ministry_accounts leader
         WHERE leader.status = 'active'
           AND (
             leader.global_role IN ('owner', 'super_admin')
@@ -813,7 +843,7 @@ export const sendAssignmentChangeRequestedNotification = async (
       FROM responsibility_assignments assignment
       JOIN events event ON event.id = assignment.event_id
       JOIN event_responsibilities responsibility ON responsibility.id = assignment.responsibility_id
-      JOIN users subject ON subject.id = assignment.user_id
+      JOIN ministry_accounts subject ON subject.id = assignment.user_id
       WHERE assignment.id = $1 AND assignment.status = 'change_requested'
       LIMIT 1
     `,
@@ -824,7 +854,7 @@ export const sendAssignmentChangeRequestedNotification = async (
   const leaders = await getPool().query(
     `
       SELECT DISTINCT leader.id
-      FROM users leader
+      FROM ministry_accounts leader
       WHERE leader.status = 'active'
         AND leader.id <> $2
         AND (
@@ -990,7 +1020,7 @@ export const sendEventScheduleNotifications = async (
     const leaders = await getPool().query(
       `
         SELECT DISTINCT leader.id
-        FROM users leader
+        FROM ministry_accounts leader
         WHERE leader.status = 'active'
           AND (
             leader.global_role IN ('owner', 'super_admin')
@@ -1055,7 +1085,7 @@ export const queueAssignmentReminderAlert = async (reminderId: string) => {
       JOIN responsibility_assignments assignment ON assignment.id = reminder.assignment_id
       JOIN events event ON event.id = reminder.event_id
       JOIN event_responsibilities responsibility ON responsibility.id = assignment.responsibility_id
-      JOIN users subject ON subject.id = reminder.subject_user_id
+      JOIN ministry_accounts subject ON subject.id = reminder.subject_user_id
       JOIN ministries ministry
         ON ministry.id = COALESCE(responsibility.ministry_id, event.ministry_id)
       WHERE reminder.id = $1
@@ -1081,7 +1111,7 @@ export const queueAssignmentReminderAlert = async (reminderId: string) => {
       FROM responsibility_assignments assignment
       JOIN event_responsibilities responsibility
         ON responsibility.id = assignment.responsibility_id
-      JOIN users subject ON subject.id = assignment.user_id
+      JOIN ministry_accounts subject ON subject.id = assignment.user_id
       WHERE assignment.event_id = $1
         AND assignment.status IN ('pending', 'assigned', 'confirmed', 'change_requested')
         AND (
@@ -1220,6 +1250,19 @@ const buildDigestHtml = (alerts: any[], origin: string) => {
 
 export const processNotificationDigests = async () => {
   if (!deliveryAllowed()) return 0
+  const dueRecipients = await getPool().query(
+    `
+      SELECT count(DISTINCT recipient_user_id)::INT AS recipient_count
+      FROM ministry_alerts
+      WHERE delivery_status IN ('pending', 'retry')
+        AND digest_after <= now()
+        AND (next_attempt_at IS NULL OR next_attempt_at <= now())
+    `,
+  )
+  assertRecipientBatchWithinLimit(
+    "Outbound Ministry notification batch",
+    Number(dueRecipients.rows[0]?.recipient_count || 0),
+  )
   const claimed = await claimDueAlerts()
   if (!claimed.length) return 0
   const ids = claimed.map((alert: any) => alert.id)
@@ -1237,8 +1280,8 @@ export const processNotificationDigests = async () => {
         recipient.sms_transactional_consent_at,
         telegram.chat_id
       FROM ministry_alerts alert
-      JOIN users subject ON subject.id = alert.subject_user_id
-      JOIN users recipient ON recipient.id = alert.recipient_user_id
+      JOIN ministry_accounts subject ON subject.id = alert.subject_user_id
+      JOIN ministry_accounts recipient ON recipient.id = alert.recipient_user_id
       LEFT JOIN telegram_connections telegram
         ON telegram.account_user_id = recipient.id AND telegram.status = 'active'
       WHERE alert.id = ANY($1)

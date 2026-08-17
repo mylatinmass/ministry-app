@@ -20,7 +20,7 @@ ALTER TABLE assignment_change_requests
   ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL;
 
 ALTER TABLE assignment_change_requests
-  ADD COLUMN IF NOT EXISTS accepted_by_user_id UUID NULL REFERENCES users(id);
+  ADD COLUMN IF NOT EXISTS accepted_by_user_id UUID NULL REFERENCES ministry_accounts(id);
 
 ALTER TABLE assignment_change_requests
   ADD COLUMN IF NOT EXISTS replacement_assignment_id UUID NULL
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS assignment_substitution_offers (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   change_request_id UUID NOT NULL
     REFERENCES assignment_change_requests(id) ON DELETE CASCADE,
-  recipient_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  recipient_user_id UUID NOT NULL REFERENCES ministry_accounts(id) ON DELETE CASCADE,
   status STRING NOT NULL DEFAULT 'offered',
   notified_at TIMESTAMPTZ NULL,
   responded_at TIMESTAMPTZ NULL,

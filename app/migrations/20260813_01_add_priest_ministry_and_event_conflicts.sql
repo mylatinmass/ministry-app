@@ -9,7 +9,7 @@ ALTER TABLE events
   ADD COLUMN IF NOT EXISTS conflict_override_reason STRING NULL;
 
 ALTER TABLE events
-  ADD COLUMN IF NOT EXISTS conflict_override_by UUID NULL REFERENCES users(id);
+  ADD COLUMN IF NOT EXISTS conflict_override_by UUID NULL REFERENCES ministry_accounts(id);
 
 ALTER TABLE events
   ADD COLUMN IF NOT EXISTS conflict_override_at TIMESTAMPTZ NULL;
@@ -23,7 +23,7 @@ SELECT
   actor.id
 FROM (
   SELECT id
-  FROM users
+  FROM ministry_accounts
   ORDER BY
     CASE global_role WHEN 'owner' THEN 0 WHEN 'super_admin' THEN 1 ELSE 2 END,
     created_at,
@@ -52,7 +52,7 @@ SELECT
 FROM ministries ministry
 CROSS JOIN (
   SELECT id
-  FROM users
+  FROM ministry_accounts
   ORDER BY
     CASE global_role WHEN 'owner' THEN 0 WHEN 'super_admin' THEN 1 ELSE 2 END,
     created_at,

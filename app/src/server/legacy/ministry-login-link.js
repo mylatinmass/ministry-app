@@ -23,7 +23,7 @@ const handler = async (event) => {
   try { body = JSON.parse(event.body || "{}") } catch { return jsonResponse(400, { message: "Invalid request" }) }
   const email = normalizeEmail(body.email)
   if (!isValidEmail(email)) return jsonResponse(400, { message: "Enter a valid email address." })
-  const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+  const connectionString = process.env.MINISTRY_DATABASE_URL
   if (!connectionString) return jsonResponse(500, { message: "Ministries login is not configured" })
   if (!process.env.GMAIL_USER || !process.env.GMAIL_PASS) {
     return jsonResponse(500, { message: "Login email is not configured" })
@@ -38,7 +38,7 @@ const handler = async (event) => {
     await client.connect()
     const result = await client.query(
       `SELECT u.id, u.email
-       FROM users u
+       FROM ministry_accounts u
        WHERE lower(u.email) = $1
          AND u.status = 'active'
          AND u.global_role NOT IN ('owner', 'super_admin')

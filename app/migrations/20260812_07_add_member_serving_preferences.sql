@@ -34,14 +34,14 @@ ALTER TABLE ministry_members
     OR monthly_frequency_limit BETWEEN 1 AND 100
   );
 
-ALTER TABLE users
+ALTER TABLE ministry_accounts
   ADD COLUMN IF NOT EXISTS automatic_assignment_monthly_limit INT NULL;
 
-ALTER TABLE users
-  DROP CONSTRAINT IF EXISTS users_automatic_assignment_monthly_limit_check;
+ALTER TABLE ministry_accounts
+  DROP CONSTRAINT IF EXISTS ministry_accounts_automatic_assignment_monthly_limit_check;
 
-ALTER TABLE users
-  ADD CONSTRAINT users_automatic_assignment_monthly_limit_check
+ALTER TABLE ministry_accounts
+  ADD CONSTRAINT ministry_accounts_automatic_assignment_monthly_limit_check
   CHECK (
     automatic_assignment_monthly_limit IS NULL
     OR automatic_assignment_monthly_limit BETWEEN 1 AND 100

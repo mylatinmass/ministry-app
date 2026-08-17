@@ -2,18 +2,18 @@
 -- members of a ministry. Public profile IDs are opaque bearer identifiers used
 -- only to prefill a volunteer form from a directly addressed event email.
 
-ALTER TABLE users
+ALTER TABLE ministry_accounts
   ADD COLUMN IF NOT EXISTS public_profile_id UUID NOT NULL DEFAULT gen_random_uuid();
 
-ALTER TABLE users
+ALTER TABLE ministry_accounts
   ADD COLUMN IF NOT EXISTS is_volunteer_profile BOOL NOT NULL DEFAULT false;
 
-CREATE UNIQUE INDEX IF NOT EXISTS users_public_profile_id_key
-  ON users (public_profile_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ministry_accounts_public_profile_id_key
+  ON ministry_accounts (public_profile_id);
 
 CREATE TABLE IF NOT EXISTS volunteer_account_invitations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES ministry_accounts(id) ON DELETE CASCADE,
   assignment_id UUID NOT NULL
     REFERENCES responsibility_assignments(id) ON DELETE CASCADE,
   token_hash STRING NOT NULL UNIQUE,

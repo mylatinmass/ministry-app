@@ -48,8 +48,8 @@ const loadSeparation = async (client, token, forUpdate = false) => {
         guardian.id AS guardian_user_id
       FROM managed_profile_separations separation
       JOIN managed_profiles profile ON profile.id = separation.managed_profile_id
-      JOIN users child ON child.id = separation.child_user_id
-      JOIN users guardian ON guardian.id = profile.guardian_user_id
+      JOIN ministry_accounts child ON child.id = separation.child_user_id
+      JOIN ministry_accounts guardian ON guardian.id = profile.guardian_user_id
       WHERE separation.token_hash = $1
       LIMIT 1
       ${forUpdate ? "FOR UPDATE" : ""}
@@ -64,7 +64,7 @@ const handler = async (event) => {
   const body = parseBody(event)
   if (!body?.token) return jsonResponse(400, { message: "Activation token is required" })
 
-  const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+  const connectionString = process.env.MINISTRY_DATABASE_URL
   const jwtSecret = process.env.JWT_SECRET_KEY
   if (!connectionString || !jwtSecret) return jsonResponse(500, { message: "Activation is not configured" })
 
@@ -91,7 +91,7 @@ const handler = async (event) => {
       const validationMessage = usernameError(username)
       if (validationMessage) return jsonResponse(200, { available: false, message: validationMessage })
       const duplicate = await client.query(
-        `SELECT 1 FROM users WHERE lower(username) = $1 AND id <> $2 LIMIT 1`,
+        `SELECT 1 FROM ministry_accounts WHERE lower(username) = $1 AND id <> $2 LIMIT 1`,
         [username, separation.child_user_id]
       )
       return jsonResponse(200, {
@@ -110,7 +110,7 @@ const handler = async (event) => {
     if (expired) return jsonResponse(410, { message: "This activation link has expired" })
 
     const duplicate = await client.query(
-      `SELECT 1 FROM users WHERE lower(username) = $1 AND id <> $2 LIMIT 1`,
+      `SELECT 1 FROM ministry_accounts WHERE lower(username) = $1 AND id <> $2 LIMIT 1`,
       [username, separation.child_user_id]
     )
     if (duplicate.rowCount) return jsonResponse(409, { message: "Username is already in use" })
@@ -126,7 +126,7 @@ const handler = async (event) => {
       const emailOwner = await client.query(
         `
           SELECT 1
-          FROM users
+          FROM ministry_accounts
           WHERE lower(btrim(email)) = $1
             AND id <> $2
           LIMIT 1
@@ -142,7 +142,7 @@ const handler = async (event) => {
       }
       const userResult = await client.query(
         `
-          UPDATE users
+          UPDATE ministry_accounts
           SET email = $1, phone = NULLIF($2, ''), telephone = NULLIF($2, ''),
             username = $3, password_hash = $4, updated_at = now()
           WHERE id = $5

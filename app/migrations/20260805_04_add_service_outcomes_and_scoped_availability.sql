@@ -9,7 +9,7 @@ ALTER TABLE responsibility_assignments
   ADD COLUMN IF NOT EXISTS outcome_recorded_at TIMESTAMPTZ NULL;
 
 ALTER TABLE responsibility_assignments
-  ADD COLUMN IF NOT EXISTS outcome_recorded_by UUID NULL REFERENCES users(id);
+  ADD COLUMN IF NOT EXISTS outcome_recorded_by UUID NULL REFERENCES ministry_accounts(id);
 
 ALTER TABLE responsibility_assignments
   ADD COLUMN IF NOT EXISTS outcome_note STRING NULL;

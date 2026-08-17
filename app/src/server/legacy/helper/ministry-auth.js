@@ -31,7 +31,7 @@ const getMinistryUserById = async (client, userId) => {
             AND mm.status = 'active'
             AND m.status = 'active'
         ) AS has_active_membership
-      FROM users u
+      FROM ministry_accounts u
       WHERE u.id = $1
       LIMIT 1
     `,
@@ -62,7 +62,7 @@ const getMinistryUserByUsername = async (client, username) => {
             AND mm.status = 'active'
             AND m.status = 'active'
         ) AS has_active_membership
-      FROM users u
+      FROM ministry_accounts u
       WHERE lower(u.username) = $1 OR lower(btrim(u.email)) = $1
       ORDER BY CASE WHEN lower(u.username) = $1 THEN 0 ELSE 1 END, u.created_at
       LIMIT 1

@@ -16,7 +16,7 @@ const handler = async (event) => {
   try { body = JSON.parse(event.body || "{}") } catch { return jsonResponse(400, { message: "Invalid request" }) }
   const token = body.token?.toString() || ""
   if (token.length < 32) return jsonResponse(400, { message: "Account invitation is incomplete" })
-  const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+  const connectionString = process.env.MINISTRY_DATABASE_URL
   const jwtSecret = process.env.JWT_SECRET_KEY
   if (!connectionString || !jwtSecret) return jsonResponse(500, { message: "Volunteer accounts are not configured" })
   const client = new Client({ connectionString, ssl: { rejectUnauthorized: false } })
@@ -25,11 +25,11 @@ const handler = async (event) => {
     const load = (forUpdate = false) => client.query(
       `SELECT invitation.id, invitation.user_id, invitation.status,
               invitation.expires_at, invitation.consumed_at, invitation.revoked_at,
-              users.first_name, users.last_name, users.username,
-              users.password_hash, users.global_role, users.status AS user_status,
+              ministry_accounts.first_name, ministry_accounts.last_name, ministry_accounts.username,
+              ministry_accounts.password_hash, ministry_accounts.global_role, ministry_accounts.status AS user_status,
               event.title AS event_title, responsibility.name AS responsibility_name
        FROM volunteer_account_invitations invitation
-       JOIN users ON users.id = invitation.user_id
+       JOIN ministry_accounts ON ministry_accounts.id = invitation.user_id
        JOIN responsibility_assignments assignment ON assignment.id = invitation.assignment_id
        JOIN events event ON event.id = assignment.event_id
        JOIN event_responsibilities responsibility ON responsibility.id = assignment.responsibility_id
@@ -70,7 +70,7 @@ const handler = async (event) => {
       await client.query("ROLLBACK")
       return jsonResponse(403, { message: "This profile is inactive" })
     }
-    await client.query(`UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1`, [row.user_id, passwordHash])
+    await client.query(`UPDATE ministry_accounts SET password_hash = $2, updated_at = now() WHERE id = $1`, [row.user_id, passwordHash])
     await client.query(`UPDATE volunteer_account_invitations SET status = 'accepted', consumed_at = now(), updated_at = now() WHERE id = $1`, [row.id])
     await client.query(`UPDATE volunteer_account_invitations SET status = 'revoked', revoked_at = now(), updated_at = now() WHERE user_id = $1 AND id <> $2 AND status = 'pending'`, [row.user_id, row.id])
     await client.query("COMMIT")

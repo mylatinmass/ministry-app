@@ -5,10 +5,10 @@
 CREATE TABLE IF NOT EXISTS ministry_invitations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email STRING NOT NULL,
-  invited_user_id UUID NULL REFERENCES users(id) ON DELETE SET NULL,
+  invited_user_id UUID NULL REFERENCES ministry_accounts(id) ON DELETE SET NULL,
   token_hash STRING NOT NULL UNIQUE,
   status STRING NOT NULL DEFAULT 'pending',
-  requested_by UUID NOT NULL REFERENCES users(id),
+  requested_by UUID NOT NULL REFERENCES ministry_accounts(id),
   expires_at TIMESTAMPTZ NOT NULL,
   responded_at TIMESTAMPTZ NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

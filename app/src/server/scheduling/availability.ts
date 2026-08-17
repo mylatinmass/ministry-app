@@ -505,7 +505,7 @@ const loadManagedMembers = async (
     `
       SELECT user_account.id, user_account.first_name, user_account.last_name
       FROM ministry_members membership
-      JOIN users user_account ON user_account.id = membership.user_id
+      JOIN ministry_accounts user_account ON user_account.id = membership.user_id
       WHERE membership.ministry_id = $1
         AND membership.status = 'active'
         AND user_account.status = 'active'
@@ -589,7 +589,7 @@ export const handleAvailability = async (request: Request) => {
         }
       }
       const subjectResult = await client.query(
-        `SELECT id, first_name, last_name FROM users WHERE id = $1 LIMIT 1`,
+        `SELECT id, first_name, last_name FROM ministry_accounts WHERE id = $1 LIMIT 1`,
         [subjectUserId],
       )
       const subject = subjectResult.rows[0] || context.user

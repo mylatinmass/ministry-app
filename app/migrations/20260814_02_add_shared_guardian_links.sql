@@ -8,13 +8,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS managed_profiles_active_guardian_child_key
 
 CREATE TABLE IF NOT EXISTS managed_profile_link_invitations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  child_user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-  invited_by_guardian_user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  child_user_id UUID NOT NULL REFERENCES ministry_accounts(id) ON DELETE RESTRICT,
+  invited_by_guardian_user_id UUID NOT NULL REFERENCES ministry_accounts(id) ON DELETE RESTRICT,
   invitee_email STRING NOT NULL,
   token_hash STRING NOT NULL UNIQUE,
   status STRING NOT NULL DEFAULT 'pending',
   expires_at TIMESTAMPTZ NOT NULL,
-  accepted_guardian_user_id UUID NULL REFERENCES users(id) ON DELETE RESTRICT,
+  accepted_guardian_user_id UUID NULL REFERENCES ministry_accounts(id) ON DELETE RESTRICT,
   responded_at TIMESTAMPTZ NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

@@ -30,7 +30,7 @@ const handler = async (event) => {
     return jsonResponse(405, { message: "Method not allowed" })
   }
 
-  const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+  const connectionString = process.env.MINISTRY_DATABASE_URL
   const jwtSecret = process.env.JWT_SECRET_KEY
 
   if (!connectionString || !jwtSecret) {
@@ -153,12 +153,12 @@ const handler = async (event) => {
             CASE WHEN COALESCE(e.visibility, 'public') <> 'private'
               OR EXISTS (SELECT 1 FROM responsibility_assignments private_assignment WHERE private_assignment.event_id = e.id AND private_assignment.user_id = $1 AND private_assignment.status NOT IN ('declined', 'cancelled'))
               OR EXISTS (SELECT 1 FROM ministry_members private_access JOIN ministries private_ministry ON private_ministry.id = private_access.ministry_id WHERE private_access.user_id = $1 AND private_access.status = 'active' AND private_access.level IN ('owner', 'admin') AND private_ministry.slug = 'priests')
-              OR EXISTS (SELECT 1 FROM users private_user WHERE private_user.id = $1 AND private_user.global_role IN ('owner', 'super_admin'))
+              OR EXISTS (SELECT 1 FROM ministry_accounts private_user WHERE private_user.id = $1 AND private_user.global_role IN ('owner', 'super_admin'))
               THEN e.description ELSE NULL END AS description,
             CASE WHEN COALESCE(e.visibility, 'public') <> 'private'
               OR EXISTS (SELECT 1 FROM responsibility_assignments private_assignment WHERE private_assignment.event_id = e.id AND private_assignment.user_id = $1 AND private_assignment.status NOT IN ('declined', 'cancelled'))
               OR EXISTS (SELECT 1 FROM ministry_members private_access JOIN ministries private_ministry ON private_ministry.id = private_access.ministry_id WHERE private_access.user_id = $1 AND private_access.status = 'active' AND private_access.level IN ('owner', 'admin') AND private_ministry.slug = 'priests')
-              OR EXISTS (SELECT 1 FROM users private_user WHERE private_user.id = $1 AND private_user.global_role IN ('owner', 'super_admin'))
+              OR EXISTS (SELECT 1 FROM ministry_accounts private_user WHERE private_user.id = $1 AND private_user.global_role IN ('owner', 'super_admin'))
               THEN e.location ELSE NULL END AS location,
             e.start_time,
             e.end_time,
@@ -183,7 +183,7 @@ const handler = async (event) => {
               COALESCE(e.visibility, 'public') <> 'private'
               OR EXISTS (SELECT 1 FROM responsibility_assignments private_assignment WHERE private_assignment.event_id = e.id AND private_assignment.user_id = $1 AND private_assignment.status NOT IN ('declined', 'cancelled'))
               OR EXISTS (SELECT 1 FROM ministry_members private_access JOIN ministries private_ministry ON private_ministry.id = private_access.ministry_id WHERE private_access.user_id = $1 AND private_access.status = 'active' AND private_ministry.slug = 'priests')
-              OR EXISTS (SELECT 1 FROM users private_user WHERE private_user.id = $1 AND private_user.global_role IN ('owner', 'super_admin'))
+              OR EXISTS (SELECT 1 FROM ministry_accounts private_user WHERE private_user.id = $1 AND private_user.global_role IN ('owner', 'super_admin'))
             )
           ORDER BY e.start_time
         `,

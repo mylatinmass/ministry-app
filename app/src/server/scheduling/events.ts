@@ -714,7 +714,7 @@ const previewTemplateAssignments = async (
        AND membership.status = 'active'
        AND membership.can_serve = true
        AND membership.serving_preference <> 'cannot_serve'
-      JOIN users member ON member.id = membership.user_id
+      JOIN ministry_accounts member ON member.id = membership.user_id
       LEFT JOIN ministry_levels required_level
         ON required_level.id = responsibility.required_ministry_level_id
       LEFT JOIN ministry_levels granted_level
@@ -899,7 +899,7 @@ const fillAndReviewAutomaticSchedule = async (
             history.last_served_at,
             COALESCE(history.same_position_count, 0)::INT AS same_position_count
           FROM ministry_members membership
-          JOIN users member ON member.id = membership.user_id
+          JOIN ministry_accounts member ON member.id = membership.user_id
           LEFT JOIN ministry_levels required_level
             ON required_level.id = $7
           LEFT JOIN ministry_levels granted_level
@@ -1151,7 +1151,7 @@ const fillAndReviewAutomaticSchedule = async (
     const adminResult = await client.query(
       `
         SELECT DISTINCT administrator.id
-        FROM users administrator
+        FROM ministry_accounts administrator
         LEFT JOIN ministry_members membership
           ON membership.user_id = administrator.id
          AND membership.status = 'active'
@@ -1772,7 +1772,7 @@ const loadEventDetails = async (
           FROM responsibility_assignments assignment
           JOIN event_responsibilities assigned_responsibility
             ON assigned_responsibility.id = assignment.responsibility_id
-          LEFT JOIN users member ON member.id = assignment.user_id
+          LEFT JOIN ministry_accounts member ON member.id = assignment.user_id
           WHERE assignment.event_id = $1
             AND assignment.status NOT IN ('declined', 'cancelled')
           ORDER BY lower(COALESCE(member.last_name, '')), lower(COALESCE(member.first_name, assignment.volunteer_name))
@@ -1826,7 +1826,7 @@ const loadEventDetails = async (
            AND membership.status = 'active'
            AND membership.can_serve = true
            AND membership.serving_preference <> 'cannot_serve'
-          JOIN users member ON member.id = membership.user_id
+          JOIN ministry_accounts member ON member.id = membership.user_id
           LEFT JOIN ministry_levels required_level
             ON required_level.id =
               responsibility.required_ministry_level_id
@@ -3047,7 +3047,7 @@ const assignMemberToResponsibility = async (
     `
       SELECT member.id, member.first_name, member.last_name
       FROM ministry_members membership
-      JOIN users member ON member.id = membership.user_id
+      JOIN ministry_accounts member ON member.id = membership.user_id
       LEFT JOIN ministry_levels required_level
         ON required_level.id = $8
       LEFT JOIN ministry_levels granted_level
@@ -3342,7 +3342,7 @@ const saveEventAssignments = async (
     `
       SELECT assignment.id, assignment.responsibility_id, assignment.user_id
       FROM responsibility_assignments assignment
-      LEFT JOIN users member ON member.id = assignment.user_id
+      LEFT JOIN ministry_accounts member ON member.id = assignment.user_id
       WHERE assignment.event_id = $1
         AND assignment.responsibility_id = ANY($2::UUID[])
         AND assignment.status = ANY($3)
@@ -3550,7 +3550,7 @@ const matchingConflictCandidates = async (
       `
         SELECT member.id
         FROM ministry_members membership
-        JOIN users member ON member.id = membership.user_id
+        JOIN ministry_accounts member ON member.id = membership.user_id
         LEFT JOIN ministry_levels required_level ON required_level.id = $8
         LEFT JOIN ministry_levels granted_level ON granted_level.id = membership.highest_level_id
         WHERE membership.ministry_id = $1

@@ -11,6 +11,7 @@ import {
 } from "./assignment-notifications"
 import { processMinistryMessageDeliveries } from "./messages"
 import { expireAssignmentSubstitutionRequests } from "../scheduling/substitutions"
+import { syncPrioryAllocationsIfDue } from "../scheduling/priory-allocations"
 
 const ASSIGNMENT_STATUSES = [
   "pending",
@@ -49,8 +50,8 @@ const reconcileReminders = async () => {
       LEFT JOIN managed_profiles mp
         ON mp.child_user_id = ra.user_id
        AND mp.status IN ('active', 'separation_pending')
-      JOIN users subject ON subject.id = ra.user_id
-      JOIN users recipient
+      JOIN ministry_accounts subject ON subject.id = ra.user_id
+      JOIN ministry_accounts recipient
         ON recipient.id = COALESCE(mp.guardian_user_id, ra.user_id)
       WHERE ra.user_id IS NOT NULL
         AND ra.status = ANY($1)
@@ -229,6 +230,10 @@ export const handleReminderProcessing = async (request: Request) => {
   }
 
   const klaviyoProfiles = await processKlaviyoProfileSyncs()
+  const prioryAllocations = await syncPrioryAllocationsIfDue().catch((error) => {
+    console.error("Priory allocation synchronization failed:", error)
+    return { failed: true, message: error?.message || "Priory synchronization failed" }
+  })
   const expiredSubstitutionRequests =
     await expireAssignmentSubstitutionRequests()
   const reconciled = await reconcileReminders()
@@ -245,6 +250,7 @@ export const handleReminderProcessing = async (request: Request) => {
 
   return json({
     klaviyoProfiles,
+    prioryAllocations,
     expiredSubstitutionRequests,
     reconciledAssignments: reconciled,
     processedReminders: reminders.length,

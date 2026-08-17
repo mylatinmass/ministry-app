@@ -19,7 +19,7 @@ const handler = async (event) => {
     return jsonResponse(405, { message: "Method not allowed" })
   }
 
-  const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+  const connectionString = process.env.MINISTRY_DATABASE_URL
   const jwtSecret = process.env.JWT_SECRET_KEY
 
   if (!connectionString || !jwtSecret) {

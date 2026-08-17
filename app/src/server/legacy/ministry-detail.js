@@ -17,7 +17,7 @@ const handler = async (event) => {
     return jsonResponse(405, { message: "Method not allowed" })
   }
 
-  const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+  const connectionString = process.env.MINISTRY_DATABASE_URL
   const jwtSecret = process.env.JWT_SECRET_KEY
   const slug = event.queryStringParameters?.slug?.toString().trim().toLowerCase()
 
@@ -294,7 +294,7 @@ const handler = async (event) => {
       client.query(
         `
           SELECT u.id, u.first_name, u.last_name
-          FROM users u
+          FROM ministry_accounts u
           WHERE u.id = $1
              OR EXISTS (
                SELECT 1 FROM managed_profiles mp
@@ -318,7 +318,7 @@ const handler = async (event) => {
             er.name AS responsibility_name
           FROM responsibility_assignments ra
           JOIN event_responsibilities er ON er.id = ra.responsibility_id
-          JOIN users u ON u.id = ra.user_id
+          JOIN ministry_accounts u ON u.id = ra.user_id
           WHERE (
               ra.user_id = $1
               OR EXISTS (

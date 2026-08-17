@@ -2,7 +2,7 @@
 
 CREATE TABLE IF NOT EXISTS telegram_connections (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  account_user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  account_user_id UUID NOT NULL UNIQUE REFERENCES ministry_accounts(id) ON DELETE CASCADE,
   telegram_user_id STRING NOT NULL,
   chat_id STRING NOT NULL UNIQUE,
   username STRING NULL,
@@ -24,7 +24,7 @@ CREATE INDEX IF NOT EXISTS telegram_connections_account_status_idx
 
 CREATE TABLE IF NOT EXISTS telegram_connection_tokens (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  account_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  account_user_id UUID NOT NULL REFERENCES ministry_accounts(id) ON DELETE CASCADE,
   token_hash STRING NOT NULL UNIQUE,
   expires_at TIMESTAMPTZ NOT NULL,
   used_at TIMESTAMPTZ NULL,

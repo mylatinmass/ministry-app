@@ -1,12 +1,12 @@
 -- Per-session Ministries authentication credentials belong to the existing
 -- user identity because one user may belong to several ministries.
 
-ALTER TABLE users
+ALTER TABLE ministry_accounts
   ADD COLUMN IF NOT EXISTS username STRING NULL;
 
-ALTER TABLE users
+ALTER TABLE ministry_accounts
   ADD COLUMN IF NOT EXISTS password_hash STRING NULL;
 
-CREATE UNIQUE INDEX IF NOT EXISTS users_ministry_username_key
-  ON users (lower(username))
+CREATE UNIQUE INDEX IF NOT EXISTS ministry_accounts_ministry_username_key
+  ON ministry_accounts (lower(username))
   WHERE username IS NOT NULL;

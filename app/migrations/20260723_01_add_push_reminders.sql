@@ -2,7 +2,7 @@
 
 CREATE TABLE IF NOT EXISTS push_subscriptions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  account_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  account_user_id UUID NOT NULL REFERENCES ministry_accounts(id) ON DELETE CASCADE,
   endpoint STRING NOT NULL,
   endpoint_hash STRING NOT NULL UNIQUE,
   p256dh_key STRING NOT NULL,
@@ -24,8 +24,8 @@ CREATE TABLE IF NOT EXISTS ministry_reminders (
   assignment_id UUID NOT NULL
     REFERENCES responsibility_assignments(id) ON DELETE CASCADE,
   event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-  subject_user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-  recipient_user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  subject_user_id UUID NOT NULL REFERENCES ministry_accounts(id) ON DELETE RESTRICT,
+  recipient_user_id UUID NOT NULL REFERENCES ministry_accounts(id) ON DELETE RESTRICT,
   scheduled_for TIMESTAMPTZ NOT NULL,
   event_updated_at TIMESTAMPTZ NOT NULL,
   status STRING NOT NULL DEFAULT 'pending',

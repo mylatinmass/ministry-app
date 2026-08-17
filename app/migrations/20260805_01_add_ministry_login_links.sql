@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS ministry_login_links (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES ministry_accounts(id) ON DELETE CASCADE,
   token_hash STRING NOT NULL UNIQUE,
   requested_email STRING NOT NULL,
   expires_at TIMESTAMPTZ NOT NULL,

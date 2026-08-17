@@ -1,24 +1,24 @@
 -- Complete account notification preferences, reminder stages, and delivery logs.
 
-ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS notification_reminders_enabled BOOL NOT NULL DEFAULT true;
+ALTER TABLE ministry_accounts
+  ADD COLUMN IF NOT EXISTS notification_reminders_enabled BOOL NOT NULL DEFAULT false;
 
-ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS notification_schedule_changes_enabled BOOL NOT NULL DEFAULT true;
+ALTER TABLE ministry_accounts
+  ADD COLUMN IF NOT EXISTS notification_schedule_changes_enabled BOOL NOT NULL DEFAULT false;
 
-ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS notification_announcements_enabled BOOL NOT NULL DEFAULT true;
+ALTER TABLE ministry_accounts
+  ADD COLUMN IF NOT EXISTS notification_announcements_enabled BOOL NOT NULL DEFAULT false;
 
-ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS notification_volunteer_opportunities_enabled BOOL NOT NULL DEFAULT true;
+ALTER TABLE ministry_accounts
+  ADD COLUMN IF NOT EXISTS notification_volunteer_opportunities_enabled BOOL NOT NULL DEFAULT false;
 
-ALTER TABLE users
+ALTER TABLE ministry_accounts
   ADD COLUMN IF NOT EXISTS sms_transactional_consent_at TIMESTAMPTZ NULL;
 
-ALTER TABLE users
+ALTER TABLE ministry_accounts
   ADD COLUMN IF NOT EXISTS sms_transactional_consent_source STRING NULL;
 
-ALTER TABLE users
+ALTER TABLE ministry_accounts
   ADD COLUMN IF NOT EXISTS sms_transactional_consent_text_version STRING NULL;
 
 ALTER TABLE events
@@ -63,7 +63,7 @@ ALTER TABLE ministry_alerts
 CREATE TABLE IF NOT EXISTS ministry_alert_deliveries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   alert_id UUID NOT NULL REFERENCES ministry_alerts(id) ON DELETE CASCADE,
-  recipient_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  recipient_user_id UUID NOT NULL REFERENCES ministry_accounts(id) ON DELETE CASCADE,
   channel STRING NOT NULL,
   provider STRING NOT NULL,
   status STRING NOT NULL,

@@ -30,9 +30,9 @@ const loadInvitation = async (client, token, forUpdate = false) => {
         invitee.id AS invitee_user_id,
         invitee.first_name AS invitee_first_name
       FROM managed_profile_link_invitations invitation
-      JOIN users child ON child.id = invitation.child_user_id
-      JOIN users inviter ON inviter.id = invitation.invited_by_guardian_user_id
-      LEFT JOIN users invitee
+      JOIN ministry_accounts child ON child.id = invitation.child_user_id
+      JOIN ministry_accounts inviter ON inviter.id = invitation.invited_by_guardian_user_id
+      LEFT JOIN ministry_accounts invitee
         ON lower(btrim(invitee.email)) = lower(btrim(invitation.invitee_email))
        AND invitee.status = 'active'
       WHERE invitation.token_hash = $1
@@ -64,7 +64,7 @@ const handler = async (event) => {
     return jsonResponse(400, { message: "Unknown invitation action" })
   }
 
-  const connectionString = process.env.COCKROACHDB_CONNECTION_STRING
+  const connectionString = process.env.MINISTRY_DATABASE_URL
   if (!connectionString) {
     return jsonResponse(500, { message: "Profile invitations are not configured" })
   }

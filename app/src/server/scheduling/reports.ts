@@ -58,7 +58,7 @@ export const loadReports = async (
             history.start_time,
             history.responsibility_name
           FROM ministry_members membership
-          JOIN users member ON member.id = membership.user_id
+          JOIN ministry_accounts member ON member.id = membership.user_id
           LEFT JOIN service_history history ON history.user_id = member.id
           WHERE membership.ministry_id = $1
             AND membership.status = 'active'
@@ -109,9 +109,9 @@ export const loadReports = async (
             member.first_name,
             member.last_name
           FROM ministry_audit_log audit
-          JOIN users actor ON actor.id = audit.actor_user_id
+          JOIN ministry_accounts actor ON actor.id = audit.actor_user_id
           LEFT JOIN ministry_members membership ON membership.id = audit.entity_id
-          LEFT JOIN users member ON member.id = membership.user_id
+          LEFT JOIN ministry_accounts member ON member.id = membership.user_id
           WHERE audit.ministry_id = $1
             AND audit.action = 'ministry_member.level_granted'
           ORDER BY audit.created_at DESC

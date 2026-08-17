@@ -4,6 +4,7 @@ import {
   CalendarDaysIcon,
   CheckCircleIcon,
   ClockIcon,
+  ExclamationTriangleIcon,
   MapPinIcon,
   ClipboardDocumentIcon,
   LinkIcon,
@@ -768,6 +769,14 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
     { shortages: 0, backups: 0, conflicts: 0, overrides: 0, changeRequests: 0 },
   )
   const eventHasStarted = start.getTime() <= Date.now()
+  const prioryConflictCount = (details?.responsibilities || []).reduce(
+    (total, responsibility) =>
+      total +
+      (responsibility.assignments || []).filter(
+        (assignment) => assignment.prioryAllocationConflict,
+      ).length,
+    0,
+  )
 
   return (
     <div
@@ -818,6 +827,20 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
           {displayedEvent.description ||
             "No event description has been added yet."}
         </p>
+
+        {prioryConflictCount > 0 && (
+          <section role="alert" className="mt-6 rounded-2xl bg-orange-500 p-5 text-white">
+            <div className="flex items-start gap-3">
+              <ExclamationTriangleIcon className="mt-0.5 h-6 w-6 shrink-0" aria-hidden="true" />
+              <div>
+                <h2 className="font-semibold">Priory schedule conflict</h2>
+                <p className="mt-1 text-sm text-white/90">
+                  {prioryConflictCount} priest assignment{prioryConflictCount === 1 ? " is" : "s are"} no longer covered by this mission&apos;s current Priory allocation. The event and its history were preserved; a Priest Ministry administrator must resolve it.
+                </p>
+              </div>
+            </div>
+          </section>
+        )}
 
         {displayedEvent.visibility === "private" && (
           <section className="mt-8 rounded-2xl border border-[#d8c7b8] bg-[#fbf8f4] p-5">

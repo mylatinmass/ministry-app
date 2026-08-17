@@ -19,6 +19,10 @@ import {
   requestAssignmentSubstitute,
 } from "./substitutions"
 import { getPriestPrivacyAccess } from "./priest-privacy"
+import {
+  assertPriestAllocation,
+  checkPrioryAllocation,
+} from "./priory-allocations"
 
 const EVENT_STATUSES = new Set([
   "draft",
@@ -781,8 +785,36 @@ const previewTemplateAssignments = async (
     ],
   )
 
+  const priestMinistry = await client.query(
+    `SELECT id FROM ministries WHERE slug = 'priests' LIMIT 1`,
+  )
+  const priestMinistryId = priestMinistry.rows[0]?.id || ""
+  const responsibilityMinistries = new Map(
+    structure.responsibilities.map((responsibility: any) => [
+      responsibility.id,
+      responsibility.ministry_id || structure.template.ministry_id,
+    ]),
+  )
   const membersByResponsibility = new Map<string, any[]>()
   for (const member of result.rows) {
+    if (
+      responsibilityMinistries.get(member.responsibility_id) ===
+      priestMinistryId
+    ) {
+      const responsibility = structure.responsibilities.find(
+        (item: any) => item.id === member.responsibility_id,
+      )
+      const allocation = await checkPrioryAllocation(
+        client,
+        member.user_id,
+        new Date(
+          start.getTime() +
+            Number(responsibility?.relative_start_minutes || 0) * 60_000,
+        ),
+        end,
+      )
+      if (!allocation.allowed) continue
+    }
     const ministryCount = Number(member.ministry_monthly_count || 0)
     const overallCount = Number(member.overall_monthly_count || 0)
     const ministryLimit = member.monthly_frequency_limit == null
@@ -879,6 +911,12 @@ const fillAndReviewAutomaticSchedule = async (
     ) {
       continue
     }
+    const responsibilityMinistry = await client.query(
+      `SELECT slug FROM ministries WHERE id = $1`,
+      [responsibility.ministry_id],
+    )
+    const isPriestResponsibility =
+      responsibilityMinistry.rows[0]?.slug === "priests"
     let missing = Math.max(
       0,
       Number(responsibility.quantity_needed) -
@@ -1002,7 +1040,7 @@ const fillAndReviewAutomaticSchedule = async (
             history.same_position_count,
             lower(member.last_name),
             lower(member.first_name)
-          LIMIT 1
+          LIMIT 50
         `,
         [
           responsibility.ministry_id,
@@ -1016,19 +1054,48 @@ const fillAndReviewAutomaticSchedule = async (
           responsibility.template_responsibility_id,
         ],
       )
-      const candidate = candidateResult.rows[0]
+      let candidate = candidateResult.rows[0]
+      let prioryAllocationId: string | null = null
+      if (isPriestResponsibility) {
+        candidate = null
+        for (const possible of candidateResult.rows) {
+          const allocation = await checkPrioryAllocation(
+            client,
+            possible.id,
+            new Date(
+              new Date(event.start_time).getTime() +
+                Number(responsibility.relative_start_minutes || 0) * 60_000,
+            ),
+            new Date(event.end_time),
+          )
+          if (allocation.allowed) {
+            candidate = possible
+            prioryAllocationId = allocation.allocationId || null
+            break
+          }
+        }
+      }
       if (!candidate) break
 
       const assignmentResult = await client.query(
         `
           INSERT INTO responsibility_assignments (
             event_id, responsibility_id, user_id, quantity, status,
-            assigned_by, signup_source, notify_email
+            assigned_by, signup_source, notify_email,
+            priory_allocation_id, priory_allocation_conflict,
+            priory_allocation_checked_at
           )
-          VALUES ($1, $2, $3, 1, 'assigned', $4, 'admin_assignment', true)
+          VALUES ($1, $2, $3, 1, 'assigned', $4, 'admin_assignment', true,
+            $5, false, CASE WHEN $5 IS NULL THEN NULL ELSE now() END)
           RETURNING id
         `,
-        [event.id, responsibility.id, candidate.id, context.actor.id],
+        [
+          event.id,
+          responsibility.id,
+          candidate.id,
+          context.actor.id,
+          prioryAllocationId,
+        ],
       )
       const assignmentId = assignmentResult.rows[0].id
       assignmentIds.push(assignmentId)
@@ -1952,6 +2019,12 @@ const loadEventDetails = async (
       serviceOutcome: assignment.service_outcome || "",
       outcomeRecordedAt: assignment.outcome_recorded_at,
       outcomeNote: assignment.outcome_note || "",
+      prioryAllocationId: assignment.priory_allocation_id || null,
+      prioryAllocationConflict: Boolean(
+        assignment.priory_allocation_conflict,
+      ),
+      prioryAllocationCheckedAt:
+        assignment.priory_allocation_checked_at || null,
       conflictCount: canManageAssignment
         ? Number(assignment.conflict_count)
         : 0,
@@ -2400,6 +2473,52 @@ export const createEvents = async (
       new Error("Volunteer events cannot use automatic member assignments"),
       { status: 409 },
     )
+  }
+
+  const prioryEnabled = await client.query(
+    `SELECT enabled FROM priory_integration_settings WHERE setting_key='primary'`,
+  )
+  if (prioryEnabled.rows[0]?.enabled && status === "published") {
+    const priestMinistry = await client.query(
+      `SELECT id FROM ministries WHERE slug='priests' LIMIT 1`,
+    )
+    const priestMinistryId = priestMinistry.rows[0]?.id
+    const priestResponsibilities = structure.responsibilities.filter(
+      (responsibility: any) =>
+        (responsibility.ministry_id || structure.template.ministry_id) ===
+        priestMinistryId,
+    )
+    if (priestResponsibilities.length) {
+      const requestedByResponsibility = new Map(
+        requestedAssignments.map((assignment: any) => [
+          assignment.templateResponsibilityId,
+          assignment.userId,
+        ]),
+      )
+      const selectedPriestAssignments = priestResponsibilities.filter(
+        (responsibility: any) => requestedByResponsibility.has(responsibility.id),
+      )
+      if (!selectedPriestAssignments.length) {
+        throw Object.assign(
+          new Error(
+            "Save this event as a draft and request Priory availability before publishing",
+          ),
+          { status: 409, prioryAllocationRequired: true },
+        )
+      }
+      for (const responsibility of selectedPriestAssignments) {
+        await assertPriestAllocation(
+          client,
+          priestMinistryId,
+          String(requestedByResponsibility.get(responsibility.id) || ""),
+          new Date(
+            start.getTime() +
+              Number(responsibility.relative_start_minutes || 0) * 60_000,
+          ),
+          end,
+        )
+      }
+    }
   }
 
   for (const occurrenceStart of occurrenceStarts) {
@@ -3126,6 +3245,17 @@ const assignMemberToResponsibility = async (
     )
   }
 
+  const prioryAllocationId = await assertPriestAllocation(
+    client,
+    responsibility.ministry_id,
+    userId,
+    new Date(
+      new Date(event.start_time).getTime() +
+        Number(responsibility.relative_start_minutes || 0) * 60_000,
+    ),
+    new Date(event.end_time),
+  )
+
   const coverageResult = await client.query(
     `
       SELECT COALESCE(sum(quantity), 0)::INT AS assigned_quantity
@@ -3173,12 +3303,17 @@ const assignMemberToResponsibility = async (
             assigned_by = $2,
             signup_source = 'admin_assignment',
             notify_email = true,
+            priory_allocation_id = $3,
+            priory_allocation_conflict = false,
+            priory_allocation_checked_at = CASE
+              WHEN $3 IS NULL THEN NULL ELSE now()
+            END,
             confirmation_overdue_at = NULL,
             updated_at = now()
         WHERE id = $1
         RETURNING *
       `,
-      [existing.id, context.actor.id],
+      [existing.id, context.actor.id, prioryAllocationId],
     )
     assignment = updatedResult.rows[0]
   } else {
@@ -3192,12 +3327,22 @@ const assignMemberToResponsibility = async (
           status,
           assigned_by,
           signup_source,
-          notify_email
+          notify_email,
+          priory_allocation_id,
+          priory_allocation_conflict,
+          priory_allocation_checked_at
         )
-        VALUES ($1, $2, $3, 1, 'assigned', $4, 'admin_assignment', true)
+        VALUES ($1, $2, $3, 1, 'assigned', $4, 'admin_assignment', true,
+          $5, false, CASE WHEN $5 IS NULL THEN NULL ELSE now() END)
         RETURNING *
       `,
-      [event.id, responsibility.id, userId, context.actor.id],
+      [
+        event.id,
+        responsibility.id,
+        userId,
+        context.actor.id,
+        prioryAllocationId,
+      ],
     )
     assignment = createdResult.rows[0]
   }
@@ -4338,6 +4483,45 @@ const updateEvent = async (
     if (!EVENT_STATUSES.has(status)) {
       throw Object.assign(new Error("Invalid event status"), { status: 400 })
     }
+    if (status === "published") {
+      const prioryEnabled = await client.query(
+        `SELECT enabled FROM priory_integration_settings WHERE setting_key='primary'`,
+      )
+      if (prioryEnabled.rows[0]?.enabled) {
+        const priestResponsibilities = await client.query(
+          `SELECT responsibility.id, responsibility.relative_start_minutes,
+             COALESCE(responsibility.ministry_id, $2) AS ministry_id,
+             assignment.user_id
+           FROM event_responsibilities responsibility
+           JOIN ministries ministry ON ministry.id=COALESCE(responsibility.ministry_id, $2)
+           LEFT JOIN responsibility_assignments assignment
+             ON assignment.responsibility_id=responsibility.id
+            AND assignment.status NOT IN ('declined','cancelled')
+           WHERE responsibility.event_id=$1 AND responsibility.status <> 'cancelled'
+             AND ministry.slug='priests'`,
+          [eventId, event.ministry_id],
+        )
+        if (priestResponsibilities.rowCount &&
+            priestResponsibilities.rows.some((responsibility) => !responsibility.user_id)) {
+          throw Object.assign(
+            new Error("Assign an allocated priest before publishing this event"),
+            { status: 409, prioryAllocationRequired: true },
+          )
+        }
+        for (const responsibility of priestResponsibilities.rows) {
+          await assertPriestAllocation(
+            client,
+            responsibility.ministry_id,
+            responsibility.user_id,
+            new Date(
+              new Date(event.start_time).getTime() +
+                Number(responsibility.relative_start_minutes || 0) * 60_000,
+            ),
+            new Date(event.end_time),
+          )
+        }
+      }
+    }
     await client.query(
       `
       UPDATE events
@@ -5039,6 +5223,8 @@ export const handleEvents = async (request: Request) => {
       {
         message: error?.message || "Unable to manage events",
         conflicts: Array.isArray(error?.conflicts) ? error.conflicts : undefined,
+        prioryAllocationRequired: Boolean(error?.prioryAllocationRequired),
+        requestedPriestId: error?.requestedPriestId || null,
       },
       status,
     )

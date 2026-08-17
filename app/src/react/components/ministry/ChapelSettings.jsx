@@ -8,6 +8,7 @@ import {
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 import useAccessibleDialog from "../../hooks/useAccessibleDialog"
+import PrioryScheduleSettings from "./PrioryScheduleSettings"
 
 const emptyObservance = {
   id: "",
@@ -224,6 +225,8 @@ const ChapelSettings = () => {
           {errorMessage || message}
         </p>
       )}
+
+      <PrioryScheduleSettings />
 
       <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">

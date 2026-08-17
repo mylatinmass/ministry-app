@@ -147,6 +147,10 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
   const [creatingRepeatingEvent, setCreatingRepeatingEvent] = React.useState(false)
   const [message, setMessage] = React.useState("")
   const [errorMessage, setErrorMessage] = React.useState("")
+  const [prioryOverview, setPrioryOverview] = React.useState(null)
+  const [requestedPriestId, setRequestedPriestId] = React.useState("")
+  const [priestRequestUrgency, setPriestRequestUrgency] = React.useState("normal")
+  const [isRequestingPriest, setIsRequestingPriest] = React.useState(false)
   const repeatingDatePreview = React.useMemo(
     () => previewRepeatingDates(form),
     [form],
@@ -154,6 +158,15 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
   const selectedTemplate = React.useMemo(
     () => templates.find((template) => template.id === form.templateId) || null,
     [templates, form.templateId],
+  )
+  const priestPublishNeedsDraft =
+    data.ministry?.slug === "priests" &&
+    prioryOverview?.settings?.enabled &&
+    !Object.values(assignmentSelections).some(Boolean)
+  const hasPendingPrioryRequest = Boolean(
+    form.eventId && prioryOverview?.requests?.some(
+      (request) => request.eventId === form.eventId && request.status === "pending",
+    ),
   )
 
   const loadData = React.useCallback(async () => {
@@ -275,6 +288,79 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
     form.startTime,
     form.templateId,
   ])
+
+  React.useEffect(() => {
+    if (
+      data.ministry?.slug !== "priests" ||
+      !form.startTime ||
+      !form.endTime
+    ) {
+      setPrioryOverview(null)
+      return undefined
+    }
+    const start = new Date(form.startTime)
+    const end = new Date(form.endTime)
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+      setPrioryOverview(null)
+      return undefined
+    }
+    const controller = new AbortController()
+    const timer = window.setTimeout(async () => {
+      try {
+        const url = new URL(
+          getFunctionEndpoint("scheduling/priory-allocations"),
+          window.location.origin,
+        )
+        url.searchParams.set("start", start.toISOString())
+        url.searchParams.set("end", end.toISOString())
+        const response = await fetch(url, {
+          headers: requestHeaders(),
+          signal: controller.signal,
+        })
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.message || "Unable to check Priory availability")
+        setPrioryOverview(result)
+      } catch (error) {
+        if (error.name !== "AbortError") setErrorMessage(error.message)
+      }
+    }, 250)
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
+  }, [data.ministry?.slug, form.endTime, form.startTime])
+
+  const requestPriestAvailability = async () => {
+    if (!form.eventId) {
+      setErrorMessage("Save this event as a draft before requesting Priory availability.")
+      return
+    }
+    setIsRequestingPriest(true)
+    setErrorMessage("")
+    setMessage("")
+    try {
+      const response = await fetch(
+        getFunctionEndpoint("scheduling/priory-allocations"),
+        {
+          method: "POST",
+          headers: requestHeaders(),
+          body: JSON.stringify({
+            action: "request_allocation",
+            eventId: form.eventId,
+            requestedPriestId,
+            urgency: priestRequestUrgency,
+          }),
+        },
+      )
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.message || "Unable to request Priest availability")
+      setMessage(result.message)
+    } catch (error) {
+      setErrorMessage(error.message)
+    } finally {
+      setIsRequestingPriest(false)
+    }
+  }
 
   const updateField = (field, value) => {
     setRecurrencePreview(null)
@@ -1049,6 +1135,85 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
             </label>
           </div>
 
+          {data.ministry?.slug === "priests" && prioryOverview?.settings?.enabled && (
+            <section className="mt-5 rounded-xl border border-orange-200 bg-orange-50 p-4">
+              <div className="flex items-start gap-3">
+                <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 shrink-0 text-orange-600" aria-hidden="true" />
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-semibold text-gray-900">Priory allocation</h3>
+                  <p className="mt-1 text-sm text-gray-600">
+                    Only priests assigned to {prioryOverview.settings.missionName || "this mission"} for the complete appointment time can be selected.
+                  </p>
+                  {prioryOverview.stale && (
+                    <p className="mt-2 text-sm font-semibold text-orange-800">
+                      The app is using the last verified cached Priory schedule.
+                    </p>
+                  )}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {prioryOverview.priests
+                      .filter((priest) => priest.availableToMission)
+                      .map((priest) => (
+                        <span key={priest.externalPriestId} className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-green-700">
+                          {priest.displayName} available
+                        </span>
+                      ))}
+                    {!prioryOverview.priests.some((priest) => priest.availableToMission) && (
+                      <span className="text-sm font-semibold text-orange-800">No mapped priest is allocated for this complete time.</span>
+                    )}
+                  </div>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto_auto]">
+                    <label className="text-sm font-semibold text-gray-700">
+                      Request a specific priest or anyone available
+                      <select
+                        value={requestedPriestId}
+                        onChange={(event) => setRequestedPriestId(event.target.value)}
+                        className="mt-1 min-h-11 w-full rounded-lg border border-orange-200 bg-white px-3 font-normal"
+                      >
+                        <option value="">ANY available priest</option>
+                        {prioryOverview.priests.map((priest) => (
+                          <option key={priest.externalPriestId} value={priest.externalPriestId}>
+                            {priest.displayName}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-sm font-semibold text-gray-700">
+                      Urgency
+                      <select
+                        value={priestRequestUrgency}
+                        onChange={(event) => setPriestRequestUrgency(event.target.value)}
+                        className="mt-1 min-h-11 w-full rounded-lg border border-orange-200 bg-white px-3 font-normal"
+                      >
+                        <option value="normal">Normal</option>
+                        <option value="urgent">Urgent</option>
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      disabled={isRequestingPriest || hasPendingPrioryRequest || !form.eventId || !prioryOverview.canManage}
+                      onClick={requestPriestAvailability}
+                      className="self-end rounded-lg bg-orange-500 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+                    >
+                      {isRequestingPriest ? "Requesting..." : hasPendingPrioryRequest ? "Request Pending" : "Request Priest Availability"}
+                    </button>
+                  </div>
+                  {!form.eventId && (
+                    <p className="mt-2 text-xs text-gray-600">Save the event as a draft first. Then edit it and send the Priory request.</p>
+                  )}
+                  {form.eventId && prioryOverview.requests
+                    .filter((request) => request.eventId === form.eventId)
+                    .slice(0, 3)
+                    .map((request) => (
+                      <div key={request.id} className="mt-3 rounded-lg border border-orange-200 bg-white px-3 py-2 text-xs text-gray-700">
+                        <span className="font-semibold">Priory request: {request.status}</span>
+                        <span className="ml-2">{request.requestedPriestId ? "Specific priest" : "ANY priest"} · {request.urgency}</span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            </section>
+          )}
+
           {form.startTime && (
             <div className="mt-5">
               <MinistryOrdoReference startTime={form.startTime} />
@@ -1350,7 +1515,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                 type="submit"
                 name="eventStatus"
                 value="published"
-                disabled={isSaving || !form.templateId}
+                disabled={isSaving || !form.templateId || priestPublishNeedsDraft}
                 className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <CheckIcon className="size-5" />
@@ -1358,6 +1523,11 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
               </button>
             )}
           </div>
+          {priestPublishNeedsDraft && !form.eventId && !form.sourceEventId && (
+            <p className="mt-2 text-sm font-semibold text-orange-700">
+              Select a priest covered by the Priory allocation, or save the event as a draft and request availability.
+            </p>
+          )}
         </form>
       )}
 

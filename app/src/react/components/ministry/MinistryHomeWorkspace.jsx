@@ -919,6 +919,7 @@ const MinistryHomeWorkspace = ({ data }) => {
           <MinistryConflictTicker
             profileId={currentUser?.id}
             onOpenAvailability={() => selectSection("availability")}
+            onOpenPrioryConflicts={() => selectSection("events")}
           />
 
           <div className="ministry-scroll-region min-h-0 flex-1 overflow-y-auto px-4 py-5 lg:px-6">

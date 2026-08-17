@@ -411,6 +411,9 @@ const MinistryWorkspace = ({ data }) => {
             onOpenAvailability={() =>
               openWorkspaceArea("availability", "my-availability")
             }
+            onOpenPrioryConflicts={() =>
+              openWorkspaceArea("events", "modify")
+            }
           />
 
           <div

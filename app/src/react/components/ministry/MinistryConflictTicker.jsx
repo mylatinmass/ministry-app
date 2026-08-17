@@ -14,8 +14,13 @@ const formatConflictDate = (value) => {
   }).format(date)
 }
 
-const MinistryConflictTicker = ({ profileId, onOpenAvailability }) => {
+const MinistryConflictTicker = ({
+  profileId,
+  onOpenAvailability,
+  onOpenPrioryConflicts,
+}) => {
   const [conflicts, setConflicts] = React.useState([])
+  const [prioryConflictCount, setPrioryConflictCount] = React.useState(0)
 
   const loadConflicts = React.useCallback(async () => {
     const token = window.sessionStorage.getItem(MINISTRY_SESSION_KEY)
@@ -34,6 +39,23 @@ const MinistryConflictTicker = ({ profileId, onOpenAvailability }) => {
             assignment.changeRequestStatus === "pending",
         ),
       )
+      const prioryUrl = new URL(
+        getFunctionEndpoint("scheduling/priory-allocations"),
+        window.location.origin,
+      )
+      const start = new Date()
+      prioryUrl.searchParams.set("start", start.toISOString())
+      prioryUrl.searchParams.set(
+        "end",
+        new Date(start.getTime() + 60 * 60_000).toISOString(),
+      )
+      const prioryResponse = await fetch(prioryUrl, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (prioryResponse.ok) {
+        const prioryResult = await prioryResponse.json()
+        setPrioryConflictCount(Number(prioryResult.conflictCount || 0))
+      }
     } catch {
       // Keep the current ticker visible through temporary network failures.
     }
@@ -56,25 +78,27 @@ const MinistryConflictTicker = ({ profileId, onOpenAvailability }) => {
     }
   }, [loadConflicts, profileId])
 
-  if (!conflicts.length) return null
+  if (!conflicts.length && !prioryConflictCount) return null
 
   const first = conflicts[0]
-  const summary =
-    conflicts.length === 1
+  const showingPriory = prioryConflictCount > 0
+  const summary = showingPriory
+    ? `${prioryConflictCount} priest assignment${prioryConflictCount === 1 ? " is" : "s are"} outside the current Priory allocation`
+    : conflicts.length === 1
       ? `${first.eventTitle}: ${first.responsibilityName} on ${formatConflictDate(first.startTime)}`
       : `${conflicts.length} assigned duties conflict with your updated availability`
 
   return (
     <button
       type="button"
-      onClick={onOpenAvailability}
+      onClick={showingPriory ? onOpenPrioryConflicts || onOpenAvailability : onOpenAvailability}
       className="ministry-conflict-ticker z-40 flex w-full shrink-0 items-center gap-3 bg-orange-500 px-4 py-2.5 text-left text-sm font-semibold text-white shadow-md"
       aria-label={`${summary}. Open Availability to address this now.`}
     >
       <ExclamationTriangleIcon className="ministry-conflict-alert-icon size-6 shrink-0 text-white" />
       <span className="min-w-0 flex-1">
         <span className="mr-2 font-extrabold uppercase tracking-wide">
-          Schedule conflict
+          {showingPriory ? "Priory conflict" : "Schedule conflict"}
         </span>
         <span>{summary}.</span>
       </span>

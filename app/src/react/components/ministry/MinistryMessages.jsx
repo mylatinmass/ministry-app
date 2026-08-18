@@ -26,6 +26,8 @@ const deliveryLabel = (message) => {
   return parts.join(" · ")
 }
 
+const messageTypeLabel = (value) => value === "alert" ? "Alert" : "Email"
+
 const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
   const [data, setData] = React.useState({
     unreadCount: 0,
@@ -43,7 +45,7 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
   const [form, setForm] = React.useState({
     audience: "ministry",
     ministryId: initialMinistryId,
-    channel: "email",
+    messageType: "email",
     subject: "",
     body: "",
   })
@@ -120,7 +122,7 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
       const result = await response.json()
       if (!response.ok) throw new Error(result.message || "Unable to send message")
       setNotice(
-        `Message queued for ${result.recipientCount} ${result.recipientCount === 1 ? "member" : "members"}.`,
+        `${messageTypeLabel(form.messageType)} queued for ${result.recipientCount} ${result.recipientCount === 1 ? "member" : "members"}.`,
       )
       setForm((current) => ({ ...current, subject: "", body: "" }))
       setShowComposer(false)
@@ -198,25 +200,25 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
               </select>
             </label>
             <label className="text-sm font-semibold text-gray-700">
-              Platform
+              Type
               <select
-                value={form.channel}
+                value={form.messageType}
                 onChange={(event) =>
                   setForm((current) => ({
                     ...current,
-                    channel: event.target.value,
-                    subject: event.target.value === "telegram" ? "" : current.subject,
+                    messageType: event.target.value,
+                    subject: event.target.value === "alert" ? "" : current.subject,
                   }))
                 }
                 className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 font-normal"
               >
                 <option value="email">Email</option>
-                <option value="telegram">Telegram</option>
+                <option value="alert">Alert</option>
               </select>
             </label>
           </div>
 
-          {form.channel === "email" && (
+          {form.messageType === "email" && (
             <label className="block text-sm font-semibold text-gray-700">
               Subject
               <input
@@ -235,17 +237,21 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
             <textarea
               value={form.body}
               onChange={(event) => setForm((current) => ({ ...current, body: event.target.value }))}
-              maxLength={form.channel === "telegram" ? 250 : undefined}
               required
-              rows={form.channel === "telegram" ? 4 : 8}
+              rows={form.messageType === "alert" ? 4 : 8}
+              aria-invalid={form.messageType === "alert" && form.body.length > 200}
+              aria-describedby={form.messageType === "alert" ? "alert-character-limit" : undefined}
               className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-3 font-normal"
             />
           </label>
-          {form.channel === "telegram" ? (
-            <div className="flex items-center justify-between gap-3 text-xs text-gray-500">
-              <span>Telegram messages do not use a subject and are limited to 250 characters.</span>
-              <span className={form.body.length >= 240 ? "font-semibold text-orange-600" : ""}>
-                {form.body.length}/250
+          {form.messageType === "alert" ? (
+            <div id="alert-character-limit" className="flex items-center justify-between gap-3 text-xs text-gray-500">
+              <span>Alerts use enabled Telegram, push, and SMS notifications—never email—and are limited to 200 characters.</span>
+              <span
+                aria-live="polite"
+                className={form.body.length > 200 ? "font-semibold text-red-600" : ""}
+              >
+                {form.body.length}/200
               </span>
             </div>
           ) : (
@@ -253,11 +259,15 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
           )}
           <button
             type="submit"
-            disabled={sending || (form.audience === "ministry" && !form.ministryId)}
+            disabled={
+              sending ||
+              (form.audience === "ministry" && !form.ministryId) ||
+              (form.messageType === "alert" && form.body.length > 200)
+            }
             className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
             <PaperAirplaneIcon className="size-5" />
-            {sending ? "Sending…" : "Send Message"}
+            {sending ? "Sending…" : form.messageType === "alert" ? "Send Alert" : "Send Email"}
           </button>
         </form>
       )}
@@ -282,7 +292,7 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
                 key={message.id}
                 type="button"
                 onClick={() => markRead(message)}
-                aria-label={`${message.read ? "Read" : "Unread"} ${message.channel} message: ${message.subject || "Telegram announcement"}, from ${message.senderName}, ${messageDate(message.createdAt)}`}
+                aria-label={`${message.read ? "Read" : "Unread"} ${message.channel}: ${message.subject || "Ministry alert"}, from ${message.senderName}, ${messageDate(message.createdAt)}`}
                 className={`w-full rounded-xl border px-4 py-4 text-left ${
                   message.read
                     ? "border-gray-100 bg-gray-50"
@@ -298,7 +308,7 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
                       <ChatBubbleLeftRightIcon className="size-5 text-[#896542]" />
                     )}
                     <p className="font-semibold text-gray-900">
-                      {message.subject || "Telegram announcement"}
+                      {message.subject || "Ministry alert"}
                     </p>
                   </div>
                   <p className="text-xs text-gray-400">{messageDate(message.createdAt)}</p>
@@ -307,7 +317,7 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
                   {message.body}
                 </p>
                 <p className="mt-3 text-xs text-gray-400">
-                  {message.senderName} · {message.ministryName || "All members"} · {message.channel}
+                  {message.senderName} · {message.ministryName || "All members"} · {messageTypeLabel(message.channel)}
                 </p>
               </button>
             ))}
@@ -329,7 +339,7 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
                 <article key={message.id} className="rounded-xl border border-gray-100 px-4 py-4">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <p className="font-semibold text-gray-900">
-                      {message.subject || "Telegram announcement"}
+                      {message.subject || "Ministry alert"}
                     </p>
                     <p className="text-xs text-gray-400">{messageDate(message.createdAt)}</p>
                   </div>
@@ -337,7 +347,7 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
                     {message.body}
                   </p>
                   <p className="mt-3 text-xs text-gray-400">
-                    {message.channel} · {message.ministryName || "All members"} · {deliveryLabel(message)}
+                    {messageTypeLabel(message.channel)} · {message.ministryName || "All members"} · {deliveryLabel(message)}
                   </p>
                 </article>
               ))}

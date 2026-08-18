@@ -288,6 +288,9 @@ const klaviyoProfiles = await read(
 const klaviyoProfileQueue = await read(
   "src/server/legacy/helper/klaviyo-profile-sync.js",
 )
+const astroKlaviyoProfileQueue = await read(
+  "src/server/notifications/klaviyo-profile-sync.ts",
+)
 const volunteerSignupProfileSync = await read(
   "src/server/scheduling/volunteers.ts",
 )
@@ -304,6 +307,7 @@ assert.match(klaviyoProfiles, /profile\.is_managed_child/)
 assert.match(klaviyoProfiles, /\$4::INT \* INTERVAL '1 minute'/)
 assert.doesNotMatch(klaviyoProfiles, /ministry_names|ministry_roles/)
 assert.match(klaviyoProfileQueue, /SELECT managed_profile\.guardian_user_id/)
+assert.match(astroKlaviyoProfileQueue, /export const queueKlaviyoProfileSync/)
 assert.match(klaviyoManagedProfilesMigration, /managed_profile\.child_user_id/)
 assert.match(familyProfiles, /queueKlaviyoProfileSync\(client, childId\)/)
 assert.match(klaviyo, /assignment_subject_external_id/)
@@ -314,6 +318,10 @@ assert.doesNotMatch(reminders, /queueTomorrowSchedules/)
 assert.match(reminders, /type:\s*"event_offset"/)
 assert.match(reminders, /'one_week',[\s\S]*'confirmation_midpoint'/)
 assert.match(volunteerSignupProfileSync, /queueKlaviyoProfileSync/)
+assert.doesNotMatch(
+  volunteerSignupProfileSync,
+  /legacy\/helper\/klaviyo-profile-sync/,
+)
 assert.match(invitationResponse, /queueKlaviyoProfileSync/)
 assert.match(pushNotificationsComponent, /Send test notification/)
 
@@ -335,6 +343,9 @@ assert.match(telegramComponent, /Connect Telegram/)
 const messageMigration = await read(
   "migrations/20260812_01_add_ministry_messages.sql",
 )
+const messageAlertMigration = await read(
+  "migrations/20260818_01_add_message_alert_delivery.sql",
+)
 const messageServer = await read("src/server/notifications/messages.ts")
 const messageComponent = await read(
   "src/react/components/ministry/MinistryMessages.jsx",
@@ -350,12 +361,21 @@ assert.match(messageMigration, /CREATE TABLE IF NOT EXISTS ministry_message_reci
 assert.match(messageMigration, /channel IN \('email', 'telegram'\)/)
 assert.match(messageMigration, /length\(body\) <= 250/)
 assert.match(messageMigration, /is_delivery_target BOOL NOT NULL DEFAULT true/)
+assert.match(messageAlertMigration, /CREATE TABLE IF NOT EXISTS ministry_message_deliveries/)
+assert.match(messageAlertMigration, /channel IN \('email', 'telegram', 'sms', 'push'\)/)
+assert.match(messageAlertMigration, /UNIQUE \(recipient_id, channel\)/)
 assert.match(messageServer, /Only a Super Admin can message all members/)
 assert.match(messageServer, /requireMinistryAccess\(client, context\.user, ministryId, true\)/)
 assert.match(messageServer, /processMinistryMessageDeliveries/)
-assert.doesNotMatch(messageServer, /sendAccountPush|sendSms|notification_sms_enabled/)
+assert.match(messageServer, /sendAccountPush/)
+assert.match(messageServer, /sendKlaviyoAlertDue/)
+assert.match(messageServer, /sendTelegramMessage/)
+assert.match(messageServer, /MINISTRY_OUTBOUND_DELIVERY_ENABLED/)
 assert.match(messageComponent, /NEW MESSAGE/)
-assert.match(messageComponent, /Telegram messages do not use a subject/)
+assert.match(messageComponent, /Alerts use enabled Telegram, push, and SMS notifications—never email/)
+assert.match(messageComponent, /\{form\.body\.length\}\/200/)
+assert.match(messageComponent, /form\.body\.length > 200/)
+assert.match(messageServer, /Alerts must be 200 characters or fewer/)
 assert.match(accountNavigation, /id: "messages"/)
 assert.match(homeWorkspace, /messageSummary\.unreadCount/)
 assert.match(

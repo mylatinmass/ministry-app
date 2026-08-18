@@ -34,8 +34,14 @@ const parseBody = (event) => {
 const usernameError = (username) => {
   if (username.length < 4) return "Username must be at least 4 characters"
   if (username.length > 40) return "Username must be 40 characters or fewer"
+  if (username.includes("@") || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username)) {
+    return "Emails cannot be used as usernames. Try a simpler username, such as john.smith"
+  }
+  if (/\s/.test(username)) {
+    return "Usernames cannot contain spaces. Try john.smith, john_smith, or john-smith"
+  }
   if (!/^[a-z0-9._-]+$/.test(username)) {
-    return "Use only letters, numbers, periods, underscores, or hyphens"
+    return "Use a simpler username with only letters, numbers, periods, underscores, or hyphens"
   }
   return ""
 }
@@ -140,12 +146,13 @@ const validateAccountFields = (body) => {
   const password = body.password?.toString() || ""
   const validationMessage = usernameError(username)
 
-  if (validationMessage) return { error: validationMessage }
-  if (!firstName || !lastName || !phone || !password) {
-    return { error: "First name, last name, phone, username, and password are required" }
-  }
+  if (validationMessage) return { error: validationMessage, field: "username" }
+  if (!firstName) return { error: "First name is required", field: "firstName" }
+  if (!lastName) return { error: "Last name is required", field: "lastName" }
+  if (!phone) return { error: "Phone is required", field: "phone" }
+  if (!password) return { error: "Password is required", field: "password" }
   if (password.length < 8) {
-    return { error: "Password must be at least 8 characters" }
+    return { error: "Password must be at least 8 characters", field: "password" }
   }
 
   return { username, firstName, lastName, phone, password }
@@ -165,7 +172,12 @@ const acceptInvitation = async (client, token, body, jwtSecret) => {
   let passwordHash = null
   if (initialInvitation.account_required) {
     accountFields = validateAccountFields(body)
-    if (accountFields.error) return jsonResponse(400, { message: accountFields.error })
+    if (accountFields.error) {
+      return jsonResponse(400, {
+        message: accountFields.error,
+        field: accountFields.field,
+      })
+    }
     passwordHash = await hashPassword(accountFields.password)
   }
 
@@ -237,7 +249,10 @@ const acceptInvitation = async (client, token, body, jwtSecret) => {
       const available = await isUsernameAvailable(client, accountFields.username, userId)
       if (!available) {
         await client.query("ROLLBACK")
-        return jsonResponse(409, { message: "Username is already in use" })
+        return jsonResponse(409, {
+          message: "Username is already in use",
+          field: "username",
+        })
       }
 
       if (userId) {
@@ -385,7 +400,10 @@ const acceptInvitation = async (client, token, body, jwtSecret) => {
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {})
     if (error.code === "23505") {
-      return jsonResponse(409, { message: "Username is already in use" })
+      return jsonResponse(409, {
+        message: "Username is already in use",
+        field: "username",
+      })
     }
     throw error
   }

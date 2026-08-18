@@ -21,6 +21,22 @@ const readApiResponse = async (response) => {
   return response.json()
 }
 
+const usernameError = (value) => {
+  const username = value.trim()
+  if (username.length < 4) return "Username must be at least 4 characters"
+  if (username.length > 40) return "Username must be 40 characters or fewer"
+  if (username.includes("@") || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username)) {
+    return "Emails cannot be used as usernames. Try a simpler username, such as john.smith"
+  }
+  if (/\s/.test(username)) {
+    return "Usernames cannot contain spaces. Try john.smith, john_smith, or john-smith"
+  }
+  if (!/^[a-z0-9._-]+$/i.test(username)) {
+    return "Use a simpler username with only letters, numbers, periods, underscores, or hyphens"
+  }
+  return ""
+}
+
 const MinistryInvitePage = ({ location }) => {
   const params = React.useMemo(
     () =>
@@ -48,6 +64,7 @@ const MinistryInvitePage = ({ location }) => {
     available: null,
     message: "",
   })
+  const [fieldErrors, setFieldErrors] = React.useState({})
 
   React.useEffect(() => {
     if (typeof window !== "undefined" && (window.location.hash || window.location.search)) {
@@ -93,6 +110,7 @@ const MinistryInvitePage = ({ location }) => {
   const updateField = (event) => {
     const { name, value } = event.target
     setForm((current) => ({ ...current, [name]: value }))
+    setFieldErrors((current) => ({ ...current, [name]: "" }))
     if (name === "username") {
       setUsernameState({ checking: false, available: null, message: "" })
     }
@@ -100,6 +118,15 @@ const MinistryInvitePage = ({ location }) => {
 
   const checkUsername = async () => {
     if (!form.username) return
+    const validationMessage = usernameError(form.username)
+    if (validationMessage) {
+      setUsernameState({
+        checking: false,
+        available: false,
+        message: validationMessage,
+      })
+      return
+    }
     setUsernameState({ checking: true, available: null, message: "Checking..." })
     try {
       const response = await fetch(
@@ -128,8 +155,20 @@ const MinistryInvitePage = ({ location }) => {
 
   const answerInvitation = async (event) => {
     event.preventDefault()
+    if (invitation?.accountRequired) {
+      const validationMessage = usernameError(form.username)
+      if (validationMessage) {
+        setUsernameState({
+          checking: false,
+          available: false,
+          message: validationMessage,
+        })
+        return
+      }
+    }
     setIsSubmitting(true)
     setMessage("")
+    setFieldErrors({})
     try {
       const response = await fetch(
         getFunctionEndpoint("ministry-invitation-response"),
@@ -140,7 +179,20 @@ const MinistryInvitePage = ({ location }) => {
         }
       )
       const result = await readApiResponse(response)
-      if (!response.ok) throw new Error(result.message || "Unable to answer invitation")
+      if (!response.ok) {
+        if (result.field) {
+          setFieldErrors({ [result.field]: result.message })
+          if (result.field === "username") {
+            setUsernameState({
+              checking: false,
+              available: false,
+              message: result.message,
+            })
+          }
+          return
+        }
+        throw new Error(result.message || "Unable to answer invitation")
+      }
       if (result.token) {
         window.sessionStorage.setItem(MINISTRY_SESSION_KEY, result.token)
       }
@@ -212,11 +264,11 @@ const MinistryInvitePage = ({ location }) => {
                   <h2 className="mt-6 century-font text-2xl text-gray-900">Create your account</h2>
                   <p className="mt-1 text-sm text-gray-500">Every field is required. Your username must be unique and at least 4 characters.</p>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                    <label className="text-sm font-semibold text-gray-700">First name<input name="firstName" value={form.firstName} onChange={updateField} required autoComplete="given-name" className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-3 font-normal" /></label>
-                    <label className="text-sm font-semibold text-gray-700">Last name<input name="lastName" value={form.lastName} onChange={updateField} required autoComplete="family-name" className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-3 font-normal" /></label>
-                    <label className="text-sm font-semibold text-gray-700">Phone<input name="phone" type="tel" value={form.phone} onChange={updateField} required autoComplete="tel" className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-3 font-normal" /></label>
-                    <label className="text-sm font-semibold text-gray-700">Username<input name="username" value={form.username} onChange={updateField} onBlur={checkUsername} minLength={4} required autoComplete="username" className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-3 font-normal" /><span className={`mt-1 block min-h-5 text-xs ${usernameState.available === true ? "text-green-700" : usernameState.available === false ? "text-red-600" : "text-gray-500"}`}>{usernameState.message}</span></label>
-                    <label className="text-sm font-semibold text-gray-700 sm:col-span-2">Password<input name="password" type="password" value={form.password} onChange={updateField} minLength={8} required autoComplete="new-password" className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-3 font-normal" /><span className="mt-1 block text-xs font-normal text-gray-500">At least 8 characters</span></label>
+                    <label className="text-sm font-semibold text-gray-700">First name<input name="firstName" value={form.firstName} onChange={updateField} required autoComplete="given-name" className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-3 font-normal" />{fieldErrors.firstName && <span className="mt-1 block text-xs font-normal text-red-600">{fieldErrors.firstName}</span>}</label>
+                    <label className="text-sm font-semibold text-gray-700">Last name<input name="lastName" value={form.lastName} onChange={updateField} required autoComplete="family-name" className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-3 font-normal" />{fieldErrors.lastName && <span className="mt-1 block text-xs font-normal text-red-600">{fieldErrors.lastName}</span>}</label>
+                    <label className="text-sm font-semibold text-gray-700">Phone<input name="phone" type="tel" value={form.phone} onChange={updateField} required autoComplete="tel" className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-3 font-normal" />{fieldErrors.phone && <span className="mt-1 block text-xs font-normal text-red-600">{fieldErrors.phone}</span>}</label>
+                    <label className="text-sm font-semibold text-gray-700">Username<input name="username" value={form.username} onChange={updateField} onBlur={checkUsername} minLength={4} maxLength={40} required autoComplete="username" aria-describedby="invite-username-help" className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-3 font-normal" /><span id="invite-username-help" className={`mt-1 block min-h-5 text-xs font-normal ${usernameState.available === true ? "text-green-700" : usernameState.available === false ? "text-red-600" : "text-gray-500"}`}>{usernameState.message || "4–40 characters; no spaces or email address"}</span></label>
+                    <label className="text-sm font-semibold text-gray-700 sm:col-span-2">Password<input name="password" type="password" value={form.password} onChange={updateField} minLength={8} required autoComplete="new-password" className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-3 font-normal" /><span className={`mt-1 block text-xs font-normal ${fieldErrors.password ? "text-red-600" : "text-gray-500"}`}>{fieldErrors.password || "At least 8 characters"}</span></label>
                   </div>
                   <button type="submit" disabled={isSubmitting || usernameState.available === false || usernameState.checking} className="mt-6 w-full rounded-xl bg-[#896542] px-6 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{isSubmitting ? "Creating account..." : "Create account and accept"}</button>
                   <button type="button" onClick={() => setIntent("decline")} className="mt-3 w-full py-2 text-sm font-semibold text-gray-500 hover:text-gray-800">Decline instead</button>

@@ -198,3 +198,9 @@ export const downloadEventSchedulePdf = (options) => {
   ].join("-")
   doc.save(`${filename}.pdf`)
 }
+
+export const openEventSchedulePdf = (options) => {
+  const doc = createEventSchedulePdf(options)
+  const pdfUrl = doc.output("bloburl")
+  window.open(pdfUrl, "_blank", "noopener,noreferrer")
+}

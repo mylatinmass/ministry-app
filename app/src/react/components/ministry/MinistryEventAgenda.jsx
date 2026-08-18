@@ -1,6 +1,9 @@
 import * as React from "react"
 import { MapPinIcon } from "@heroicons/react/24/outline"
 
+const useIsomorphicLayoutEffect =
+  typeof window === "undefined" ? React.useEffect : React.useLayoutEffect
+
 const toDateKey = (value) => {
   const date = value instanceof Date ? value : new Date(value)
   const month = `${date.getMonth() + 1}`.padStart(2, "0")
@@ -20,9 +23,18 @@ const MinistryEventAgenda = ({
   emptyTitle,
   emptyText,
   showDateHeadings = true,
+  showDateRail = false,
   onEventSelect,
   useAssignmentTime = false,
+  dateKeys: requestedDateKeys,
+  initialFocusDate,
+  focusRequestKey,
+  onPastStart,
+  onFutureEnd,
 }) => {
+  const scrollContainerRef = React.useRef(null)
+  const boundaryLockRef = React.useRef(false)
+  const touchStartRef = React.useRef(null)
   const groupedEvents = events.reduce((groups, event) => {
     const displayTime = useAssignmentTime && event.assignment_start_time
       ? event.assignment_start_time
@@ -32,21 +44,136 @@ const MinistryEventAgenda = ({
     groups[key].push(event)
     return groups
   }, {})
-  const dateKeys = Object.keys(groupedEvents).sort()
+  const eventDateKeys = Object.keys(groupedEvents).sort()
+  const availableDateKeys = requestedDateKeys?.length
+    ? [...new Set(requestedDateKeys)].sort()
+    : eventDateKeys
+  const dateKeys = showDateRail
+    ? availableDateKeys.filter((key) => groupedEvents[key]?.length)
+    : availableDateKeys
+  const dateKeySignature = dateKeys.join("|")
+  const focusKey = initialFocusDate ? toDateKey(initialFocusDate) : null
+  const targetFocusKey = focusKey
+    ? dateKeys.find((key) => key >= focusKey) || dateKeys.at(-1)
+    : null
+
+  useIsomorphicLayoutEffect(() => {
+    const scrollContainer = scrollContainerRef.current
+    if (!scrollContainer || !targetFocusKey) return
+
+    const target = scrollContainer.querySelector(
+      `[data-agenda-date="${targetFocusKey}"]`,
+    )
+    if (!target) return
+
+    const containerTop = scrollContainer.getBoundingClientRect().top
+    const targetTop = target.getBoundingClientRect().top
+    scrollContainer.scrollTop += targetTop - containerTop
+  }, [targetFocusKey, dateKeySignature, focusRequestKey])
+
+  React.useEffect(() => {
+    boundaryLockRef.current = false
+  }, [dateKeySignature])
+
+  const showPreviousDates = () => {
+    if (!onPastStart || boundaryLockRef.current) return
+    boundaryLockRef.current = true
+    onPastStart()
+  }
+
+  const showNextDates = () => {
+    if (!onFutureEnd || boundaryLockRef.current) return
+    boundaryLockRef.current = true
+    onFutureEnd()
+  }
+
+  const handleWheel = (event) => {
+    const target = event.currentTarget
+    const isAtStart = target.scrollTop <= 1
+    const isAtEnd =
+      target.scrollTop + target.clientHeight >= target.scrollHeight - 1
+
+    if (isAtStart && event.deltaY < 0 && onPastStart) {
+      event.preventDefault()
+      showPreviousDates()
+    } else if (isAtEnd && event.deltaY > 0 && onFutureEnd) {
+      event.preventDefault()
+      showNextDates()
+    }
+  }
+
+  const handleTouchStart = (event) => {
+    const target = event.currentTarget
+    const startY = event.touches[0]?.clientY
+    const isAtStart = target.scrollTop <= 1
+    const isAtEnd =
+      target.scrollTop + target.clientHeight >= target.scrollHeight - 1
+
+    touchStartRef.current = isAtStart
+      ? { boundary: "start", y: startY }
+      : isAtEnd
+        ? { boundary: "end", y: startY }
+        : null
+  }
+
+  const handleTouchMove = (event) => {
+    const touchStart = touchStartRef.current
+    const currentY = event.touches[0]?.clientY
+    if (!touchStart || currentY == null) return
+
+    const crossedStart =
+      touchStart.boundary === "start" && currentY - touchStart.y >= 48
+    const crossedEnd =
+      touchStart.boundary === "end" && touchStart.y - currentY >= 48
+    if (!crossedStart && !crossedEnd) return
+
+    touchStartRef.current = null
+    if (crossedStart) showPreviousDates()
+    if (crossedEnd) showNextDates()
+  }
 
   return (
     <section
-      aria-label={label} className="ministry-scroll-region min-h-0 flex-1 overflow-y-auto w-full"
+      ref={scrollContainerRef}
+      aria-label={label}
+      onWheel={handleWheel}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={() => {
+        touchStartRef.current = null
+      }}
+      className="ministry-scroll-region min-h-0 flex-1 overflow-y-auto w-full"
     >
       {dateKeys.length ? (
-        <div className="space-y-7">
+        <div className={showDateRail ? "space-y-4" : "space-y-2"}>
           {dateKeys.map((key) => {
             const date = new Date(`${key}T12:00:00`)
+            const dayEvents = groupedEvents[key] || []
 
             return (
-              <section key={key}>
-                {showDateHeadings && (
-                  <div className="mb-4 flex items-center gap-4">
+              <section
+                key={key}
+                data-agenda-date={key}
+                className={showDateRail ? "grid grid-cols-[4.25rem_minmax(0,1fr)] items-stretch gap-3 sm:grid-cols-[5rem_minmax(0,1fr)]" : ""}
+              >
+                {showDateRail && (
+                  <div className="flex min-h-20 flex-col items-center justify-center rounded-xl bg-gray-100 px-2 py-3 text-gray-700">
+                    <span className="text-xs font-semibold uppercase tracking-[0.14em]">
+                      {new Intl.DateTimeFormat("en-US", {
+                        month: "short",
+                      }).format(date)}
+                    </span>
+                    <span className="mt-1 text-2xl font-bold leading-none text-gray-950 sm:text-3xl">
+                      {date.getDate()}
+                    </span>
+                  </div>
+                )}
+                {showDateHeadings && !showDateRail && (
+                  <div
+                    className={`flex items-center gap-4 ${
+                      dayEvents.length ? "mb-4" : ""
+                    }`}
+                  >
                     <h5 className="shrink-0 text-xs font-semibold uppercase tracking-[0.14em] text-gray-700 sm:text-sm">
                       {new Intl.DateTimeFormat("en-US", {
                         weekday: "long",
@@ -57,63 +184,80 @@ const MinistryEventAgenda = ({
                     <span className="h-px flex-1 bg-gray-100" />
                   </div>
                 )}
-                <div className="space-y-2">
-                  {groupedEvents[key].map((event) => {
-                    const displayTime = useAssignmentTime && event.assignment_start_time
-                      ? event.assignment_start_time
-                      : event.start_time
-                    const isMassTemplate = /^(low|high) mass$/i.test(
-                      event.template_name || "",
-                    )
-                    const templateName = isMassTemplate
-                      ? event.template_name
-                      : ""
-                    const ordoName =
-                      event.ordo_celebration || event.ordo_mass_name || ""
-                    const isFirstFriday =
-                      Array.isArray(event.ordo_general_information) &&
-                      event.ordo_general_information.some((item) =>
-                        /first friday/i.test(item),
+                {dayEvents.length > 0 && (
+                  <div className="space-y-2">
+                    {dayEvents.map((event) => {
+                      const displayTime =
+                        useAssignmentTime && event.assignment_start_time
+                          ? event.assignment_start_time
+                          : event.start_time
+                      const isMassTemplate = /^(low|high) mass$/i.test(
+                        event.template_name || "",
                       )
-                    const ordoEventName = ordoName
-                      ? `${ordoName}${
-                          isFirstFriday && !/first friday/i.test(ordoName)
-                            ? " (First Friday)"
-                            : ""
-                        }`
-                      : ""
-                    const eventName = isMassTemplate
-                      ? event.title && event.title !== templateName
-                        ? event.title
-                        : ordoEventName || event.title
-                      : event.title
+                      const templateName = isMassTemplate
+                        ? event.template_name
+                        : ""
+                      const ordoName =
+                        event.ordo_celebration || event.ordo_mass_name || ""
+                      const isFirstFriday =
+                        Array.isArray(event.ordo_general_information) &&
+                        event.ordo_general_information.some((item) =>
+                          /first friday/i.test(item),
+                        )
+                      const ordoEventName = ordoName
+                        ? `${ordoName}${
+                            isFirstFriday && !/first friday/i.test(ordoName)
+                              ? " (First Friday)"
+                              : ""
+                          }`
+                        : ""
+                      const eventName = isMassTemplate
+                        ? event.title && event.title !== templateName
+                          ? event.title
+                          : ordoEventName || event.title
+                        : event.title
 
-                    return (
-                      <button
-                        key={event.id}
-                        type="button"
-                        onClick={() => onEventSelect?.(event)}
-                        aria-label={`${eventName || templateName || "Event"}, ${new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(displayTime))}${event.is_assigned ? ", includes your assignment" : ""}`}
-                        className={`relative w-full flex flex-col items-center gap-1 border border-l-8 px-4 py-2 transition hover:bg-gray-50 ${
-                          event.is_assigned
-                            ? "border-orange-400"
-                            : "border-gray-200"
-                        }`}
-                      >
-                        <div className="flex flex-row items-center gap-3 w-full leading-relaxed text-gray-400 text-sm">
-                          {formatTime(displayTime)}
-                          {templateName && (
-                            <h6 className="font-semibold uppercase">
-                              {templateName}
-                            </h6>
+                      return (
+                        <button
+                          key={event.id}
+                          type="button"
+                          onClick={() => onEventSelect?.(event)}
+                          aria-label={`${eventName || templateName || "Event"}, ${new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(displayTime))}${event.is_assigned ? ", includes your assignment" : ""}`}
+                          className={`relative flex w-full flex-col gap-1 px-4 py-3 transition hover:bg-gray-50 ${
+                            showDateRail
+                              ? `items-stretch rounded-xl border ${
+                                  event.is_assigned
+                                    ? "border-l-8 border-orange-500 bg-orange-50/30"
+                                    : "border-gray-100 bg-white"
+                                }`
+                              : `items-center border border-l-8 py-2 ${
+                                  event.is_assigned
+                                    ? "border-orange-400"
+                                    : "border-gray-200"
+                                }`
+                          }`}
+                        >
+                          <div className="flex w-full flex-row items-center gap-2 text-sm leading-relaxed text-gray-400">
+                            {showDateRail && (
+                              <span className="font-semibold uppercase text-gray-500">
+                                {new Intl.DateTimeFormat("en-US", {
+                                  weekday: "short",
+                                }).format(new Date(displayTime))}
+                              </span>
+                            )}
+                            <span>{formatTime(displayTime)}</span>
+                            {templateName && (
+                              <h6 className="ml-1 font-semibold uppercase">
+                                {templateName}
+                              </h6>
+                            )}
+                          </div>
+                          {eventName && eventName !== templateName && (
+                            <p className="w-full text-left text-xs font-semibold uppercase leading-snug sm:text-sm">
+                              {eventName}
+                            </p>
                           )}
-                        </div>
-                        {eventName && eventName !== templateName && (
-                          <p className="w-full text-left text-xs font-semibold uppercase leading-snug sm:text-sm">
-                            {eventName}
-                          </p>
-                        )}
-                        <div className="min-w-0">
+                          <div className="min-w-0">
 
 
                         {/* {event.visibleProfileAssignments?.length > 0 && (
@@ -135,11 +279,12 @@ const MinistryEventAgenda = ({
                             {event.location}
                           </p>
                         )} */}
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
               </section>
             )
           })}

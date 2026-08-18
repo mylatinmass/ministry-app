@@ -807,7 +807,7 @@ const MinistryHomeWorkspace = ({ data }) => {
         </aside>
 
         <main className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
-          <header className="ministry-responsive-header flex items-center border-b border-gray-100 bg-white px-4 py-2">
+          <header className="ministry-responsive-header flex items-center border-b border-gray-100 bg-white px-4 py-2 lg:hidden">
             <div className="min-w-0 flex-1">
               <button
                 type="button"
@@ -922,7 +922,13 @@ const MinistryHomeWorkspace = ({ data }) => {
             onOpenPrioryConflicts={() => selectSection("events")}
           />
 
-          <div className="ministry-scroll-region min-h-0 flex-1 overflow-y-auto px-4 py-5 lg:px-6">
+          <div
+            className={`min-h-0 flex-1 px-4 py-5 lg:px-6 ${
+              sectionId === "calendar"
+                ? "overflow-hidden"
+                : "ministry-scroll-region overflow-y-auto"
+            }`}
+          >
             {content}
           </div>
         </main>

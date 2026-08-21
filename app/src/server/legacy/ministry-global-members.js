@@ -101,6 +101,12 @@ const handler = async (event) => {
               user_account.background_check_verified_at
             FROM ministry_accounts user_account
             WHERE user_account.status = 'active'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM ministry_profile_suppressions suppression
+                WHERE suppression.user_id = user_account.id
+                  AND suppression.reactivated_at IS NULL
+              )
               AND (
                 $2::BOOL
                 OR EXISTS (
@@ -215,6 +221,12 @@ const handler = async (event) => {
                 JOIN ministry_accounts guardian
                   ON guardian.id = profile.guardian_user_id
                 WHERE child.status = 'pending'
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM ministry_profile_suppressions suppression
+                    WHERE suppression.user_id = child.id
+                      AND suppression.reactivated_at IS NULL
+                  )
                 ORDER BY child.created_at, child.id
               `
             )

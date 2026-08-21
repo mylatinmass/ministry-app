@@ -69,6 +69,63 @@ const cleanIconKey = (value) => {
   return /^[a-z0-9-]+$/.test(iconKey) ? iconKey : null
 }
 
+const hasParticipationHistory = async (client, userId) => {
+  const result = await client.query(
+    `
+      SELECT
+        EXISTS (SELECT 1 FROM ministry_members WHERE user_id = $1)
+          AS has_ministry_history,
+        EXISTS (SELECT 1 FROM responsibility_assignments WHERE user_id = $1)
+          AS has_assignment_history
+    `,
+    [userId]
+  )
+  return Boolean(
+    result.rows[0]?.has_ministry_history ||
+      result.rows[0]?.has_assignment_history
+  )
+}
+
+const permanentlyDeleteUnusedProfile = async (client, userId) => {
+  await client.query(
+    `DELETE FROM managed_profile_membership_requests WHERE child_user_id = $1`,
+    [userId]
+  )
+  await client.query(
+    `DELETE FROM managed_profile_link_invitations WHERE child_user_id = $1`,
+    [userId]
+  )
+  await client.query(
+    `DELETE FROM managed_profile_separations WHERE child_user_id = $1`,
+    [userId]
+  )
+  await client.query(
+    `DELETE FROM managed_profile_audit WHERE subject_user_id = $1`,
+    [userId]
+  )
+  await client.query(`DELETE FROM managed_profiles WHERE child_user_id = $1`, [
+    userId,
+  ])
+  await client.query(
+    `DELETE FROM ministry_profile_suppressions WHERE user_id = $1`,
+    [userId]
+  )
+  const result = await client.query(
+    `
+      DELETE FROM ministry_accounts
+      WHERE id = $1
+        AND global_role = 'regular'
+        AND NOT EXISTS (SELECT 1 FROM ministry_members WHERE user_id = $1)
+        AND NOT EXISTS (
+          SELECT 1 FROM responsibility_assignments WHERE user_id = $1
+        )
+      RETURNING id
+    `,
+    [userId]
+  )
+  return Boolean(result.rowCount)
+}
+
 const writeLevelAudit = async (
   client,
   {
@@ -745,6 +802,45 @@ const updateMembership = async (
 
     await client.query("BEGIN")
     try {
+      if (action === "decline_app_member") {
+        const pendingResult = await client.query(
+          `
+            SELECT id, first_name, last_name, status
+            FROM ministry_accounts
+            WHERE id = $1 AND status = 'pending'
+            FOR UPDATE
+          `,
+          [targetUserId]
+        )
+        if (!pendingResult.rowCount) {
+          await client.query("ROLLBACK")
+          return jsonResponse(404, { message: "Pending member not found" })
+        }
+        if (!(await hasParticipationHistory(client, targetUserId))) {
+          const deleted = await permanentlyDeleteUnusedProfile(
+            client,
+            targetUserId
+          )
+          if (!deleted) {
+            throw new Error("Unused pending profile could not be deleted")
+          }
+          await writeLevelAudit(client, {
+            actor,
+            user,
+            action: "app_membership.declined_and_deleted",
+            entityType: "user",
+            entityId: targetUserId,
+            ministryId: null,
+            beforeData: pendingResult.rows[0],
+            afterData: { deleted: true },
+          })
+          await client.query("COMMIT")
+          return jsonResponse(200, {
+            success: true,
+            message: "Pending profile declined and permanently removed",
+          })
+        }
+      }
       const nextStatus =
         action === "approve_app_member" ? "active" : "inactive"
       const accountResult = await client.query(
@@ -1019,11 +1115,33 @@ const updateMembership = async (
         `,
         [targetUserId]
       )
-      if (!membershipsResult.rowCount) {
-        await client.query("ROLLBACK")
-        return jsonResponse(404, { message: "Active Ministry member not found" })
+      if (!(await hasParticipationHistory(client, targetUserId))) {
+        const deleted = await permanentlyDeleteUnusedProfile(
+          client,
+          targetUserId
+        )
+        if (!deleted) {
+          throw new Error("Unused profile could not be deleted")
+        }
+        await writeLevelAudit(client, {
+          actor,
+          user,
+          action: "ministry_profile.deleted_unused",
+          entityType: "user",
+          entityId: targetUserId,
+          ministryId: null,
+          beforeData: { ...target, memberships: [] },
+          afterData: { deleted: true },
+        })
+        await client.query("COMMIT")
+        const name = [target.first_name, target.last_name]
+          .filter(Boolean)
+          .join(" ")
+        return jsonResponse(200, {
+          success: true,
+          message: `${name || target.email || "Unused profile"} had no ministry or assignment history and was permanently removed`,
+        })
       }
-
       const suppressionResult = await client.query(
         `
           INSERT INTO ministry_profile_suppressions (

@@ -138,7 +138,6 @@ export const requestAssignmentSubstitute = async (
         ON granted_level.id = membership.highest_level_id
       WHERE membership.ministry_id = $2
         AND membership.status = 'active'
-        AND membership.can_serve = true
         AND membership.serving_preference <> 'cannot_serve'
         AND member.status = 'active'
         AND membership.user_id <> $3
@@ -146,7 +145,12 @@ export const requestAssignmentSubstitute = async (
       ON CONFLICT (change_request_id, recipient_user_id) DO NOTHING
       RETURNING recipient_user_id
     `,
-    [requestId, assignment.ministry_id, context.user.id, minimumLevelRank],
+    [
+      requestId,
+      assignment.ministry_id,
+      context.user.id,
+      minimumLevelRank,
+    ],
   )
   await client.query(
     `
@@ -197,6 +201,7 @@ export const acceptAssignmentSubstitute = async (
       SELECT request.*, assignment.status AS assignment_status,
         assignment.user_id AS original_user_id,
         assignment.quantity, responsibility.name AS responsibility_name,
+        responsibility.required_ministry_level_id,
         responsibility.substitution_allowed,
         responsibility.relative_start_minutes,
         event.title AS event_title, event.start_time, event.end_time,
@@ -278,7 +283,6 @@ export const acceptAssignmentSubstitute = async (
       WHERE membership.ministry_id = $1
         AND membership.user_id = $2
         AND membership.status = 'active'
-        AND membership.can_serve = true
         AND membership.serving_preference <> 'cannot_serve'
         AND member.status = 'active'
         AND COALESCE(granted_level.rank_order, 0) >= $3

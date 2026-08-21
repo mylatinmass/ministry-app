@@ -36,6 +36,7 @@ const MinistryGlobalMembers = () => {
   const [errorMessage, setErrorMessage] = React.useState("")
   const [isLoading, setIsLoading] = React.useState(true)
   const [isSaving, setIsSaving] = React.useState(false)
+  const [pendingMinistryIds, setPendingMinistryIds] = React.useState({})
 
   const authHeaders = React.useCallback(
     (json = false) => ({
@@ -548,6 +549,51 @@ const MinistryGlobalMembers = () => {
             className="h-12 w-full rounded-xl border border-gray-200 pl-10 pr-3 text-sm outline-none focus:border-[#896542]"
           />
         </label>
+      </section>
+
+      <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+        <div className="mb-4">
+          <h2 className="century-font text-2xl text-gray-950">
+            Pending member approvals
+          </h2>
+          <p className="mt-1 text-sm text-gray-500">
+            New members awaiting acceptance into the Ministry app.
+          </p>
+        </div>
+        <div className="space-y-3">
+          {(data.pendingMembers || []).map((member) => {
+            const selectedIds = pendingMinistryIds[member.id] || []
+            return (
+              <article key={member.id} className="rounded-xl border border-amber-100 bg-amber-50/40 p-4">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="font-semibold text-gray-900">{member.firstName} {member.lastName}</p>
+                    <p className="mt-1 text-sm text-gray-600">Child of {member.guardianName}</p>
+                    <p className="text-xs text-gray-500">Parent {member.guardianName} asked to add this child.</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="button" disabled={isSaving} onClick={() => runMemberAction({ action: "approve_app_member", userId: member.id, ministryIds: selectedIds })} className="rounded-lg bg-[#896542] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Accept</button>
+                    <button type="button" disabled={isSaving} onClick={() => runMemberAction({ action: "decline_app_member", userId: member.id })} className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-600 disabled:opacity-50">Decline</button>
+                  </div>
+                </div>
+                <fieldset className="mt-4">
+                  <legend className="text-xs font-semibold uppercase tracking-wide text-gray-500">Assign ministries when accepted (optional)</legend>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {data.ministries.map((ministry) => (
+                      <label key={ministry.id} className="flex items-center gap-2 text-sm text-gray-700">
+                        <input type="checkbox" checked={selectedIds.includes(ministry.id)} onChange={() => setPendingMinistryIds((current) => ({ ...current, [member.id]: selectedIds.includes(ministry.id) ? selectedIds.filter((id) => id !== ministry.id) : [...selectedIds, ministry.id] }))} className="size-4 accent-[#896542]" />
+                        {ministry.name}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              </article>
+            )
+          })}
+          {!(data.pendingMembers || []).length && (
+            <p className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-gray-500">No members pending approval.</p>
+          )}
+        </div>
       </section>
 
       <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">

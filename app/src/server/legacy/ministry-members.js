@@ -717,6 +717,95 @@ const updateMembership = async (
     return jsonResponse(400, { message: "Membership action is incomplete" })
   }
 
+  if (["approve_app_member", "decline_app_member"].includes(action)) {
+    if (!isGlobalManager(user)) {
+      return jsonResponse(403, {
+        message: "Only a Super Admin can review pending app members",
+      })
+    }
+    if (!targetUserId) {
+      return jsonResponse(400, { message: "Pending member is required" })
+    }
+    const requestedMinistryIds = Array.from(
+      new Set(
+        (Array.isArray(body.ministryIds) ? body.ministryIds : [])
+          .map((id) => id?.toString())
+          .filter(Boolean)
+      )
+    )
+    if (
+      requestedMinistryIds.some(
+        (id) => !managedMinistries.some((ministry) => ministry.id === id)
+      )
+    ) {
+      return jsonResponse(403, {
+        message: "You cannot assign one or more selected ministries",
+      })
+    }
+
+    await client.query("BEGIN")
+    try {
+      const nextStatus =
+        action === "approve_app_member" ? "active" : "inactive"
+      const accountResult = await client.query(
+        `
+          UPDATE ministry_accounts
+          SET status = $2, updated_at = now()
+          WHERE id = $1 AND status = 'pending'
+          RETURNING id, first_name, last_name, status
+        `,
+        [targetUserId, nextStatus]
+      )
+      if (!accountResult.rowCount) {
+        await client.query("ROLLBACK")
+        return jsonResponse(404, { message: "Pending member not found" })
+      }
+
+      if (nextStatus === "active") {
+        for (const selectedMinistryId of requestedMinistryIds) {
+          await client.query(
+            `
+              INSERT INTO ministry_members (
+                ministry_id, user_id, level, status, can_serve, joined_at, updated_at
+              ) VALUES ($1, $2, 'member', 'active', true, now(), now())
+              ON CONFLICT (ministry_id, user_id)
+              DO UPDATE SET status = 'active', can_serve = true, updated_at = now()
+            `,
+            [selectedMinistryId, targetUserId]
+          )
+        }
+      }
+
+      await writeLevelAudit(client, {
+        actor,
+        user,
+        action:
+          nextStatus === "active"
+            ? "app_membership.approved"
+            : "app_membership.declined",
+        entityType: "user",
+        entityId: targetUserId,
+        ministryId: requestedMinistryIds[0] || null,
+        beforeData: { status: "pending" },
+        afterData: {
+          status: nextStatus,
+          ministryIds: requestedMinistryIds,
+        },
+      })
+      await client.query("COMMIT")
+      return jsonResponse(200, {
+        success: true,
+        message:
+          nextStatus === "active"
+            ? "Member accepted into the app"
+            : "Member declined",
+      })
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {})
+      throw error
+    }
+  }
+
   if (["resend_invitation", "cancel_invitation"].includes(action)) {
     return manageInvitation(
       client,

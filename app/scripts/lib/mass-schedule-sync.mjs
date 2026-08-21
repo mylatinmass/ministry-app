@@ -185,7 +185,12 @@ export const buildMassTemplateDefinitions = ({
       sortOrder: 2,
     },
   ]
-  const responsibility = (ministryId, name, sortOrder) => ({
+  const responsibility = (
+    ministryId,
+    name,
+    sortOrder,
+    requiredLevelName = "",
+  ) => ({
     ministryId,
     name,
     description: "",
@@ -193,6 +198,7 @@ export const buildMassTemplateDefinitions = ({
     quantityNeeded: 1,
     approvalRequired: false,
     isRequired: true,
+    requiredLevelName: requiredLevelName || name,
     requiredQualification: "",
     relativeStartMinutes: 0,
     instructions: "",
@@ -200,8 +206,8 @@ export const buildMassTemplateDefinitions = ({
   })
   const shared = [
     responsibility(sacristansMinistryId, "Sacristan", 0),
-    responsibility(altarServersMinistryId, "Acolyte 1", 10),
-    responsibility(altarServersMinistryId, "Acolyte 2", 20),
+    responsibility(altarServersMinistryId, "Acolyte 1", 10, "Acolyte 1"),
+    responsibility(altarServersMinistryId, "Acolyte 2", 20, "Acolyte 2"),
   ]
   return {
     low_mass: {
@@ -340,11 +346,19 @@ const insertTemplateStructure = async (client, templateId, definition) => {
         INSERT INTO template_responsibilities (
           template_id, template_ministry_id, name, description,
           responsibility_type, quantity_needed, approval_required,
-          is_required, required_qualification, relative_start_minutes,
+          is_required, required_ministry_level_id, required_qualification, relative_start_minutes,
           instructions, sort_order, status
         )
         VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'active'
+          $1, $2, $3, $4, $5, $6, $7, $8,
+          (
+            SELECT level.id
+            FROM ministry_levels level
+            WHERE level.ministry_id = $13
+              AND lower(level.name) = lower($14)
+            LIMIT 1
+          ),
+          $9, $10, $11, $12, 'active'
         )
       `,
       [
@@ -360,6 +374,8 @@ const insertTemplateStructure = async (client, templateId, definition) => {
         item.relativeStartMinutes || 0,
         item.instructions || null,
         item.sortOrder || 0,
+        item.ministryId,
+        item.requiredLevelName || "",
       ],
     )
   }

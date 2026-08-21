@@ -2,7 +2,6 @@ import * as React from "react"
 import {
   ArrowLeftIcon,
   CalendarDaysIcon,
-  CheckCircleIcon,
   ClockIcon,
   ExclamationTriangleIcon,
   MapPinIcon,
@@ -229,44 +228,6 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
 
   const start = new Date(displayedEvent.start_time)
   const end = new Date(displayedEvent.end_time)
-
-  const setScheduleStatus = async (ministryId, status) => {
-    setErrorMessage("")
-    try {
-      const response = await fetch(
-        getFunctionEndpoint("scheduling/events"),
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${window.sessionStorage.getItem(
-              MINISTRY_SESSION_KEY,
-            )}`,
-          },
-          body: JSON.stringify({
-            action: "set_schedule_status",
-            eventId: displayedEvent.id,
-            ministryId,
-            status,
-          }),
-        },
-      )
-      const result = await response.json()
-      if (!response.ok) {
-        throw new Error(result.message || "Unable to update schedule")
-      }
-      setDetails((current) => ({
-        ...current,
-        ministries: current.ministries.map((ministry) =>
-          ministry.ministryId === ministryId
-            ? { ...ministry, scheduleStatus: status }
-            : ministry,
-        ),
-      }))
-    } catch (error) {
-      setErrorMessage(error.message)
-    }
-  }
 
   const manageableMinistries = (details?.ministries || []).filter(
     (ministry) => ministry.canManage,
@@ -1143,7 +1104,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
             Participating ministries
           </p>
           <h2 className="mt-2 century-font text-2xl text-gray-950">
-            One event, coordinated schedules
+            Included in this event
           </h2>
           {isLoading ? (
             <p className="mt-4 text-sm text-gray-500">
@@ -1161,8 +1122,8 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                       <h3 className="font-semibold text-gray-900">
                         {ministry.ministryName}
                       </h3>
-                      <p className="mt-1 text-xs uppercase text-gray-500">
-                        {ministry.scheduleStatus.replaceAll("_", " ")}
+                      <p className="mt-1 text-xs text-gray-500">
+                        Responsibilities and assignments update with the event.
                       </p>
                     </div>
                     {ministry.isRequired && (
@@ -1171,32 +1132,6 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                       </span>
                     )}
                   </div>
-                  {ministry.canManage && (
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setScheduleStatus(ministry.ministryId, "ready")
-                        }
-                        className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 hover:border-[#C1A387]"
-                      >
-                        Mark ready
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setScheduleStatus(
-                            ministry.ministryId,
-                            "published",
-                          )
-                        }
-                        className="inline-flex items-center gap-1 rounded-lg bg-[#896542] px-3 py-2 text-xs font-semibold text-white hover:bg-[#6f4f34]"
-                      >
-                        <CheckCircleIcon className="size-4" />
-                        Publish schedule
-                      </button>
-                    </div>
-                  )}
                 </article>
               ))}
             </div>

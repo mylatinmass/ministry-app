@@ -113,7 +113,6 @@ const handler = async (event) => {
               FROM ministry_members mm
               WHERE mm.ministry_id = $1
                 AND mm.status = 'active'
-                AND mm.can_serve = true
             ) AS serving_members,
             (
               SELECT count(*)

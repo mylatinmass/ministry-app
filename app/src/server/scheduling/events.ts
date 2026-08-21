@@ -31,15 +31,6 @@ const EVENT_STATUSES = new Set([
   "completed",
   "archived",
 ])
-const SCHEDULE_STATUSES = new Set([
-  "generated",
-  "under_review",
-  "ready",
-  "published",
-  "incomplete",
-  "cancelled",
-  "completed",
-])
 const RESPONSIBILITY_TYPES = new Set([
   "position",
   "food",
@@ -716,7 +707,6 @@ const previewTemplateAssignments = async (
       JOIN ministry_members membership
         ON membership.ministry_id = block.ministry_id
        AND membership.status = 'active'
-       AND membership.can_serve = true
        AND membership.serving_preference <> 'cannot_serve'
       JOIN ministry_accounts member ON member.id = membership.user_id
       LEFT JOIN ministry_levels required_level
@@ -896,9 +886,14 @@ const fillAndReviewAutomaticSchedule = async (
         ), 0)::INT AS assigned_quantity
       FROM event_responsibilities responsibility
       JOIN events event ON event.id = responsibility.event_id
+      LEFT JOIN ministry_levels required_level
+        ON required_level.id = responsibility.required_ministry_level_id
       WHERE responsibility.event_id = $1
         AND responsibility.status <> 'cancelled'
-      ORDER BY responsibility.sort_order, responsibility.id
+      ORDER BY
+        required_level.rank_order DESC NULLS LAST,
+        responsibility.sort_order,
+        responsibility.id
     `,
     [eventId],
   )
@@ -973,7 +968,6 @@ const fillAndReviewAutomaticSchedule = async (
           ) history ON true
           WHERE membership.ministry_id = $1
             AND membership.status = 'active'
-            AND membership.can_serve = true
             AND membership.serving_preference <> 'cannot_serve'
             AND COALESCE(member.is_volunteer_profile, false) = false
             AND (
@@ -1024,6 +1018,10 @@ const fillAndReviewAutomaticSchedule = async (
                   $5::TIMESTAMPTZ + COALESCE($8::INT, 0) * INTERVAL '1 minute'
             )
           ORDER BY
+            CASE
+              WHEN required_level.rank_order IS NULL THEN 0
+              ELSE granted_level.rank_order - required_level.rank_order
+            END,
             CASE membership.serving_preference
               WHEN 'prefer' THEN 0
               WHEN 'sometimes' THEN 1
@@ -1032,10 +1030,6 @@ const fillAndReviewAutomaticSchedule = async (
             END,
             COALESCE(monthly.ministry_count, 0),
             COALESCE(monthly.overall_count, 0),
-            CASE
-              WHEN required_level.rank_order IS NULL THEN 0
-              ELSE granted_level.rank_order - required_level.rank_order
-            END,
             history.last_served_at NULLS FIRST,
             history.same_position_count,
             lower(member.last_name),
@@ -1891,7 +1885,6 @@ const loadEventDetails = async (
             ON membership.ministry_id =
               COALESCE(responsibility.ministry_id, $2)
            AND membership.status = 'active'
-           AND membership.can_serve = true
            AND membership.serving_preference <> 'cannot_serve'
           JOIN ministry_accounts member ON member.id = membership.user_id
           LEFT JOIN ministry_levels required_level
@@ -3071,7 +3064,7 @@ const previewTemplateReplacement = async (
 const markEventMinistryChanged = async (
   client: PoolClient,
   eventId: string,
-  ministryId: string,
+  _ministryId: string,
 ) => {
   await client.query(
     `
@@ -3081,20 +3074,6 @@ const markEventMinistryChanged = async (
       WHERE id = $1
     `,
     [eventId],
-  )
-  await client.query(
-    `
-      UPDATE event_ministries
-      SET schedule_status = CASE
-            WHEN schedule_status IN ('under_review', 'ready', 'published')
-              THEN 'incomplete'
-            ELSE schedule_status
-          END,
-          updated_at = now()
-      WHERE event_id = $1
-        AND ministry_id = $2
-    `,
-    [eventId, ministryId],
   )
 }
 
@@ -3175,7 +3154,6 @@ const assignMemberToResponsibility = async (
         AND membership.user_id = $2
         AND membership.status = 'active'
         AND COALESCE(member.is_volunteer_profile, false) = false
-        AND membership.can_serve = true
         AND membership.serving_preference <> 'cannot_serve'
         AND (
           required_level.id IS NULL
@@ -3701,7 +3679,6 @@ const matchingConflictCandidates = async (
         WHERE membership.ministry_id = $1
           AND membership.user_id = $2
           AND membership.status = 'active'
-          AND membership.can_serve = true
           AND membership.serving_preference <> 'cannot_serve'
           AND COALESCE(member.is_volunteer_profile, false) = false
           AND (
@@ -4239,9 +4216,7 @@ const updateEvent = async (
     return mutateEventResponsibility(client, context, event, body)
   }
 
-  if (body.action !== "set_schedule_status") {
-    await requireMinistryAccess(client, context.user, event.ministry_id, true)
-  }
+  await requireMinistryAccess(client, context.user, event.ministry_id, true)
 
   if (body.action === "replace_template") {
     const nextTemplateId = cleanText(body.templateId, 100)
@@ -4533,15 +4508,29 @@ const updateEvent = async (
       `,
       [eventId, status],
     )
+    await client.query(
+      `
+        UPDATE event_ministries
+        SET schedule_status = CASE
+              WHEN $2 = 'published' THEN 'published'
+              WHEN $2 = 'cancelled' THEN 'cancelled'
+              WHEN $2 = 'completed' THEN 'completed'
+              ELSE 'generated'
+            END,
+            published_by = CASE
+              WHEN $2 = 'published' THEN $3
+              ELSE published_by
+            END,
+            published_at = CASE
+              WHEN $2 = 'published' THEN now()
+              ELSE published_at
+            END,
+            updated_at = now()
+        WHERE event_id = $1
+      `,
+      [eventId, status, context.user.id],
+    )
     if (status === "cancelled") {
-      await client.query(
-        `
-          UPDATE event_ministries
-          SET schedule_status = 'cancelled', updated_at = now()
-          WHERE event_id = $1
-        `,
-        [eventId],
-      )
       await client.query(
         `
           UPDATE event_responsibilities
@@ -4568,51 +4557,6 @@ const updateEvent = async (
       ministryId: event.ministry_id,
       beforeData: { status: event.status },
       afterData: { status },
-    })
-    return
-  }
-
-  if (body.action === "set_schedule_status") {
-    const ministryId = cleanText(body.ministryId, 100)
-    const status = cleanText(body.status, 30)
-    if (!SCHEDULE_STATUSES.has(status)) {
-      throw Object.assign(new Error("Invalid ministry schedule status"), {
-        status: 400,
-      })
-    }
-    await requireMinistryAccess(client, context.user, ministryId, true)
-    const result = await client.query(
-      `
-        UPDATE event_ministries
-        SET schedule_status = $3,
-            reviewed_by = CASE
-              WHEN $3 IN ('ready', 'published', 'incomplete') THEN $4
-              ELSE reviewed_by
-            END,
-            reviewed_at = CASE
-              WHEN $3 IN ('ready', 'published', 'incomplete') THEN now()
-              ELSE reviewed_at
-            END,
-            published_by = CASE WHEN $3 = 'published' THEN $4 ELSE published_by END,
-            published_at = CASE WHEN $3 = 'published' THEN now() ELSE published_at END,
-            updated_at = now()
-        WHERE event_id = $1
-          AND ministry_id = $2
-        RETURNING ministry_id
-      `,
-      [eventId, ministryId, status, context.user.id],
-    )
-    if (!result.rowCount) {
-      throw Object.assign(new Error("Ministry is not part of this event"), {
-        status: 404,
-      })
-    }
-    await writeSchedulingAudit(client, context, {
-      action: `event_ministry.${status}`,
-      entityType: "event",
-      entityId: eventId,
-      ministryId,
-      afterData: { scheduleStatus: status },
     })
     return
   }

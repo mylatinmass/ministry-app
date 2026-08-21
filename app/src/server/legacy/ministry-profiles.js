@@ -23,6 +23,9 @@ const {
   sendMembershipRequestEmail,
 } = require("./helper/managed-profile-membership-email")
 const {
+  sendChildApplicationEmail,
+} = require("./helper/managed-profile-application-email")
+const {
   queueKlaviyoProfileSync,
 } = require("./helper/klaviyo-profile-sync")
 
@@ -210,7 +213,7 @@ const createChild = async (client, actor, body) => {
     const userResult = await client.query(
       `
         INSERT INTO ministry_accounts (first_name, last_name, global_role, status)
-        VALUES ($1, $2, 'regular', 'active')
+        VALUES ($1, $2, 'regular', 'pending')
         RETURNING id
       `,
       [firstName, lastName]
@@ -234,7 +237,39 @@ const createChild = async (client, actor, body) => {
     )
     await queueKlaviyoProfileSync(client, childId)
     await client.query("COMMIT")
-    return jsonResponse(201, { success: true, profileId: childId, message: "Child profile added" })
+    const reviewers = await client.query(
+      `
+        SELECT DISTINCT first_name, lower(btrim(email)) AS email
+        FROM ministry_accounts
+        WHERE status = 'active'
+          AND global_role IN ('owner', 'super_admin')
+          AND NULLIF(btrim(email), '') IS NOT NULL
+      `
+    )
+    const guardianName = [actor.first_name, actor.last_name]
+      .filter(Boolean)
+      .join(" ")
+    const childName = `${firstName} ${lastName}`
+    const deliveries = await Promise.allSettled(
+      reviewers.rows.map((reviewer) =>
+        sendChildApplicationEmail({
+          email: reviewer.email,
+          reviewerFirstName: reviewer.first_name,
+          childName,
+          guardianName,
+        })
+      )
+    )
+    deliveries.forEach((delivery) => {
+      if (delivery.status === "rejected") {
+        console.error("Unable to email child application reviewer:", delivery.reason)
+      }
+    })
+    return jsonResponse(201, {
+      success: true,
+      profileId: childId,
+      message: "Child submitted for app approval",
+    })
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {})
     throw error

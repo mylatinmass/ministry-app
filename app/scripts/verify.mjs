@@ -466,8 +466,11 @@ assert.match(globalMembersServer, /\["owner", "super_admin"\]\.includes/)
 assert.match(globalMembersServer, /context\.authMethod !== "password"/)
 assert.match(globalMembersServer, /WITH eligible_users AS/)
 assert.match(globalMembersServer, /LEFT JOIN ministry_members membership/)
-assert.match(globalMembersServer, /existing_membership\.status = 'active'/)
+assert.match(globalMembersServer, /visible_membership\.status = 'active'/)
+assert.match(globalMembersServer, /pendingMembers:/)
 assert.match(globalMembersUi, /Search name, ministry, or access/)
+assert.match(globalMembersUi, /Pending member approvals/)
+assert.match(globalMembersUi, /action: "approve_app_member"/)
 assert.doesNotMatch(globalMembersUi, /action: "add_existing_member"/)
 assert.match(globalMembersUi, /userId: selectedMember\.id/)
 assert.match(globalMembersUi, /action: "set_role"/)
@@ -569,13 +572,13 @@ assert.match(
 assert.match(schedulingTemplates, /template_versions/)
 assert.match(schedulingTemplates, /writeSchedulingAudit/)
 assert.match(schedulingEvents, /createEventFromStructure/)
-assert.match(schedulingEvents, /set_schedule_status/)
+assert.doesNotMatch(schedulingEvents, /body\.action === "set_schedule_status"/)
 assert.match(schedulingEvents, /event_responsibility\.created/)
 assert.match(schedulingEvents, /event_responsibility\.updated/)
 assert.match(schedulingEvents, /event_responsibility\.cancelled/)
 assert.match(schedulingEvents, /body\.action === "assign_member"/)
 assert.match(schedulingEvents, /FROM availability_blocks block/)
-assert.match(schedulingEvents, /membership\.can_serve = true/)
+assert.doesNotMatch(schedulingEvents, /membership\.can_serve = true/)
 assert.match(schedulingEvents, /responsibility_assignment\.assigned/)
 assert.match(schedulingEvents, /source:\s*"event_override"/)
 assert.match(
@@ -645,6 +648,14 @@ assert.match(schedulingTemplates, /requiredLevelId/)
 assert.match(
   schedulingEvents,
   /granted_level\.rank_order >= required_level\.rank_order/
+)
+assert.match(
+  schedulingEvents,
+  /required_level\.rank_order DESC NULLS LAST/
+)
+assert.match(
+  schedulingEvents,
+  /granted_level\.rank_order - required_level\.rank_order/
 )
 assert.match(
   eventDetails,

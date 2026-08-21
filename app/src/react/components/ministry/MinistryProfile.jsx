@@ -690,12 +690,12 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
               {familyData.profiles.filter((item) => !item.isGuardian).map((child) => (
                 <div key={child.id} className="rounded-xl border border-gray-100 p-4">
                   <p className="font-semibold text-gray-900">{child.firstName} {child.lastName}</p>
-                  <p className="mt-1 text-sm text-gray-500">{child.relationshipStatus === "separation_pending" ? "Independent account activation pending" : "Managed child profile"}</p>
+                  <p className="mt-1 text-sm text-gray-500">{child.status === "pending" ? "Pending app approval" : child.relationshipStatus === "separation_pending" ? "Independent account activation pending" : "Managed child profile"}</p>
                   <p className="mt-1 text-xs text-gray-400">
                     {child.guardianCount} linked {child.guardianCount === 1 ? "guardian" : "guardians"}
                     {child.hasPendingGuardianInvitation ? " · Link invitation pending" : ""}
                   </p>
-                  {child.relationshipStatus === "active" && familyData.ministries.length > 0 && (
+                  {child.status === "active" && child.relationshipStatus === "active" && familyData.ministries.length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       <select value={requestMinistryId} onChange={(event) => setRequestMinistryId(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
                         <option value="">Request ministry access</option>
@@ -704,7 +704,7 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
                       <button type="button" disabled={!requestMinistryId || isSaving} onClick={() => runFamilyAction({ action: "request_membership", profileId: child.id, ministryId: requestMinistryId })} className="rounded-lg border border-[#d8c7b8] px-3 py-2 text-sm font-semibold text-[#6f4f34]">Send request</button>
                     </div>
                   )}
-                  {child.relationshipStatus === "active" && (
+                  {child.status === "active" && child.relationshipStatus === "active" && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"

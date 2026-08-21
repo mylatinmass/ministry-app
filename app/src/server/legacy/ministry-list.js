@@ -76,7 +76,6 @@ const handler = async (event) => {
                 FROM ministry_members members
                 WHERE members.ministry_id = m.id
                   AND members.status = 'active'
-                  AND members.can_serve = true
               ) AS member_count,
               (
                 SELECT count(*)
@@ -115,7 +114,6 @@ const handler = async (event) => {
                 FROM ministry_members members
                 WHERE members.ministry_id = m.id
                   AND members.status = 'active'
-                  AND members.can_serve = true
               ) AS member_count,
               (
                 SELECT count(*)

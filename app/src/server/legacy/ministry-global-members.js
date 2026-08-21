@@ -86,7 +86,7 @@ const handler = async (event) => {
       canManageAll ||
       ministriesResult.rows.some((ministry) => ministry.slug === "security")
 
-    const [membershipsResult, levelsResult, invitationsResult] =
+    const [membershipsResult, levelsResult, invitationsResult, pendingMembersResult] =
       await Promise.all([
         client.query(
           `
@@ -100,10 +100,17 @@ const handler = async (event) => {
               user_account.background_check_verified,
               user_account.background_check_verified_at
             FROM ministry_accounts user_account
-            JOIN ministry_members existing_membership
-              ON existing_membership.user_id = user_account.id
-             AND existing_membership.status = 'active'
             WHERE user_account.status = 'active'
+              AND (
+                $2::BOOL
+                OR EXISTS (
+                  SELECT 1
+                  FROM ministry_members visible_membership
+                  WHERE visible_membership.user_id = user_account.id
+                    AND visible_membership.status = 'active'
+                    AND visible_membership.ministry_id = ANY($1::UUID[])
+                )
+              )
               AND (
                 $2::BOOL
                 OR NOT EXISTS (
@@ -192,6 +199,26 @@ const handler = async (event) => {
           `,
           [managedMinistryIds]
         ),
+        canManageAll
+          ? client.query(
+              `
+                SELECT
+                  child.id,
+                  child.first_name,
+                  child.last_name,
+                  child.created_at,
+                  concat_ws(' ', guardian.first_name, guardian.last_name) AS guardian_name
+                FROM ministry_accounts child
+                JOIN managed_profiles profile
+                  ON profile.child_user_id = child.id
+                 AND profile.status IN ('active', 'separation_pending')
+                JOIN ministry_accounts guardian
+                  ON guardian.id = profile.guardian_user_id
+                WHERE child.status = 'pending'
+                ORDER BY child.created_at, child.id
+              `
+            )
+          : Promise.resolve({ rows: [] }),
       ])
 
     const membersById = new Map()
@@ -249,6 +276,13 @@ const handler = async (event) => {
         ministryNames: invitation.ministry_names,
         requestedByName: invitation.requested_by_name,
         expired: new Date(invitation.expires_at).getTime() <= Date.now(),
+      })),
+      pendingMembers: pendingMembersResult.rows.map((member) => ({
+        id: member.id,
+        firstName: member.first_name,
+        lastName: member.last_name,
+        guardianName: member.guardian_name,
+        requestedAt: member.created_at,
       })),
     })
   } catch (error) {

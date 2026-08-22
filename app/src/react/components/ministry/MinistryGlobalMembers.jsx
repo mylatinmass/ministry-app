@@ -24,6 +24,59 @@ const globalRoleLabel = (role) => {
   return "Member"
 }
 
+const communicationChannelLabels = {
+  email: "Email",
+  telegram: "Telegram",
+  push: "Push notifications",
+  sms: "SMS",
+}
+
+const notificationCategoryLabels = {
+  reminders: "Event reminders",
+  scheduleChanges: "Schedule changes",
+  announcements: "Announcements",
+  volunteerOpportunities: "Volunteer opportunities",
+}
+
+const channelReadiness = (channel, settings) => {
+  if (!settings?.connected) {
+    return {
+      ready: false,
+      label: channel === "push" ? "No active device" : "Not connected",
+      detail:
+        channel === "email"
+          ? "No email is configured on this account."
+          : channel === "telegram"
+            ? "The member has not connected Telegram."
+            : channel === "push"
+              ? "The member has no active browser or device subscription."
+              : "No mobile number is configured on this account.",
+    }
+  }
+  if (channel === "sms" && !settings.consented) {
+    return {
+      ready: false,
+      label: "Consent required",
+      detail: "A mobile number exists, but transactional SMS consent is missing.",
+    }
+  }
+  if (!settings.enabled) {
+    return {
+      ready: false,
+      label: "Connected, turned off",
+      detail: "The member has this channel available but disabled notifications.",
+    }
+  }
+  return {
+    ready: true,
+    label: "Ready to receive",
+    detail:
+      channel === "push" && settings.activeDevices > 0
+        ? `${settings.activeDevices} active ${settings.activeDevices === 1 ? "device" : "devices"}.`
+        : "Connected and enabled by the member.",
+  }
+}
+
 const MinistryGlobalMembers = () => {
   const [data, setData] = React.useState(null)
   const [query, setQuery] = React.useState("")
@@ -236,6 +289,84 @@ const MinistryGlobalMembers = () => {
             </span>
           </div>
         </header>
+
+        {data.canManageAll && selectedMember.communications && (
+          <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+            <div>
+              <h3 className="font-semibold text-gray-900">
+                Communications and notifications
+              </h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Connection and delivery readiness only. Contact details and platform identities remain private.
+              </p>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {Object.entries(selectedMember.communications.channels).map(
+                ([channel, settings]) => {
+                  const readiness = channelReadiness(channel, settings)
+                  return (
+                    <article
+                      key={channel}
+                      className={`rounded-xl border p-4 ${
+                        readiness.ready
+                          ? "border-green-200 bg-green-50/60"
+                          : "border-amber-200 bg-amber-50/60"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <h4 className="font-semibold text-gray-900">
+                          {communicationChannelLabels[channel]}
+                        </h4>
+                        <span
+                          className={`size-2.5 rounded-full ${
+                            readiness.ready ? "bg-green-500" : "bg-amber-500"
+                          }`}
+                          aria-hidden="true"
+                        />
+                      </div>
+                      <p
+                        className={`mt-2 text-sm font-semibold ${
+                          readiness.ready ? "text-green-800" : "text-amber-800"
+                        }`}
+                      >
+                        {readiness.label}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-gray-600">
+                        {readiness.detail}
+                      </p>
+                    </article>
+                  )
+                }
+              )}
+            </div>
+
+            <div className="mt-5 border-t border-gray-100 pt-4">
+              <h4 className="text-sm font-semibold text-gray-900">
+                Notification categories
+              </h4>
+              <p className="mt-1 text-xs text-gray-500">
+                A ready channel will still skip a notification when its category is turned off.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {Object.entries(selectedMember.communications.categories).map(
+                  ([category, enabled]) => (
+                    <span
+                      key={category}
+                      className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                        enabled
+                          ? "bg-green-100 text-green-800"
+                          : "bg-gray-100 text-gray-600"
+                      }`}
+                    >
+                      {notificationCategoryLabels[category]} · {enabled ? "On" : "Off"}
+                    </span>
+                  )
+                )}
+              </div>
+            </div>
+          </section>
+        )}
 
         {data.canManageBackgroundChecks && (
           <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">

@@ -346,9 +346,6 @@ const messageMigration = await read(
 const messageAlertMigration = await read(
   "migrations/20260818_01_add_message_alert_delivery.sql",
 )
-const notificationDefaultsMigration = await read(
-  "migrations/20260822_01_enable_notification_categories_by_default.sql",
-)
 const messageServer = await read("src/server/notifications/messages.ts")
 const messageComponent = await read(
   "src/react/components/ministry/MinistryMessages.jsx",
@@ -383,11 +380,6 @@ assert.match(messageComponent, /\{form\.body\.length\}\/200/)
 assert.match(messageComponent, /form\.body\.length > 200/)
 assert.match(messageComponent, /channel deliveries/)
 assert.match(messageServer, /Alerts must be 200 characters or fewer/)
-assert.match(notificationDefaultsMigration, /notification_email_enabled = true/)
-assert.match(
-  notificationDefaultsMigration,
-  /notification_volunteer_opportunities_enabled = true/,
-)
 for (const accountCreationSource of [
   invitationResponse,
   familyProfiles,
@@ -514,6 +506,14 @@ assert.match(globalMembersServer, /membership\.level IN \('owner', 'admin'\)/)
 assert.match(globalMembersServer, /membership\.ministry_id = ANY\(\$1::UUID\[\]\)/)
 assert.match(globalMembersServer, /canManageAll/)
 assert.match(globalMembersUi, /data\.canManageAll/)
+assert.match(globalMembersServer, /communicationsResult/)
+assert.match(globalMembersServer, /telegram_connected/)
+assert.match(globalMembersServer, /active_push_devices/)
+assert.match(globalMembersServer, /sms_consented/)
+assert.match(globalMembersUi, /Communications and notifications/)
+assert.match(globalMembersUi, /Ready to receive/)
+assert.match(globalMembersUi, /Consent required/)
+assert.match(globalMembersUi, /Notification categories/)
 assert.match(globalMembersServer, /invitation\.status = 'pending'/)
 assert.match(globalMembersUi, /MinistryPendingInvitations/)
 assert.match(ministryMembersComponent, /MinistryPendingInvitations/)

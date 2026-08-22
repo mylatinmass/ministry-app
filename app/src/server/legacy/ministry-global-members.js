@@ -86,7 +86,13 @@ const handler = async (event) => {
       canManageAll ||
       ministriesResult.rows.some((ministry) => ministry.slug === "security")
 
-    const [membershipsResult, levelsResult, invitationsResult, pendingMembersResult] =
+    const [
+      membershipsResult,
+      levelsResult,
+      invitationsResult,
+      pendingMembersResult,
+      communicationsResult,
+    ] =
       await Promise.all([
         client.query(
           `
@@ -231,7 +237,81 @@ const handler = async (event) => {
               `
             )
           : Promise.resolve({ rows: [] }),
+        canManageAll
+          ? client.query(
+              `
+                SELECT
+                  account.id AS user_id,
+                  account.notification_email_enabled,
+                  account.notification_telegram_enabled,
+                  account.notification_sms_enabled,
+                  account.notification_push_enabled,
+                  account.notification_reminders_enabled,
+                  account.notification_schedule_changes_enabled,
+                  account.notification_announcements_enabled,
+                  account.notification_volunteer_opportunities_enabled,
+                  NULLIF(btrim(account.email), '') IS NOT NULL AS email_configured,
+                  COALESCE(
+                    NULLIF(btrim(account.phone), ''),
+                    NULLIF(btrim(account.telephone), '')
+                  ) IS NOT NULL AS sms_configured,
+                  account.sms_transactional_consent_at IS NOT NULL AS sms_consented,
+                  EXISTS (
+                    SELECT 1
+                    FROM telegram_connections telegram
+                    WHERE telegram.account_user_id = account.id
+                      AND telegram.status = 'active'
+                  ) AS telegram_connected,
+                  (
+                    SELECT count(*)::INT
+                    FROM push_subscriptions subscription
+                    WHERE subscription.account_user_id = account.id
+                      AND subscription.status = 'active'
+                  ) AS active_push_devices
+                FROM ministry_accounts account
+                WHERE account.status = 'active'
+              `
+            )
+          : Promise.resolve({ rows: [] }),
       ])
+
+    const communicationsByUserId = new Map(
+      communicationsResult.rows.map((row) => [
+        row.user_id,
+        {
+          channels: {
+            email: {
+              enabled: Boolean(row.notification_email_enabled),
+              connected: Boolean(row.email_configured),
+            },
+            telegram: {
+              enabled: Boolean(row.notification_telegram_enabled),
+              connected: Boolean(row.telegram_connected),
+            },
+            push: {
+              enabled: Boolean(row.notification_push_enabled),
+              connected: Number(row.active_push_devices) > 0,
+              activeDevices: Number(row.active_push_devices) || 0,
+            },
+            sms: {
+              enabled: Boolean(row.notification_sms_enabled),
+              connected: Boolean(row.sms_configured),
+              consented: Boolean(row.sms_consented),
+            },
+          },
+          categories: {
+            reminders: Boolean(row.notification_reminders_enabled),
+            scheduleChanges: Boolean(
+              row.notification_schedule_changes_enabled
+            ),
+            announcements: Boolean(row.notification_announcements_enabled),
+            volunteerOpportunities: Boolean(
+              row.notification_volunteer_opportunities_enabled
+            ),
+          },
+        },
+      ])
+    )
 
     const membersById = new Map()
     for (const row of membershipsResult.rows) {
@@ -244,6 +324,7 @@ const handler = async (event) => {
           status: row.user_status,
           backgroundCheckVerified: Boolean(row.background_check_verified),
           backgroundCheckVerifiedAt: row.background_check_verified_at || null,
+          communications: communicationsByUserId.get(row.user_id) || null,
           memberships: [],
         })
       }

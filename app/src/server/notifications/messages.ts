@@ -210,6 +210,7 @@ const createMessage = async (client: any, context: any, body: any) => {
     return json({ message: "Email subjects must be 250 characters or fewer" }, 400)
   }
 
+  let committed = false
   await client.query("BEGIN")
   try {
     const messageResult = await client.query(
@@ -307,13 +308,19 @@ const createMessage = async (client: any, context: any, body: any) => {
       },
     })
     await client.query("COMMIT")
+    committed = true
+    const processedDeliveryCount =
+      await processMinistryMessageDeliveries(messageId)
     return json({
-      message: "Message queued",
+      message: processedDeliveryCount > 0
+        ? "Message delivery started"
+        : "Message queued",
       id: messageId,
       recipientCount: recipients.rowCount || 0,
+      processedDeliveryCount,
     }, 201)
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {})
+    if (!committed) await client.query("ROLLBACK").catch(() => {})
     throw error
   }
 }
@@ -404,7 +411,7 @@ const ensureLegacyMessageDeliveries = async () => {
   )
 }
 
-const claimDueDeliveries = async () => {
+const claimDueDeliveries = async (messageId: string | null = null) => {
   const client = await getPool().connect()
   try {
     await client.query("BEGIN")
@@ -417,11 +424,23 @@ const claimDueDeliveries = async () => {
     `)
     const result = await client.query(`
       WITH due AS (
-        SELECT id
-        FROM ministry_message_deliveries
-        WHERE status IN ('pending', 'retry')
-          AND (next_attempt_at IS NULL OR next_attempt_at <= now())
-        ORDER BY created_at
+        SELECT delivery.id
+        FROM ministry_message_deliveries delivery
+        WHERE delivery.status IN ('pending', 'retry')
+          AND (
+            delivery.next_attempt_at IS NULL
+            OR delivery.next_attempt_at <= now()
+          )
+          AND (
+            $1::UUID IS NULL
+            OR EXISTS (
+              SELECT 1
+              FROM ministry_message_recipients recipient
+              WHERE recipient.id = delivery.recipient_id
+                AND recipient.message_id = $1
+            )
+          )
+        ORDER BY delivery.created_at
         LIMIT 100
         FOR UPDATE SKIP LOCKED
       )
@@ -431,7 +450,7 @@ const claimDueDeliveries = async () => {
       FROM due
       WHERE delivery.id = due.id
       RETURNING delivery.*
-    `)
+    `, [messageId])
     await client.query("COMMIT")
     return result.rows
   } catch (error) {
@@ -508,10 +527,12 @@ const finishAttempts = async (delivery: any, attempts: Array<Record<string, any>
   )
 }
 
-export const processMinistryMessageDeliveries = async () => {
+export const processMinistryMessageDeliveries = async (
+  messageId: string | null = null,
+) => {
   if (!deliveryAllowed()) return 0
   await ensureLegacyMessageDeliveries()
-  const claimed = await claimDueDeliveries()
+  const claimed = await claimDueDeliveries(messageId)
   if (!claimed.length) return 0
   const ids = claimed.map((delivery: any) => delivery.id)
   const result = await getPool().query(

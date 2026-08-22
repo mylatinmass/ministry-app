@@ -121,8 +121,11 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
       })
       const result = await response.json()
       if (!response.ok) throw new Error(result.message || "Unable to send message")
+      const deliveryAction = result.processedDeliveryCount > 0
+        ? "processed immediately for"
+        : "queued for"
       setNotice(
-        `${messageTypeLabel(form.messageType)} queued for ${result.recipientCount} ${result.recipientCount === 1 ? "member" : "members"}.`,
+        `${messageTypeLabel(form.messageType)} ${deliveryAction} ${result.recipientCount} ${result.recipientCount === 1 ? "member" : "members"}.`,
       )
       setForm((current) => ({ ...current, subject: "", body: "" }))
       setShowComposer(false)

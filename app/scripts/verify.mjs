@@ -346,6 +346,9 @@ const messageMigration = await read(
 const messageAlertMigration = await read(
   "migrations/20260818_01_add_message_alert_delivery.sql",
 )
+const notificationDefaultsMigration = await read(
+  "migrations/20260822_01_enable_notification_categories_by_default.sql",
+)
 const messageServer = await read("src/server/notifications/messages.ts")
 const messageComponent = await read(
   "src/react/components/ministry/MinistryMessages.jsx",
@@ -369,6 +372,7 @@ assert.match(messageServer, /requireMinistryAccess\(client, context\.user, minis
 assert.match(messageServer, /processMinistryMessageDeliveries/)
 assert.match(messageServer, /processMinistryMessageDeliveries\(messageId\)/)
 assert.match(messageServer, /recipient\.message_id = \$1/)
+assert.match(messageServer, /deliverySummary/)
 assert.match(messageServer, /sendAccountPush/)
 assert.match(messageServer, /sendKlaviyoAlertDue/)
 assert.match(messageServer, /sendTelegramMessage/)
@@ -377,7 +381,21 @@ assert.match(messageComponent, /NEW MESSAGE/)
 assert.match(messageComponent, /Alerts use enabled Telegram, push, and SMS notifications—never email/)
 assert.match(messageComponent, /\{form\.body\.length\}\/200/)
 assert.match(messageComponent, /form\.body\.length > 200/)
+assert.match(messageComponent, /channel deliveries/)
 assert.match(messageServer, /Alerts must be 200 characters or fewer/)
+assert.match(notificationDefaultsMigration, /notification_email_enabled = true/)
+assert.match(
+  notificationDefaultsMigration,
+  /notification_volunteer_opportunities_enabled = true/,
+)
+for (const accountCreationSource of [
+  invitationResponse,
+  familyProfiles,
+  volunteerSignupProfileSync,
+]) {
+  assert.match(accountCreationSource, /notification_email_enabled/)
+  assert.match(accountCreationSource, /notification_announcements_enabled/)
+}
 assert.match(accountNavigation, /id: "messages"/)
 assert.match(homeWorkspace, /messageSummary\.unreadCount/)
 assert.match(

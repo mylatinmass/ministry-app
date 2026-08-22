@@ -311,13 +311,34 @@ const createMessage = async (client: any, context: any, body: any) => {
     committed = true
     const processedDeliveryCount =
       await processMinistryMessageDeliveries(messageId)
+    const deliverySummaryResult = await client.query(
+      `
+        SELECT
+          count(*) FILTER (WHERE delivery.status = 'sent')::INT AS accepted_count,
+          count(*) FILTER (WHERE delivery.status = 'skipped')::INT AS skipped_count,
+          count(*) FILTER (WHERE delivery.status = 'failed')::INT AS failed_count,
+          count(*) FILTER (
+            WHERE delivery.status IN ('pending', 'processing', 'retry')
+          )::INT AS pending_count
+        FROM ministry_message_deliveries delivery
+        JOIN ministry_message_recipients recipient
+          ON recipient.id = delivery.recipient_id
+        WHERE recipient.message_id = $1
+      `,
+      [messageId],
+    )
+    const deliverySummary = deliverySummaryResult.rows[0] || {}
     return json({
-      message: processedDeliveryCount > 0
-        ? "Message delivery started"
-        : "Message queued",
+      message: processedDeliveryCount > 0 ? "Message processed" : "Message queued",
       id: messageId,
       recipientCount: recipients.rowCount || 0,
       processedDeliveryCount,
+      deliverySummary: {
+        acceptedCount: Number(deliverySummary.accepted_count || 0),
+        skippedCount: Number(deliverySummary.skipped_count || 0),
+        failedCount: Number(deliverySummary.failed_count || 0),
+        pendingCount: Number(deliverySummary.pending_count || 0),
+      },
     }, 201)
   } catch (error) {
     if (!committed) await client.query("ROLLBACK").catch(() => {})

@@ -289,9 +289,17 @@ const acceptInvitation = async (client, token, body, jwtSecret) => {
           `
             INSERT INTO ministry_accounts (
               first_name, last_name, email, phone, telephone,
-              username, password_hash, global_role, status
+              username, password_hash, global_role, status,
+              notification_email_enabled,
+              notification_reminders_enabled,
+              notification_schedule_changes_enabled,
+              notification_announcements_enabled,
+              notification_volunteer_opportunities_enabled
             )
-            VALUES ($1, $2, $3, $4, $4, $5, $6, 'regular', 'active')
+            VALUES (
+              $1, $2, $3, $4, $4, $5, $6, 'regular', 'active',
+              true, true, true, true, true
+            )
             RETURNING id, first_name, last_name, username, global_role, status
           `,
           [

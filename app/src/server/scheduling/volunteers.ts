@@ -304,9 +304,17 @@ const createVolunteerSignup = async (
     const created = await client.query(
       `INSERT INTO ministry_accounts (
          first_name, last_name, email, phone, telephone, username,
-         global_role, status, notification_lead_minutes, is_volunteer_profile
+         global_role, status, notification_lead_minutes, is_volunteer_profile,
+         notification_email_enabled,
+         notification_reminders_enabled,
+         notification_schedule_changes_enabled,
+         notification_announcements_enabled,
+         notification_volunteer_opportunities_enabled
        )
-       VALUES ($1, $2, $3, $4, $4, $5, 'regular', 'active', 60, true)
+       VALUES (
+         $1, $2, $3, $4, $4, $5, 'regular', 'active', 60, true,
+         true, true, true, true, true
+       )
        RETURNING id, first_name, last_name, username, password_hash, public_profile_id`,
       [firstName, lastName, email, phone, username],
     )

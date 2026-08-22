@@ -212,8 +212,18 @@ const createChild = async (client, actor, body) => {
   try {
     const userResult = await client.query(
       `
-        INSERT INTO ministry_accounts (first_name, last_name, global_role, status)
-        VALUES ($1, $2, 'regular', 'pending')
+        INSERT INTO ministry_accounts (
+          first_name, last_name, global_role, status,
+          notification_email_enabled,
+          notification_reminders_enabled,
+          notification_schedule_changes_enabled,
+          notification_announcements_enabled,
+          notification_volunteer_opportunities_enabled
+        )
+        VALUES (
+          $1, $2, 'regular', 'pending',
+          true, true, true, true, true
+        )
         RETURNING id
       `,
       [firstName, lastName]

@@ -280,11 +280,18 @@ const listMembers = async (client, user, ministryId) => {
           invitation.status,
           invitation.expires_at,
           invitation.created_at,
+          CASE
+            WHEN $2::BOOL OR invitation.requested_by = $3
+              THEN invitation.email
+            ELSE NULL
+          END AS recipient_email,
+          concat_ws(' ', requester.first_name, requester.last_name) AS requested_by_name,
           array_agg(m.name ORDER BY m.name) AS ministry_names
         FROM ministry_invitations invitation
         JOIN ministry_invitation_items item
           ON item.invitation_id = invitation.id
         JOIN ministries m ON m.id = item.ministry_id
+        JOIN ministry_accounts requester ON requester.id = invitation.requested_by
         WHERE EXISTS (
           SELECT 1
           FROM ministry_invitation_items selected_item
@@ -292,10 +299,10 @@ const listMembers = async (client, user, ministryId) => {
             AND selected_item.ministry_id = $1
         )
           AND invitation.status = 'pending'
-        GROUP BY invitation.id
+        GROUP BY invitation.id, requester.id
         ORDER BY invitation.created_at DESC
       `,
-      [ministryId]
+      [ministryId, isGlobalManager(user), user.id]
     ),
     client.query(
       `
@@ -374,6 +381,8 @@ const listMembers = async (client, user, ministryId) => {
     })),
     invitations: invitationsResult.rows.map((invitation) => ({
       id: invitation.id,
+      recipientEmail: invitation.recipient_email || null,
+      requestedByName: invitation.requested_by_name || null,
       status: invitation.status,
       expiresAt: invitation.expires_at,
       createdAt: invitation.created_at,
@@ -639,7 +648,7 @@ const manageInvitation = async (
   try {
     const invitationResult = await client.query(
       `
-        SELECT id, email, status, expires_at, created_at
+        SELECT id, email, requested_by, status, expires_at, created_at
         FROM ministry_invitations
         WHERE id = $1
         FOR UPDATE
@@ -655,6 +664,12 @@ const manageInvitation = async (
       await client.query("ROLLBACK")
       return jsonResponse(409, {
         message: "This invitation is no longer pending",
+      })
+    }
+    if (!isGlobalManager(user) && invitation.requested_by !== user.id) {
+      await client.query("ROLLBACK")
+      return jsonResponse(403, {
+        message: "Only a Super Admin or the invitation sender can manage it",
       })
     }
 

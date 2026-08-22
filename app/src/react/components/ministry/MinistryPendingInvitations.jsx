@@ -28,8 +28,13 @@ const MinistryPendingInvitations = ({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <p className="break-words font-semibold text-gray-900">
-                Private email invitation
+                {invitation.recipientEmail || "Pending email invitation"}
               </p>
+              {!invitation.recipientEmail && (
+                <p className="mt-1 text-xs text-gray-500">
+                  The recipient is visible only to a Super Admin or the person who sent this invitation.
+                </p>
+              )}
               <p className="mt-1 text-xs leading-relaxed text-gray-500">
                 {invitation.ministryNames.join(", ")}
               </p>
@@ -53,34 +58,40 @@ const MinistryPendingInvitations = ({
                   : `Awaiting response · expires ${formatDate(invitation.expiresAt)}`}
               </p>
             </div>
-            <div className="flex shrink-0 flex-wrap gap-2">
-              <button
-                type="button"
-                disabled={disabled}
-                onClick={() => onAction("resend_invitation", invitation)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-[#d8c7b8] bg-white px-3 py-2 text-xs font-semibold text-[#6f4f34] disabled:opacity-50"
-              >
-                <ArrowPathIcon className="size-4" />
-                Resend
-              </button>
-              <button
-                type="button"
-                disabled={disabled}
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      "Cancel this invitation? The existing invitation link will stop working.",
-                    )
-                  ) {
-                    onAction("cancel_invitation", invitation)
-                  }
-                }}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 disabled:opacity-50"
-              >
-                <XCircleIcon className="size-4" />
-                Cancel
-              </button>
-            </div>
+            {invitation.recipientEmail ? (
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => onAction("resend_invitation", invitation)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#d8c7b8] bg-white px-3 py-2 text-xs font-semibold text-[#6f4f34] disabled:opacity-50"
+                >
+                  <ArrowPathIcon className="size-4" />
+                  Resend
+                </button>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        "Cancel this invitation? The existing invitation link will stop working.",
+                      )
+                    ) {
+                      onAction("cancel_invitation", invitation)
+                    }
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 disabled:opacity-50"
+                >
+                  <XCircleIcon className="size-4" />
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <p className="max-w-48 text-xs leading-5 text-gray-500">
+                Ask the invitation sender or a Super Admin to resend or cancel it.
+              </p>
+            )}
           </div>
         </article>
       ))

@@ -185,6 +185,11 @@ const handler = async (event) => {
               invitation.status,
               invitation.expires_at,
               invitation.created_at,
+              CASE
+                WHEN $2::BOOL OR invitation.requested_by = $3
+                  THEN invitation.email
+                ELSE NULL
+              END AS recipient_email,
               array_agg(ministry.name ORDER BY ministry.name) AS ministry_names,
               concat_ws(' ', requester.first_name, requester.last_name) AS requested_by_name
             FROM ministry_invitations invitation
@@ -209,7 +214,7 @@ const handler = async (event) => {
               requester.last_name
             ORDER BY invitation.created_at DESC
           `,
-          [managedMinistryIds]
+          [managedMinistryIds, canManageAll, context.user.id]
         ),
         canManageAll
           ? client.query(
@@ -363,6 +368,7 @@ const handler = async (event) => {
       })),
       invitations: invitationsResult.rows.map((invitation) => ({
         id: invitation.id,
+        recipientEmail: invitation.recipient_email || null,
         status: invitation.status,
         expiresAt: invitation.expires_at,
         createdAt: invitation.created_at,

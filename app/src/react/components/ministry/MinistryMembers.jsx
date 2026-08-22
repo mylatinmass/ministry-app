@@ -880,7 +880,10 @@ const MinistryMembers = ({ data, activeAction }) => {
                 <p className="rounded-xl border border-dashed border-gray-200 p-5 text-center text-sm text-gray-500">No child membership requests.</p>
               )}
             </div>
-            <h3 className="mb-4 century-font text-xl text-gray-900">Pending invitations</h3>
+            <h3 className="mb-1 century-font text-xl text-gray-900">Pending invited members</h3>
+            <p className="mb-4 text-xs leading-relaxed text-gray-500">
+              Super Admins and the person who sent an invitation can see the pending recipient.
+            </p>
             <MinistryPendingInvitations
               invitations={memberData.invitations}
               onAction={manageInvitation}

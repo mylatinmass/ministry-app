@@ -730,10 +730,10 @@ const MinistryGlobalMembers = () => {
       <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
         <div className="mb-4">
           <h2 className="century-font text-2xl text-gray-950">
-            Pending invitations
+            Pending invited members
           </h2>
           <p className="mt-1 text-sm text-gray-500">
-            People who have been invited but have not accepted yet.
+            People who have been invited but have not accepted yet. Super Admins and invitation senders can see the recipient.
           </p>
         </div>
         <MinistryPendingInvitations

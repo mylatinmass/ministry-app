@@ -24,6 +24,8 @@ export const requestAssignmentSubstitute = async (
     `
       SELECT assignment.*, responsibility.name AS responsibility_name,
         responsibility.required_ministry_level_id,
+        responsibility.required_group_id,
+        responsibility.required_qualification,
         responsibility.substitution_allowed,
         responsibility.relative_start_minutes,
         COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id,
@@ -142,6 +144,7 @@ export const requestAssignmentSubstitute = async (
         AND member.status = 'active'
         AND membership.user_id <> $3
         AND COALESCE(granted_level.rank_order, 0) >= $4
+        AND ($5::UUID IS NULL OR EXISTS (SELECT 1 FROM ministry_group_members group_member WHERE group_member.ministry_member_id = membership.id AND group_member.group_id = $5))
       ON CONFLICT (change_request_id, recipient_user_id) DO NOTHING
       RETURNING recipient_user_id
     `,
@@ -150,6 +153,7 @@ export const requestAssignmentSubstitute = async (
       assignment.ministry_id,
       context.user.id,
       minimumLevelRank,
+      assignment.required_group_id,
     ],
   )
   await client.query(
@@ -202,6 +206,8 @@ export const acceptAssignmentSubstitute = async (
         assignment.user_id AS original_user_id,
         assignment.quantity, responsibility.name AS responsibility_name,
         responsibility.required_ministry_level_id,
+        responsibility.required_qualification,
+        responsibility.required_group_id,
         responsibility.substitution_allowed,
         responsibility.relative_start_minutes,
         event.title AS event_title, event.start_time, event.end_time,
@@ -286,6 +292,7 @@ export const acceptAssignmentSubstitute = async (
         AND membership.serving_preference <> 'cannot_serve'
         AND member.status = 'active'
         AND COALESCE(granted_level.rank_order, 0) >= $3
+        AND ($5::UUID IS NULL OR EXISTS (SELECT 1 FROM ministry_group_members group_member WHERE group_member.ministry_member_id = membership.id AND group_member.group_id = $5))
         AND NOT EXISTS (
           SELECT 1
           FROM availability_blocks block
@@ -302,6 +309,7 @@ export const acceptAssignmentSubstitute = async (
       context.user.id,
       Number(request.minimum_level_rank || 0),
       eventDate,
+      request.required_group_id,
     ],
   )
   if (!eligibility.rowCount) {

@@ -45,6 +45,7 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
   const [form, setForm] = React.useState({
     audience: "ministry",
     ministryId: initialMinistryId,
+    groupIds: [],
     messageType: "email",
     subject: "",
     body: "",
@@ -191,8 +192,8 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
                 onChange={(event) =>
                   setForm((current) =>
                     event.target.value === "all_members"
-                      ? { ...current, audience: "all_members", ministryId: "" }
-                      : { ...current, audience: "ministry", ministryId: event.target.value },
+                      ? { ...current, audience: "all_members", ministryId: "", groupIds: [] }
+                      : { ...current, audience: "ministry", ministryId: event.target.value, groupIds: [] },
                   )
                 }
                 required
@@ -224,6 +225,34 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
               </select>
             </label>
           </div>
+
+          {form.audience !== "all_members" && (() => {
+            const ministry = data.manageableMinistries.find((item) => item.id === form.ministryId)
+            if (!ministry?.groups?.length) return null
+            return (
+              <fieldset className="rounded-xl border border-gray-200 p-4">
+                <legend className="px-1 text-sm font-semibold text-gray-700">Audience</legend>
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input type="radio" checked={form.audience === "ministry"} onChange={() => setForm((current) => ({ ...current, audience: "ministry", groupIds: [] }))} />
+                  Entire ministry
+                </label>
+                <label className="mt-3 flex items-center gap-2 text-sm text-gray-700">
+                  <input type="radio" checked={form.audience === "groups"} onChange={() => setForm((current) => ({ ...current, audience: "groups" }))} />
+                  Selected groups
+                </label>
+                {form.audience === "groups" && (
+                  <div className="mt-3 flex flex-wrap gap-4 pl-6">
+                    {ministry.groups.map((group) => (
+                      <label key={group.id} className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                        <input type="checkbox" checked={form.groupIds.includes(group.id)} onChange={(event) => setForm((current) => ({ ...current, groupIds: event.target.checked ? [...current.groupIds, group.id] : current.groupIds.filter((id) => id !== group.id) }))} />
+                        {group.name}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </fieldset>
+            )
+          })()}
 
           {form.messageType === "email" && (
             <label className="block text-sm font-semibold text-gray-700">
@@ -269,6 +298,7 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
             disabled={
               sending ||
               (form.audience === "ministry" && !form.ministryId) ||
+              (form.audience === "groups" && (!form.ministryId || !form.groupIds.length)) ||
               (form.messageType === "alert" && form.body.length > 200)
             }
             className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"

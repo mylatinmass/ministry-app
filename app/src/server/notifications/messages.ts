@@ -27,8 +27,17 @@ const manageableMinistries = async (
   const global = isGlobalManager(user)
   const result = await client.query(
     `
-      SELECT ministry.id, ministry.name
+      SELECT ministry.id, ministry.name,
+        COALESCE(json_agg(json_build_object(
+          'id', ministry_group.id,
+          'name', ministry_group.name,
+          'automaticMembership', ministry_group.automatic_membership
+        ) ORDER BY ministry_group.sort_order, ministry_group.name)
+          FILTER (WHERE ministry_group.id IS NOT NULL), '[]'::JSON) AS groups
       FROM ministries ministry
+      LEFT JOIN ministry_groups ministry_group
+        ON ministry_group.ministry_id = ministry.id
+       AND ministry_group.status = 'active'
       WHERE ministry.status = 'active'
         AND (
           $2::BOOL
@@ -41,6 +50,7 @@ const manageableMinistries = async (
               AND membership.level IN ('owner', 'admin')
           )
         )
+      GROUP BY ministry.id, ministry.name
       ORDER BY ministry.name
     `,
     [user.id, global],
@@ -182,6 +192,9 @@ const createMessage = async (client: any, context: any, body: any) => {
   const channel = messageType === "alert" ? "telegram" : messageType
   const audience = String(body.audience || "").trim().toLowerCase()
   const ministryId = String(body.ministryId || "").trim() || null
+  const groupIds = Array.isArray(body.groupIds)
+    ? [...new Set(body.groupIds.map((value: unknown) => String(value).trim()).filter(Boolean))]
+    : []
   const subject = String(body.subject || "").trim()
   const messageBody = String(body.body || "").trim()
   const global = isGlobalManager(context.user)
@@ -189,15 +202,25 @@ const createMessage = async (client: any, context: any, body: any) => {
   if (!['email', 'alert'].includes(messageType)) {
     return json({ message: "Choose Email or Alert" }, 400)
   }
-  if (!['ministry', 'all_members'].includes(audience)) {
+  if (!['ministry', 'groups', 'all_members'].includes(audience)) {
     return json({ message: "Choose a message audience" }, 400)
   }
   if (audience === "all_members" && !global) {
     return json({ message: "Only a Super Admin can message all members" }, 403)
   }
-  if (audience === "ministry") {
+  if (audience === "ministry" || audience === "groups") {
     if (!ministryId) return json({ message: "Choose a ministry" }, 400)
     await requireMinistryAccess(client, context.user, ministryId, true)
+    if (audience === "groups") {
+      if (!groupIds.length) return json({ message: "Choose at least one group" }, 400)
+      const groupsResult = await client.query(
+        `SELECT id FROM ministry_groups WHERE ministry_id = $1 AND status = 'active' AND id = ANY($2::UUID[])`,
+        [ministryId, groupIds],
+      )
+      if (groupsResult.rowCount !== groupIds.length) {
+        return json({ message: "Choose active groups from this ministry" }, 400)
+      }
+    }
   }
   if (!messageBody) return json({ message: "Enter a message" }, 400)
   if (messageType === "alert" && messageBody.length > 200) {
@@ -223,7 +246,7 @@ const createMessage = async (client: any, context: any, body: any) => {
         RETURNING id
       `,
       [
-        audience === "ministry" ? ministryId : null,
+        audience === "all_members" ? null : ministryId,
         audience,
         channel,
         channel === "email" ? subject : null,
@@ -233,6 +256,12 @@ const createMessage = async (client: any, context: any, body: any) => {
       ],
     )
     const messageId = messageResult.rows[0].id
+    for (const groupId of groupIds) {
+      await client.query(
+        `INSERT INTO ministry_message_groups (message_id, group_id) VALUES ($1, $2)`,
+        [messageId, groupId],
+      )
+    }
     const recipients = await client.query(
       `
         SELECT eligible.profile_user_id, eligible.delivery_account_user_id,
@@ -255,10 +284,19 @@ const createMessage = async (client: any, context: any, body: any) => {
               WHERE membership.user_id = member.id
                 AND membership.status = 'active'
                 AND ($1 = 'all_members' OR membership.ministry_id = $2)
+                AND (
+                  $1 <> 'groups'
+                  OR EXISTS (
+                    SELECT 1
+                    FROM ministry_group_members group_member
+                    WHERE group_member.ministry_member_id = membership.id
+                      AND group_member.group_id = ANY($3::UUID[])
+                  )
+                )
             )
         ) eligible
       `,
-      [audience, audience === "ministry" ? ministryId : null],
+      [audience, audience === "all_members" ? null : ministryId, groupIds],
     )
     for (const recipient of recipients.rows) {
       const recipientResult = await client.query(
@@ -299,9 +337,10 @@ const createMessage = async (client: any, context: any, body: any) => {
       action: "message.sent",
       entityType: "ministry_message",
       entityId: messageId,
-      ministryId: audience === "ministry" ? ministryId : null,
+      ministryId: audience === "all_members" ? null : ministryId,
       afterData: {
         audience,
+        groupIds,
         messageType,
         subject: messageType === "email" ? subject : null,
         recipientCount: recipients.rowCount || 0,

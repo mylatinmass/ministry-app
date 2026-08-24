@@ -24,6 +24,7 @@ const emptyResponsibility = (ministryId = "") => ({
   substitutionAllowed: true,
   isRequired: true,
   requiredLevelId: "",
+  requiredGroupId: "",
   relativeStartMinutes: 0,
   instructions: "",
 })
@@ -39,6 +40,7 @@ const initialForm = (ministryId) => ({
       ministryId,
       isRequired: true,
       instructions: "",
+      groupIds: [],
     },
   ],
   responsibilities: [],
@@ -122,7 +124,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
             )
           : [
               ...current.ministries,
-              { ministryId, isRequired: true, instructions: "" },
+              { ministryId, isRequired: true, instructions: "", groupIds: [] },
             ],
         responsibilities: selected
           ? current.responsibilities.filter(
@@ -172,7 +174,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
         ? current.ministries
         : [
             ...current.ministries,
-            { ministryId, isRequired: true, instructions: "" },
+            { ministryId, isRequired: true, instructions: "", groupIds: [] },
           ],
       responsibilities: current.responsibilities.map((responsibility) =>
         responsibility.clientId === clientId
@@ -180,6 +182,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
               ...responsibility,
               ministryId,
               requiredLevelId: "",
+              requiredGroupId: "",
             }
           : responsibility,
       ),
@@ -206,6 +209,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
         ministryId: block.ministryId,
         isRequired: block.isRequired,
         instructions: block.instructions || "",
+        groupIds: block.groupIds || [],
       })),
       responsibilities: template.responsibilities.map(
         (responsibility) => ({
@@ -544,6 +548,20 @@ const MinistryTemplates = ({ data, activeAction }) => {
                       className="h-10 rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#896542]"
                     />
                   </div>
+                  {(library.ministries.find((ministry) => ministry.id === block.ministryId)?.groups || []).length > 0 && (
+                    <fieldset className="mt-4 rounded-xl border border-gray-100 p-3">
+                      <legend className="px-1 text-sm font-semibold text-gray-700">Event audience</legend>
+                      <p className="mb-2 text-xs text-gray-500">Leave every group unchecked to include the whole ministry.</p>
+                      <div className="flex flex-wrap gap-4">
+                        {library.ministries.find((ministry) => ministry.id === block.ministryId).groups.map((group) => (
+                          <label key={group.id} className="flex items-center gap-2 text-sm text-gray-700">
+                            <input type="checkbox" checked={(block.groupIds || []).includes(group.id)} onChange={(event) => updateBlock(block.ministryId, "groupIds", event.target.checked ? [...(block.groupIds || []), group.id] : (block.groupIds || []).filter((id) => id !== group.id))} />
+                            {group.name}
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                  )}
 
                   <div className="mt-5 space-y-4">
                     {responsibilities.length ? (
@@ -631,6 +649,25 @@ const MinistryTemplates = ({ data, activeAction }) => {
                                 </option>
                               ))}
                             </select>
+                            {(library.ministries.find((ministry) => ministry.id === responsibility.ministryId)?.groups || []).length > 0 && (
+                              <select
+                                value={responsibility.requiredGroupId || ""}
+                                onChange={(event) =>
+                                  updateResponsibility(
+                                    responsibility.clientId,
+                                    "requiredGroupId",
+                                    event.target.value,
+                                  )
+                                }
+                                aria-label={`Required group for ${
+                                  responsibility.name || "responsibility"
+                                }`}
+                                className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm"
+                              >
+                                <option value="">No group required</option>
+                                {library.ministries.find((ministry) => ministry.id === responsibility.ministryId).groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                              </select>
+                            )}
                             <select
                               value={responsibility.requiredLevelId || ""}
                               onChange={(event) =>

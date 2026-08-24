@@ -68,7 +68,11 @@ const MinistryMembers = ({ data, activeAction }) => {
   const [isSubmitting, setIsSubmitting] = React.useState(false)
   const [newLevelName, setNewLevelName] = React.useState("")
   const [newLevelIconKey, setNewLevelIconKey] = React.useState("")
+  const [newGroupName, setNewGroupName] = React.useState("")
+  const [newGroupDescription, setNewGroupDescription] = React.useState("")
+  const [newGroupAutomatic, setNewGroupAutomatic] = React.useState(false)
   const [levelDrafts, setLevelDrafts] = React.useState({})
+  const [groupDrafts, setGroupDrafts] = React.useState({})
   const [selectedMemberId, setSelectedMemberId] = React.useState("")
   const [preferenceDrafts, setPreferenceDrafts] = React.useState({})
   const [draggedLevelId, setDraggedLevelId] = React.useState("")
@@ -128,6 +132,7 @@ const MinistryMembers = ({ data, activeAction }) => {
           ]),
         ),
       )
+      setGroupDrafts(Object.fromEntries((result.groups || []).map((group) => [group.id, { name: group.name, description: group.description || "" }])))
       if (result.ministries?.some((ministry) => ministry.id === data.ministry.id)) {
         setSelectedMinistryIds((current) =>
           current.length ? current : [data.ministry.id]
@@ -263,6 +268,22 @@ const MinistryMembers = ({ data, activeAction }) => {
     }
   }
 
+  const createGroup = async (event) => {
+    event.preventDefault()
+    if (!newGroupName.trim()) return
+    const saved = await updateMembership({
+      action: "create_group",
+      name: newGroupName,
+      description: newGroupDescription,
+      automaticMembership: newGroupAutomatic,
+    })
+    if (saved) {
+      setNewGroupName("")
+      setNewGroupDescription("")
+      setNewGroupAutomatic(false)
+    }
+  }
+
   const updateLevelDraft = (levelId, field, value) =>
     setLevelDrafts((current) => ({
       ...current,
@@ -317,6 +338,11 @@ const MinistryMembers = ({ data, activeAction }) => {
           {memberData.currentMembership?.highestLevelName ||
             "Not assigned yet"}
         </p>
+        {memberData.currentMembership?.groupNames?.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {memberData.currentMembership.groupNames.map((name) => <span key={name} className="rounded-full bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700">{name}</span>)}
+          </div>
+        )}
         <div className="mt-6 rounded-xl border border-gray-100 bg-[#fcfaf8] p-5">
           <h4 className="century-font text-xl text-gray-900">
             Service Frequency
@@ -661,6 +687,45 @@ const MinistryMembers = ({ data, activeAction }) => {
               </form>
             </div>
           </section>
+          <section>
+            <div className="mb-4">
+              <h3 className="century-font text-2xl text-gray-900">Ministry groups</h3>
+              <p className="mt-1 text-sm text-gray-500">Groups describe where members belong and remain independent from ministry levels.</p>
+            </div>
+            <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+              {(memberData.groups || []).map((group) => (
+                <div key={group.id} className="flex flex-col gap-3 border-b border-gray-100 p-4 sm:flex-row sm:items-center">
+                  <div className="min-w-0 flex-1">
+                    <input value={groupDrafts[group.id]?.name ?? group.name} onChange={(event) => setGroupDrafts((current) => ({ ...current, [group.id]: { ...current[group.id], name: event.target.value } }))} aria-label={`Name for ${group.name}`} className="h-10 w-full rounded-lg border border-gray-200 px-3 text-sm font-semibold" />
+                    <input value={groupDrafts[group.id]?.description ?? group.description} onChange={(event) => setGroupDrafts((current) => ({ ...current, [group.id]: { ...current[group.id], description: event.target.value } }))} aria-label={`Description for ${group.name}`} placeholder="Description" className="mt-2 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm" />
+                  </div>
+                  <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={group.automaticMembership}
+                      onChange={(event) => updateMembership({ action: "update_group", groupId: group.id, name: group.name, description: group.description, automaticMembership: event.target.checked })}
+                      className="size-4 rounded border-gray-300"
+                    />
+                    Automatic membership
+                  </label>
+                  <div className="flex items-center gap-1">
+                    <button type="button" disabled={group.sortOrder <= 1} onClick={() => { const ordered = [...memberData.groups]; const index = ordered.findIndex((item) => item.id === group.id); [ordered[index - 1], ordered[index]] = [ordered[index], ordered[index - 1]]; updateMembership({ action: "reorder_groups", groupIds: ordered.map((item) => item.id) }) }} className="rounded-lg border border-gray-200 p-2 disabled:opacity-30" aria-label={`Move ${group.name} up`}><ChevronUpIcon className="size-4" /></button>
+                    <button type="button" disabled={group.sortOrder >= memberData.groups.length} onClick={() => { const ordered = [...memberData.groups]; const index = ordered.findIndex((item) => item.id === group.id); [ordered[index], ordered[index + 1]] = [ordered[index + 1], ordered[index]]; updateMembership({ action: "reorder_groups", groupIds: ordered.map((item) => item.id) }) }} className="rounded-lg border border-gray-200 p-2 disabled:opacity-30" aria-label={`Move ${group.name} down`}><ChevronDownIcon className="size-4" /></button>
+                    <button type="button" onClick={() => updateMembership({ action: "update_group", groupId: group.id, ...(groupDrafts[group.id] || group), automaticMembership: group.automaticMembership })} className="rounded-lg border border-[#d8c7b8] px-3 py-2 text-sm font-semibold text-[#6f4f34]">Update</button>
+                  </div>
+                  <button type="button" onClick={() => updateMembership({ action: "archive_group", groupId: group.id })} className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-700" aria-label={`Archive ${group.name}`}>
+                    <ArchiveBoxIcon className="size-4" />
+                  </button>
+                </div>
+              ))}
+              <form onSubmit={createGroup} className="grid gap-3 bg-[#fcfaf8] p-4 sm:grid-cols-2">
+                <input value={newGroupName} onChange={(event) => setNewGroupName(event.target.value)} required placeholder="New group name" className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm" />
+                <input value={newGroupDescription} onChange={(event) => setNewGroupDescription(event.target.value)} placeholder="Description (optional)" className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm" />
+                <label className="flex items-center gap-2 text-sm font-semibold text-gray-700"><input type="checkbox" checked={newGroupAutomatic} onChange={(event) => setNewGroupAutomatic(event.target.checked)} className="size-4 rounded border-gray-300" />Automatic membership</label>
+                <button type="submit" className="rounded-lg bg-[#896542] px-4 py-2 text-sm font-semibold text-white">Add group</button>
+              </form>
+            </div>
+          </section>
         </div>
       )}
 
@@ -697,6 +762,10 @@ const MinistryMembers = ({ data, activeAction }) => {
                     {member.highestLevelName && <LevelBadge iconKey={member.highestLevelIconKey} label={member.highestLevelRank || ""} className="bg-white" />}
                     {member.highestLevelName || "No level assigned"}
                   </span>
+                  {(member.groupIds || []).map((groupId) => {
+                    const group = memberData.groups?.find((item) => item.id === groupId)
+                    return group ? <span key={group.id} className="rounded-full bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">{group.name}</span> : null
+                  })}
                   <span className="text-sm font-semibold text-[#896542]">
                     Manage member
                   </span>
@@ -723,6 +792,28 @@ const MinistryMembers = ({ data, activeAction }) => {
                     <button type="button" onClick={() => setSelectedMemberId("")} className="text-sm font-semibold text-[#6f4f34] hover:underline">Close</button>
                   </div>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                    <fieldset className="rounded-xl border border-blue-100 bg-blue-50 p-4 sm:col-span-2">
+                      <legend className="px-1 text-sm font-semibold text-blue-900">Groups</legend>
+                      <div className="mt-2 flex flex-wrap gap-4">
+                        {(memberData.groups || []).map((group) => (
+                          <label key={group.id} className="flex items-center gap-2 text-sm font-semibold text-blue-900">
+                            <input
+                              type="checkbox"
+                              checked={(member.groupIds || []).includes(group.id)}
+                              disabled={group.automaticMembership}
+                              onChange={(event) => {
+                                const groupIds = event.target.checked
+                                  ? [...(member.groupIds || []), group.id]
+                                  : (member.groupIds || []).filter((id) => id !== group.id)
+                                updateMembership({ userId: member.userId, action: "set_member_groups", groupIds })
+                              }}
+                              className="size-4 rounded border-blue-300"
+                            />
+                            {group.name}{group.automaticMembership ? " (automatic)" : ""}
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
                     <label className="text-sm font-semibold text-gray-700">
                       Access role
                       {member.level === "owner" ? (

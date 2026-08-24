@@ -27,6 +27,7 @@ const blankResponsibility = {
   substitutionAllowed: true,
   isRequired: true,
   requiredLevelId: "",
+  requiredGroupId: "",
   relativeStartMinutes: 0,
   instructions: "",
 }
@@ -259,6 +260,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
       substitutionAllowed: responsibility.substitutionAllowed !== false,
       isRequired: responsibility.isRequired,
       requiredLevelId: responsibility.requiredLevelId || "",
+      requiredGroupId: responsibility.requiredGroupId || "",
       relativeStartMinutes: responsibility.relativeStartMinutes,
       instructions: responsibility.instructions,
     })
@@ -268,7 +270,9 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
     setResponsibilityForm((current) => ({
       ...current,
       [field]: value,
-      ...(field === "ministryId" ? { requiredLevelId: "" } : {}),
+      ...(field === "ministryId"
+        ? { requiredLevelId: "", requiredGroupId: "" }
+        : {}),
     }))
 
   const submitSubstitutionRequest = async (submitEvent) => {
@@ -1356,6 +1360,24 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                       ))}
                   </select>
                 </label>
+                {(details?.groups || []).filter((group) => group.ministryId === responsibilityForm.ministryId).length > 0 && (
+                  <label className="text-sm font-semibold text-gray-700">
+                    Required group
+                    <select
+                      value={responsibilityForm.requiredGroupId || ""}
+                      onChange={(event) =>
+                        updateResponsibilityField(
+                          "requiredGroupId",
+                          event.target.value,
+                        )
+                      }
+                      className="mt-2 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal"
+                    >
+                      <option value="">No group required</option>
+                      {(details?.groups || []).filter((group) => group.ministryId === responsibilityForm.ministryId).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                    </select>
+                  </label>
+                )}
                 <label className="text-sm font-semibold text-gray-700">
                   Time offset
                   <select
@@ -1498,12 +1520,14 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                               <p className="font-semibold text-gray-900">
                                 {responsibility.name}
                               </p>
-                              {!responsibility.templateResponsibilityId && (
+                              {!responsibility.summaryOnly &&
+                                !responsibility.templateResponsibilityId && (
                                 <span className="rounded-full bg-[#f4ede6] px-2 py-1 text-[10px] font-semibold uppercase text-[#896542]">
                                   Event only
                                 </span>
                               )}
                             </div>
+                            {!responsibility.summaryOnly && (
                             <p className="mt-1 text-sm text-gray-500">
                               {responsibility.responsibilityType.replaceAll(
                                 "_",
@@ -1521,6 +1545,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                                 responsibility.relativeStartMinutes,
                               )}`}
                             </p>
+                            )}
                             {responsibility.instructions && (
                               <p className="mt-1 text-sm text-gray-500">
                                 {responsibility.instructions}
@@ -1537,11 +1562,13 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                                       <span className="font-semibold">
                                         {assignment.firstName} {assignment.lastName}
                                       </span>
-                                      <span>
-                                        · {assignment.confirmationOverdueAt && ["pending", "assigned"].includes(assignment.status)
-                                          ? "confirmation overdue"
-                                          : assignment.status.replaceAll("_", " ")}
-                                      </span>
+                                      {assignment.status && (
+                                        <span>
+                                          · {assignment.confirmationOverdueAt && ["pending", "assigned"].includes(assignment.status)
+                                            ? "confirmation overdue"
+                                            : assignment.status.replaceAll("_", " ")}
+                                        </span>
+                                      )}
                                       {assignment.isVolunteer && canManage && (
                                         <span className="w-full text-[11px] text-gray-600">
                                           Volunteer

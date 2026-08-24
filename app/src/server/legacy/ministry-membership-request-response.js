@@ -140,6 +140,22 @@ const handler = async (event) => {
           `,
           [request.ministry_id, request.child_user_id]
         )
+        await client.query(
+          `
+            INSERT INTO ministry_group_members (group_id, ministry_member_id, added_by)
+            SELECT ministry_group.id, membership.id, $3
+            FROM ministry_members membership
+            JOIN ministry_groups ministry_group
+              ON ministry_group.ministry_id = membership.ministry_id
+             AND ministry_group.status = 'active'
+             AND ministry_group.automatic_membership = true
+            WHERE membership.ministry_id = $1
+              AND membership.user_id = $2
+              AND membership.status = 'active'
+            ON CONFLICT (group_id, ministry_member_id) DO NOTHING
+          `,
+          [request.ministry_id, request.child_user_id, identity.actor.id]
+        )
       }
       const status = body.action === "accept" ? "approved" : "declined"
       await client.query(

@@ -135,6 +135,9 @@ const monthCalendar = await read(
 const messagesComponent = await read(
   "src/react/components/ministry/MinistryMessages.jsx",
 )
+const ministryGroupsMigration = await read(
+  "migrations/20260823_01_add_ministry_groups.sql",
+)
 const cadenceMigration = await read(
   "migrations/20260814_01_simplify_member_notification_cadence.sql",
 )
@@ -233,6 +236,22 @@ assert.match(monthCalendar, /includes your assignment/)
 assert.match(monthCalendar, /aria-label="Next month"/)
 assert.match(messagesComponent, /role="alert"/)
 assert.match(messagesComponent, /aria-live="polite"/)
+assert.match(ministryGroupsMigration, /CREATE TABLE IF NOT EXISTS ministry_groups/)
+assert.match(ministryGroupsMigration, /automatic_membership BOOL NOT NULL DEFAULT false/)
+assert.match(ministryGroupsMigration, /INSERT INTO ministry_group_members/)
+assert.match(ministryGroupsMigration, /'Choir'.*true/s)
+assert.match(ministryGroupsMigration, /'Schola'.*false/s)
+assert.match(ministryGroupsMigration, /'ceremony', 'sacred-music', 'choir'/)
+assert.match(ministryList, /WHERE m\.status = 'active'/)
+assert.match(ministryList, /'ceremony', 'sacred-music', 'choir'/)
+assert.doesNotMatch(ministryMembers, /choir_only|set_choir_only/)
+assert.match(ministryMembers, /set_member_groups/)
+assert.match(ministryMembers, /automatic_membership/)
+assert.match(ministryMembersComponent, /Automatic membership/)
+assert.match(schedulingEvents, /ministry_group_members/)
+assert.match(schedulingEvents, /required_group_id/)
+assert.match(schedulingEvents, /isEventParticipant/)
+assert.match(schedulingEvents, /canSeeAssignmentDetails/)
 
 assert.match(packageJson, /"prebuild":\s*"[^"]*sync-mass-schedule\.mjs --build"/)
 assert.match(packageJson, /"sync:mass-schedule"/)

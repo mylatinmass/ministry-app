@@ -15,6 +15,7 @@ type MinistryBlockInput = {
   isRequired?: boolean
   instructions?: string
   sortOrder?: number
+  groupIds?: string[]
 }
 
 type ResponsibilityInput = {
@@ -28,7 +29,7 @@ type ResponsibilityInput = {
   substitutionAllowed?: boolean
   isRequired?: boolean
   requiredLevelId?: string
-  requiredQualification?: string
+  requiredGroupId?: string
   relativeStartMinutes?: number
   instructions?: string
   sortOrder?: number
@@ -65,6 +66,9 @@ const normalizeTemplateInput = (body: any): TemplateInput => {
       isRequired: block.isRequired !== false,
       instructions: cleanText(block.instructions),
       sortOrder: integer(block.sortOrder, index),
+      groupIds: Array.isArray(block.groupIds)
+        ? [...new Set(block.groupIds.map((id: unknown) => cleanText(id, 100)).filter(Boolean))]
+        : [],
     }))
     .filter((block: MinistryBlockInput) => block.ministryId)
 
@@ -97,10 +101,7 @@ const normalizeTemplateInput = (body: any): TemplateInput => {
       isRequired: responsibility.isRequired !== false,
       requiredLevelId:
         cleanText(responsibility.requiredLevelId, 100) || undefined,
-      requiredQualification: cleanText(
-        responsibility.requiredQualification,
-        250,
-      ),
+      requiredGroupId: cleanText(responsibility.requiredGroupId, 100) || undefined,
       relativeStartMinutes: integer(responsibility.relativeStartMinutes),
       instructions: cleanText(responsibility.instructions),
       sortOrder: integer(responsibility.sortOrder, index),
@@ -170,10 +171,15 @@ const validateTemplateInput = (input: TemplateInput) => {
 const loadAvailableMinistries = async (client: PoolClient) => {
   const result = await client.query(
     `
-      SELECT id, name, slug, description
-      FROM ministries
+      SELECT ministry.id, ministry.name, ministry.slug, ministry.description,
+        COALESCE(json_agg(json_build_object('id', ministry_group.id, 'name', ministry_group.name)
+          ORDER BY ministry_group.sort_order, ministry_group.name)
+          FILTER (WHERE ministry_group.id IS NOT NULL), '[]'::JSON) AS groups
+      FROM ministries ministry
+      LEFT JOIN ministry_groups ministry_group ON ministry_group.ministry_id = ministry.id AND ministry_group.status = 'active'
       WHERE status = 'active'
-      ORDER BY lower(name)
+      GROUP BY ministry.id, ministry.name, ministry.slug, ministry.description
+      ORDER BY lower(ministry.name)
     `,
   )
   return result.rows
@@ -229,7 +235,7 @@ const loadTemplates = async (client: PoolClient, ministryId: string) => {
   if (!templateResult.rowCount) return []
 
   const ids = templateResult.rows.map((template) => template.id)
-  const [blockResult, responsibilityResult] = await Promise.all([
+  const [blockResult, blockGroupResult, responsibilityResult] = await Promise.all([
     client.query(
       `
         SELECT
@@ -248,6 +254,10 @@ const loadTemplates = async (client: PoolClient, ministryId: string) => {
       [ids],
     ),
     client.query(
+      `SELECT scoped.template_ministry_id, scoped.group_id FROM template_ministry_groups scoped JOIN template_ministries block ON block.id = scoped.template_ministry_id WHERE block.template_id = ANY($1::UUID[])`,
+      [ids],
+    ),
+    client.query(
       `
         SELECT
           responsibility.id,
@@ -261,6 +271,8 @@ const loadTemplates = async (client: PoolClient, ministryId: string) => {
           responsibility.substitution_allowed,
           responsibility.is_required,
           responsibility.required_ministry_level_id,
+          responsibility.required_group_id,
+          required_group.name AS required_group_name,
           ministry_level.name AS required_level_name,
           ministry_level.rank_order AS required_level_rank,
           responsibility.required_qualification,
@@ -272,6 +284,7 @@ const loadTemplates = async (client: PoolClient, ministryId: string) => {
           ON block.id = responsibility.template_ministry_id
         LEFT JOIN ministry_levels ministry_level
           ON ministry_level.id = responsibility.required_ministry_level_id
+        LEFT JOIN ministry_groups required_group ON required_group.id = responsibility.required_group_id
         WHERE responsibility.template_id = ANY($1::UUID[])
           AND responsibility.status = 'active'
         ORDER BY responsibility.sort_order, lower(responsibility.name)
@@ -347,6 +360,7 @@ const loadTemplates = async (client: PoolClient, ministryId: string) => {
         isRequired: block.is_required,
         instructions: block.instructions || "",
         sortOrder: Number(block.sort_order),
+        groupIds: blockGroupResult.rows.filter((row) => row.template_ministry_id === block.id).map((row) => row.group_id),
       })),
       responsibilities: responsibilities.map((responsibility) => ({
         id: responsibility.id,
@@ -363,8 +377,8 @@ const loadTemplates = async (client: PoolClient, ministryId: string) => {
         requiredLevelName: responsibility.required_level_name || "",
         requiredLevelRank:
           Number(responsibility.required_level_rank) || null,
-        requiredQualification:
-          responsibility.required_qualification || "",
+        requiredGroupId: responsibility.required_group_id || "",
+        requiredGroupName: responsibility.required_group_name || "",
         relativeStartMinutes: Number(
           responsibility.relative_start_minutes,
         ),
@@ -435,6 +449,31 @@ const ensureResponsibilityLevelsExist = async (
   }
 }
 
+const ensureGroupsAreValid = async (
+  client: PoolClient,
+  responsibilities: ResponsibilityInput[],
+  blocks: MinistryBlockInput[] = [],
+) => {
+  const restricted = responsibilities.filter((responsibility) => responsibility.requiredGroupId)
+  if (!restricted.length) return
+  const result = await client.query(
+    `SELECT id, ministry_id FROM ministry_groups WHERE id = ANY($1::UUID[]) AND status = 'active'`,
+    [restricted.map((responsibility) => responsibility.requiredGroupId)],
+  )
+  const ministryByGroup = new Map(result.rows.map((group) => [group.id, group.ministry_id]))
+  if (restricted.some((responsibility) => ministryByGroup.get(responsibility.requiredGroupId) !== responsibility.ministryId)) {
+    throw Object.assign(new Error("Every required group must belong to its responsibility ministry"), { status: 400 })
+  }
+  const scoped = blocks.flatMap((block) => (block.groupIds || []).map((groupId) => ({ groupId, ministryId: block.ministryId })))
+  if (scoped.length) {
+    const scopedResult = await client.query(`SELECT id, ministry_id FROM ministry_groups WHERE id = ANY($1::UUID[]) AND status = 'active'`, [scoped.map((item) => item.groupId)])
+    const scopedMinistry = new Map(scopedResult.rows.map((group) => [group.id, group.ministry_id]))
+    if (scoped.some((item) => scopedMinistry.get(item.groupId) !== item.ministryId)) {
+      throw Object.assign(new Error("Every selected group must belong to its participating ministry"), { status: 400 })
+    }
+  }
+}
+
 const insertTemplateStructure = async (
   client: PoolClient,
   templateId: string,
@@ -463,6 +502,9 @@ const insertTemplateStructure = async (
       ],
     )
     blockIds.set(block.ministryId, result.rows[0].id)
+    for (const groupId of block.groupIds || []) {
+      await client.query(`INSERT INTO template_ministry_groups (template_ministry_id, group_id) VALUES ($1, $2)`, [result.rows[0].id, groupId])
+    }
   }
 
   for (const responsibility of input.responsibilities || []) {
@@ -479,7 +521,7 @@ const insertTemplateStructure = async (
           substitution_allowed,
           is_required,
           required_ministry_level_id,
-          required_qualification,
+          required_group_id,
           relative_start_minutes,
           instructions,
           sort_order
@@ -499,7 +541,7 @@ const insertTemplateStructure = async (
         responsibility.substitutionAllowed !== false,
         responsibility.isRequired !== false,
         responsibility.requiredLevelId || null,
-        responsibility.requiredQualification || null,
+        responsibility.requiredGroupId || null,
         responsibility.relativeStartMinutes || 0,
         responsibility.instructions || null,
         responsibility.sortOrder || 0,
@@ -528,6 +570,7 @@ const createTemplate = async (
     client,
     input.responsibilities || [],
   )
+  await ensureGroupsAreValid(client, input.responsibilities || [], input.ministries || [])
 
   const templateResult = await client.query(
     `
@@ -611,6 +654,7 @@ const updateTemplate = async (
     client,
     input.responsibilities || [],
   )
+  await ensureGroupsAreValid(client, input.responsibilities || [], input.ministries || [])
 
   const nextVersion = Number(existing.version) + 1
   await client.query(

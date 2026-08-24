@@ -88,6 +88,9 @@ const handler = async (event) => {
               ON access.ministry_id = m.id
               AND access.user_id = $2
               AND access.status = 'active'
+            WHERE m.status = 'active'
+              AND lower(COALESCE(m.slug, '')) NOT IN ('ceremony', 'sacred-music', 'choir')
+              AND lower(m.name) NOT IN ('ceremony', 'sacred music', 'choir')
             ORDER BY
               CASE m.status
                 WHEN 'active' THEN 0
@@ -126,6 +129,8 @@ const handler = async (event) => {
             WHERE access.user_id = $1
               AND access.status = 'active'
               AND m.status = 'active'
+              AND lower(COALESCE(m.slug, '')) NOT IN ('ceremony', 'sacred-music', 'choir')
+              AND lower(m.name) NOT IN ('ceremony', 'sacred music', 'choir')
             ORDER BY m.name
           `,
           [user.id]

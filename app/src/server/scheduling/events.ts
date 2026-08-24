@@ -132,8 +132,7 @@ const normalizeEventResponsibility = (body: any) => {
     substitutionAllowed: body.substitutionAllowed !== false,
     isRequired: body.isRequired !== false,
     requiredLevelId: cleanText(body.requiredLevelId, 100) || null,
-    requiredQualification:
-      cleanText(body.requiredQualification, 500) || null,
+    requiredGroupId: cleanText(body.requiredGroupId, 100) || null,
     relativeStartMinutes,
     instructions: cleanText(body.instructions) || null,
   }
@@ -560,7 +559,8 @@ const loadTemplateStructure = async (
           ministry_id,
           is_required,
           instructions,
-          sort_order
+          sort_order,
+          ARRAY(SELECT scoped.group_id FROM template_ministry_groups scoped WHERE scoped.template_ministry_id = template_ministries.id) AS group_ids
         FROM template_ministries
         WHERE template_id = $1
         ORDER BY sort_order
@@ -580,6 +580,7 @@ const loadTemplateStructure = async (
           responsibility.substitution_allowed,
           responsibility.is_required,
           responsibility.required_ministry_level_id,
+          responsibility.required_group_id,
           responsibility.required_qualification,
           responsibility.relative_start_minutes,
           responsibility.instructions,
@@ -708,6 +709,10 @@ const previewTemplateAssignments = async (
         ON membership.ministry_id = block.ministry_id
        AND membership.status = 'active'
        AND membership.serving_preference <> 'cannot_serve'
+       AND (
+         responsibility.required_group_id IS NULL
+         OR EXISTS (SELECT 1 FROM ministry_group_members group_member WHERE group_member.ministry_member_id = membership.id AND group_member.group_id = responsibility.required_group_id)
+       )
       JOIN ministry_accounts member ON member.id = membership.user_id
       LEFT JOIN ministry_levels required_level
         ON required_level.id = responsibility.required_ministry_level_id
@@ -876,6 +881,8 @@ const fillAndReviewAutomaticSchedule = async (
         responsibility.is_required,
         responsibility.is_public_assignment,
         responsibility.required_ministry_level_id,
+        responsibility.required_group_id,
+        responsibility.required_qualification,
         responsibility.relative_start_minutes,
         COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id,
         COALESCE((
@@ -969,6 +976,7 @@ const fillAndReviewAutomaticSchedule = async (
           WHERE membership.ministry_id = $1
             AND membership.status = 'active'
             AND membership.serving_preference <> 'cannot_serve'
+            AND ($10::UUID IS NULL OR EXISTS (SELECT 1 FROM ministry_group_members group_member WHERE group_member.ministry_member_id = membership.id AND group_member.group_id = $10))
             AND COALESCE(member.is_volunteer_profile, false) = false
             AND (
               required_level.id IS NULL
@@ -1046,6 +1054,7 @@ const fillAndReviewAutomaticSchedule = async (
           responsibility.required_ministry_level_id,
           Number(responsibility.relative_start_minutes || 0),
           responsibility.template_responsibility_id,
+          responsibility.required_group_id,
         ],
       )
       let candidate = candidateResult.rows[0]
@@ -1414,7 +1423,7 @@ const createEventFromStructure = async (
   await replaceEventRooms(client, eventId, roomIds, context.actor.id)
 
   for (const block of structure.blocks) {
-    await client.query(
+    const eventBlockResult = await client.query(
       `
         INSERT INTO event_ministries (
           event_id,
@@ -1425,6 +1434,7 @@ const createEventFromStructure = async (
           instructions
         )
         VALUES ($1, $2, $3, $4, 'generated', $5)
+        RETURNING id
       `,
       [
         eventId,
@@ -1434,6 +1444,9 @@ const createEventFromStructure = async (
         block.instructions || null,
       ],
     )
+    for (const groupId of block.group_ids || []) {
+      await client.query(`INSERT INTO event_ministry_groups (event_ministry_id, group_id) VALUES ($1, $2)`, [eventBlockResult.rows[0].id, groupId])
+    }
   }
 
   for (const responsibility of structure.responsibilities) {
@@ -1451,7 +1464,7 @@ const createEventFromStructure = async (
           substitution_allowed,
           is_required,
           required_ministry_level_id,
-          required_qualification,
+          required_group_id,
           relative_start_minutes,
           instructions,
           sort_order,
@@ -1473,7 +1486,7 @@ const createEventFromStructure = async (
         responsibility.substitution_allowed !== false,
         responsibility.is_required !== false,
         responsibility.required_ministry_level_id || null,
-        responsibility.required_qualification || null,
+        responsibility.required_group_id || null,
         Number(responsibility.relative_start_minutes) || 0,
         responsibility.instructions || null,
         Number(responsibility.sort_order) || 0,
@@ -1569,9 +1582,25 @@ const loadEventList = async (
           OR event.status IN ('published', 'cancelled', 'completed')
         )
         AND ($2 = false OR event.status <> 'archived')
+        AND (
+          $2 = true
+          OR EXISTS (SELECT 1 FROM responsibility_assignments assignment WHERE assignment.event_id = event.id AND assignment.user_id = $3 AND assignment.status NOT IN ('declined', 'cancelled'))
+          OR NOT EXISTS (
+            SELECT 1 FROM event_ministries scoped_block
+            JOIN event_ministry_groups scoped ON scoped.event_ministry_id = scoped_block.id
+            WHERE scoped_block.event_id = event.id AND scoped_block.ministry_id = $1
+          )
+          OR EXISTS (
+            SELECT 1 FROM event_ministries scoped_block
+            JOIN event_ministry_groups scoped ON scoped.event_ministry_id = scoped_block.id
+            JOIN ministry_members membership ON membership.ministry_id = scoped_block.ministry_id AND membership.user_id = $3 AND membership.status = 'active'
+            JOIN ministry_group_members group_member ON group_member.ministry_member_id = membership.id AND group_member.group_id = scoped.group_id
+            WHERE scoped_block.event_id = event.id AND scoped_block.ministry_id = $1
+          )
+        )
       ORDER BY event.start_time
     `,
-    [ministryId, access.canManage],
+    [ministryId, access.canManage, context.user.id],
   )
   const eventIds = result.rows.map((event) => event.id)
   const roomResult = eventIds.length
@@ -1662,25 +1691,58 @@ const loadEventDetails = async (
         event_ministry.schedule_status,
         event_ministry.instructions,
         event_ministry.reviewed_at,
-        event_ministry.published_at
+        event_ministry.published_at,
+        ARRAY(SELECT scoped.group_id FROM event_ministry_groups scoped WHERE scoped.event_ministry_id = event_ministry.id) AS group_ids,
+        EXISTS (
+          SELECT 1 FROM ministry_members membership
+          JOIN ministry_group_members group_member ON group_member.ministry_member_id = membership.id
+          JOIN event_ministry_groups scoped ON scoped.group_id = group_member.group_id
+          WHERE membership.user_id = $2 AND membership.status = 'active'
+            AND membership.ministry_id = event_ministry.ministry_id
+            AND scoped.event_ministry_id = event_ministry.id
+        ) AS belongs_to_scoped_group
       FROM event_ministries event_ministry
       JOIN ministries ministry ON ministry.id = event_ministry.ministry_id
       WHERE event_ministry.event_id = $1
       ORDER BY lower(ministry.name)
     `,
-    [eventId],
+    [eventId, context.user.id],
   )
-  const accessChecks = await Promise.all(
+  const rawAccessChecks = await Promise.all(
     participantResult.rows.map((participant) =>
       getMinistryAccess(client, context.user, participant.ministry_id),
     ),
   )
+  const accessChecks = rawAccessChecks.map((access, index) => {
+    const participant = participantResult.rows[index]
+    const restricted = Array.isArray(participant.group_ids) && participant.group_ids.length > 0
+    return restricted && !participant.belongs_to_scoped_group && !access.canManage
+      ? { ...access, canView: false }
+      : access
+  })
   const coordinatorAccess = event.ministry_id
     ? await getMinistryAccess(client, context.user, event.ministry_id)
     : { canView: false, canManage: false }
+  const eventParticipantResult = await client.query(
+    `
+      SELECT EXISTS (
+        SELECT 1
+        FROM responsibility_assignments assignment
+        WHERE assignment.event_id = $1
+          AND assignment.user_id = $2
+          AND assignment.status NOT IN ('declined', 'cancelled')
+      ) AS is_participant
+    `,
+    [eventId, context.user.id],
+  )
+  const isEventParticipant = Boolean(
+    eventParticipantResult.rows[0]?.is_participant,
+  )
   const isPublicEvent = event.ministry_id === null
   const canViewAny =
-    coordinatorAccess.canView || accessChecks.some((access) => access.canView)
+    isEventParticipant ||
+    coordinatorAccess.canView ||
+    accessChecks.some((access) => access.canView)
   const canManageAny = accessChecks.some((access) => access.canManage)
   const canManageEvent = isPublicEvent
     ? ["owner", "super_admin"].includes(context.user.global_role) ||
@@ -1724,6 +1786,8 @@ const loadEventDetails = async (
         responsibility.required_ministry_level_id,
         required_level.name AS required_level_name,
         required_level.rank_order AS required_level_rank,
+        responsibility.required_group_id,
+        required_group.name AS required_group_name,
         responsibility.required_qualification,
         responsibility.relative_start_minutes,
         responsibility.instructions,
@@ -1742,6 +1806,8 @@ const loadEventDetails = async (
       LEFT JOIN ministries ministry ON ministry.id = responsibility.ministry_id
       LEFT JOIN ministry_levels required_level
         ON required_level.id = responsibility.required_ministry_level_id
+      LEFT JOIN ministry_groups required_group
+        ON required_group.id = responsibility.required_group_id
       WHERE responsibility.event_id = $1
       ORDER BY lower(ministry.name), responsibility.sort_order, lower(responsibility.name)
     `,
@@ -1772,7 +1838,7 @@ const loadEventDetails = async (
       const ministryId = responsibility.is_public_assignment
         ? null
         : responsibility.ministry_id || event.ministry_id
-      return canManageEvent || !ministryId || responsibilityAccessByMinistry.get(ministryId)?.canView
+      return canManageEvent || isEventParticipant || !ministryId || responsibilityAccessByMinistry.get(ministryId)?.canView
     },
   )
   const manageableMinistryIds = participantResult.rows
@@ -1886,6 +1952,10 @@ const loadEventDetails = async (
               COALESCE(responsibility.ministry_id, $2)
            AND membership.status = 'active'
            AND membership.serving_preference <> 'cannot_serve'
+           AND (
+             responsibility.required_group_id IS NULL
+             OR EXISTS (SELECT 1 FROM ministry_group_members group_member WHERE group_member.ministry_member_id = membership.id AND group_member.group_id = responsibility.required_group_id)
+           )
           JOIN ministry_accounts member ON member.id = membership.user_id
           LEFT JOIN ministry_levels required_level
             ON required_level.id =
@@ -1997,14 +2067,28 @@ const loadEventDetails = async (
     )
     const canSeeSubstitutionRequest =
       assignment.user_id === context.user.id || canManageAssignment
+    const canSeeAssignmentDetails =
+      canManageAssignment || assignment.user_id === context.user.id
+    if (!canSeeAssignmentDetails) {
+      assignments.push({
+        id: assignment.id,
+        firstName: assignment.first_name,
+        lastName: assignment.last_name || "",
+      })
+      assignmentsByResponsibility.set(
+        assignment.responsibility_id,
+        assignments,
+      )
+      continue
+    }
     assignments.push({
       id: assignment.id,
+      firstName: assignment.first_name,
+      lastName: assignment.last_name || "",
       userId: assignment.user_id,
       isVolunteer:
         assignment.signup_source === "public_link" ||
         Boolean(assignment.is_volunteer_profile),
-      firstName: assignment.first_name,
-      lastName: assignment.last_name || "",
       status: assignment.status,
       quantity: Number(assignment.quantity),
       confirmedAt: assignment.confirmed_at,
@@ -2018,6 +2102,7 @@ const loadEventDetails = async (
       ),
       prioryAllocationCheckedAt:
         assignment.priory_allocation_checked_at || null,
+      createdAt: assignment.created_at,
       conflictCount: canManageAssignment
         ? Number(assignment.conflict_count)
         : 0,
@@ -2051,7 +2136,6 @@ const loadEventDetails = async (
             createdAt: substitutionRequest.created_at,
           }
         : null,
-      createdAt: assignment.created_at,
     })
     assignmentsByResponsibility.set(
       assignment.responsibility_id,
@@ -2171,6 +2255,12 @@ const loadEventDetails = async (
         [manageableMinistryIds],
       )
     : { rows: [] }
+  const groupResult = manageableMinistryIds.length
+    ? await client.query(
+        `SELECT id, ministry_id, name, description, automatic_membership FROM ministry_groups WHERE ministry_id = ANY($1::UUID[]) AND status = 'active' ORDER BY ministry_id, sort_order, lower(name)`,
+        [manageableMinistryIds],
+      )
+    : { rows: [] }
 
   const roomResult = await client.query(
     `
@@ -2207,7 +2297,29 @@ const loadEventDetails = async (
       publishedAt: participant.published_at,
       canManage: accessChecks[index].canManage,
     })),
-    responsibilities: visibleResponsibilities.map((responsibility) => ({
+    responsibilities: visibleResponsibilities.map((responsibility) => {
+      const responsibilityMinistryId = responsibility.is_public_assignment
+        ? null
+        : responsibility.ministry_id || event.ministry_id
+      const canSeeResponsibilityDetails =
+        canManageEvent ||
+        !responsibilityMinistryId ||
+        Boolean(
+          responsibilityAccessByMinistry.get(responsibilityMinistryId)?.canView,
+        )
+      const assignments =
+        assignmentsByResponsibility.get(responsibility.id) || []
+      if (!canSeeResponsibilityDetails) {
+        return {
+          id: responsibility.id,
+          ministryId: responsibility.ministry_id,
+          ministryName: responsibility.ministry_name,
+          name: responsibility.name,
+          summaryOnly: true,
+          assignments,
+        }
+      }
+      return {
       id: responsibility.id,
       ministryId: responsibility.ministry_id,
       templateResponsibilityId: responsibility.template_responsibility_id,
@@ -2222,27 +2334,33 @@ const loadEventDetails = async (
       approvalRequired: responsibility.approval_required,
       substitutionAllowed: responsibility.substitution_allowed !== false,
       isRequired: responsibility.is_required,
-      requiredLevelId:
-        responsibility.required_ministry_level_id || "",
+      requiredLevelId: responsibility.required_ministry_level_id || "",
       requiredLevelName: responsibility.required_level_name || "",
-      requiredLevelRank:
-        Number(responsibility.required_level_rank) || null,
-      requiredQualification: responsibility.required_qualification || "",
+      requiredLevelRank: Number(responsibility.required_level_rank) || null,
+      requiredGroupId: responsibility.required_group_id || "",
+      requiredGroupName: responsibility.required_group_name || "",
       relativeStartMinutes: Number(responsibility.relative_start_minutes),
       instructions: responsibility.instructions || "",
       status: responsibility.status,
       sortOrder: Number(responsibility.sort_order),
-      assignments:
-        assignmentsByResponsibility.get(responsibility.id) || [],
+      assignments,
       availableMembers:
         candidatesByResponsibility.get(responsibility.id) || [],
-    })),
+      }
+    }),
     levels: levelResult.rows.map((level) => ({
       id: level.id,
       ministryId: level.ministry_id,
       name: level.name,
       description: level.description || "",
       rankOrder: Number(level.rank_order),
+    })),
+    groups: groupResult.rows.map((group) => ({
+      id: group.id,
+      ministryId: group.ministry_id,
+      name: group.name,
+      description: group.description || "",
+      automaticMembership: Boolean(group.automatic_membership),
     })),
     canManageEvent: publicView ? false : canManageEvent,
     canSeeProtectedDetails: privacyAccess.canSeeProtectedDetails,
@@ -2784,7 +2902,7 @@ const cloneEvent = async (
 
   const [blocks, responsibilities, sourceRooms] = await Promise.all([
     client.query(
-      `SELECT * FROM event_ministries WHERE event_id = $1 ORDER BY created_at`,
+      `SELECT event_ministries.*, ARRAY(SELECT scoped.group_id FROM event_ministry_groups scoped WHERE scoped.event_ministry_id = event_ministries.id) AS group_ids FROM event_ministries WHERE event_id = $1 ORDER BY created_at`,
       [sourceEventId],
     ),
     client.query(
@@ -2831,6 +2949,7 @@ const cloneEvent = async (
       ministry_id: block.ministry_id,
       is_required: block.is_required,
       instructions: block.instructions,
+      group_ids: block.group_ids || [],
     })),
     responsibilities: responsibilities.rows.map((responsibility) => ({
       id: responsibility.template_responsibility_id,
@@ -2843,6 +2962,7 @@ const cloneEvent = async (
       is_required: responsibility.is_required,
       required_ministry_level_id:
         responsibility.required_ministry_level_id,
+      required_group_id: responsibility.required_group_id,
       required_qualification: responsibility.required_qualification,
       relative_start_minutes: responsibility.relative_start_minutes,
       instructions: responsibility.instructions,
@@ -3111,6 +3231,7 @@ const assignMemberToResponsibility = async (
         responsibility.name,
         responsibility.quantity_needed,
         responsibility.required_ministry_level_id,
+        responsibility.required_qualification,
         responsibility.relative_start_minutes,
         responsibility.status
       FROM event_responsibilities responsibility
@@ -3155,6 +3276,7 @@ const assignMemberToResponsibility = async (
         AND membership.status = 'active'
         AND COALESCE(member.is_volunteer_profile, false) = false
         AND membership.serving_preference <> 'cannot_serve'
+        AND ($10::UUID IS NULL OR EXISTS (SELECT 1 FROM ministry_group_members group_member WHERE group_member.ministry_member_id = membership.id AND group_member.group_id = $10))
         AND (
           required_level.id IS NULL
           OR (
@@ -3211,6 +3333,7 @@ const assignMemberToResponsibility = async (
       event.end_time,
       responsibility.required_ministry_level_id,
       Number(responsibility.relative_start_minutes || 0),
+      responsibility.required_group_id,
     ],
   )
   const member = eligibleResult.rows[0]
@@ -3856,6 +3979,21 @@ const validateRequiredMinistryLevel = async (
   }
 }
 
+const validateRequiredGroup = async (
+  client: PoolClient,
+  requiredGroupId: string | null,
+  ministryId: string,
+) => {
+  if (!requiredGroupId) return
+  const result = await client.query(
+    `SELECT 1 FROM ministry_groups WHERE id = $1 AND ministry_id = $2 AND status = 'active'`,
+    [requiredGroupId, ministryId],
+  )
+  if (!result.rowCount) {
+    throw Object.assign(new Error("Select an active group from this responsibility's ministry"), { status: 400 })
+  }
+}
+
 const mutateEventResponsibility = async (
   client: PoolClient,
   context: any,
@@ -3899,6 +4037,11 @@ const mutateEventResponsibility = async (
       input.requiredLevelId,
       ministryId,
     )
+    await validateRequiredGroup(
+      client,
+      input.requiredGroupId,
+      ministryId,
+    )
     const createdResult = await client.query(
       `
         INSERT INTO event_responsibilities (
@@ -3912,7 +4055,7 @@ const mutateEventResponsibility = async (
           substitution_allowed,
           is_required,
           required_ministry_level_id,
-          required_qualification,
+          required_group_id,
           relative_start_minutes,
           instructions,
           sort_order,
@@ -3940,7 +4083,7 @@ const mutateEventResponsibility = async (
         input.substitutionAllowed,
         input.isRequired,
         input.requiredLevelId,
-        input.requiredQualification,
+        input.requiredGroupId,
         input.relativeStartMinutes,
         input.instructions,
       ],
@@ -4012,6 +4155,11 @@ const mutateEventResponsibility = async (
       input.requiredLevelId,
       responsibility.ministry_id,
     )
+    await validateRequiredGroup(
+      client,
+      input.requiredGroupId,
+      responsibility.ministry_id,
+    )
     if (input.quantityNeeded < Number(responsibility.assigned_quantity)) {
       throw Object.assign(
         new Error(
@@ -4030,7 +4178,7 @@ const mutateEventResponsibility = async (
             substitution_allowed = $6,
             is_required = $7,
             required_ministry_level_id = $8,
-            required_qualification = $9,
+            required_group_id = $9,
             relative_start_minutes = $10,
             instructions = $11,
             updated_at = now()
@@ -4046,7 +4194,7 @@ const mutateEventResponsibility = async (
         input.substitutionAllowed,
         input.isRequired,
         input.requiredLevelId,
-        input.requiredQualification,
+        input.requiredGroupId,
         input.relativeStartMinutes,
         input.instructions,
       ],
@@ -4271,7 +4419,7 @@ const updateEvent = async (
                 substitution_allowed = $6,
                 is_required = $7,
                 required_ministry_level_id = $8,
-                required_qualification = $9,
+                required_group_id = $9,
                 relative_start_minutes = $10,
                 instructions = $11,
                 sort_order = $12,
@@ -4287,7 +4435,7 @@ const updateEvent = async (
             responsibility.substitution_allowed !== false,
             responsibility.is_required !== false,
             responsibility.required_ministry_level_id || null,
-            responsibility.required_qualification || null,
+            responsibility.required_group_id || null,
             Number(responsibility.relative_start_minutes) || 0,
             responsibility.instructions || null,
             Number(responsibility.sort_order) || 0,
@@ -4309,7 +4457,7 @@ const updateEvent = async (
               substitution_allowed,
               is_required,
               required_ministry_level_id,
-              required_qualification,
+              required_group_id,
               relative_start_minutes,
               instructions,
               sort_order,
@@ -4331,7 +4479,7 @@ const updateEvent = async (
             responsibility.substitution_allowed !== false,
             responsibility.is_required !== false,
             responsibility.required_ministry_level_id || null,
-            responsibility.required_qualification || null,
+            responsibility.required_group_id || null,
             Number(responsibility.relative_start_minutes) || 0,
             responsibility.instructions || null,
             Number(responsibility.sort_order) || 0,
@@ -4379,7 +4527,7 @@ const updateEvent = async (
       [eventId, nextMinistryIds],
     )
     for (const block of structure.blocks) {
-      await client.query(
+      const replacedBlock = await client.query(
         `
           INSERT INTO event_ministries (
             event_id,
@@ -4400,6 +4548,7 @@ const updateEvent = async (
             END,
             instructions = excluded.instructions,
             updated_at = now()
+          RETURNING id
         `,
         [
           eventId,
@@ -4409,6 +4558,10 @@ const updateEvent = async (
           block.instructions || null,
         ],
       )
+      await client.query(`DELETE FROM event_ministry_groups WHERE event_ministry_id = $1`, [replacedBlock.rows[0].id])
+      for (const groupId of block.group_ids || []) {
+        await client.query(`INSERT INTO event_ministry_groups (event_ministry_id, group_id) VALUES ($1, $2)`, [replacedBlock.rows[0].id, groupId])
+      }
     }
 
     await client.query(

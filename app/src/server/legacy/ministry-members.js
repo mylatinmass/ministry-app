@@ -165,6 +165,29 @@ const writeLevelAudit = async (
     ]
   )
 
+const addAutomaticGroupsForMembership = async (
+  client,
+  ministryId,
+  userId,
+  addedBy = null
+) =>
+  client.query(
+    `
+      INSERT INTO ministry_group_members (group_id, ministry_member_id, added_by)
+      SELECT ministry_group.id, membership.id, $3
+      FROM ministry_members membership
+      JOIN ministry_groups ministry_group
+        ON ministry_group.ministry_id = membership.ministry_id
+       AND ministry_group.status = 'active'
+       AND ministry_group.automatic_membership = true
+      WHERE membership.ministry_id = $1
+        AND membership.user_id = $2
+        AND membership.status = 'active'
+      ON CONFLICT (group_id, ministry_member_id) DO NOTHING
+    `,
+    [ministryId, userId, addedBy]
+  )
+
 const listMembers = async (client, user, ministryId) => {
   const managedMinistries = await getManagedMinistries(client, user)
 
@@ -183,6 +206,20 @@ const listMembers = async (client, user, ministryId) => {
           ministry_level.name AS highest_level_name,
           ministry_level.icon_key AS highest_level_icon_key,
           ministry_level.rank_order AS highest_level_rank
+          ,ARRAY(
+            SELECT group_member.group_id
+            FROM ministry_group_members group_member
+            JOIN ministry_groups ministry_group ON ministry_group.id = group_member.group_id
+            WHERE group_member.ministry_member_id = membership.id AND ministry_group.status = 'active'
+            ORDER BY ministry_group.sort_order, ministry_group.name
+          ) AS group_ids
+          ,ARRAY(
+            SELECT ministry_group.name
+            FROM ministry_group_members group_member
+            JOIN ministry_groups ministry_group ON ministry_group.id = group_member.group_id
+            WHERE group_member.ministry_member_id = membership.id AND ministry_group.status = 'active'
+            ORDER BY ministry_group.sort_order, ministry_group.name
+          ) AS group_names
         FROM ministry_members membership
         JOIN ministry_accounts member ON member.id = membership.user_id
         LEFT JOIN ministry_levels ministry_level
@@ -229,12 +266,16 @@ const listMembers = async (client, user, ministryId) => {
         highestLevelIconKey: membershipResult.rows[0].highest_level_icon_key,
         highestLevelRank:
           Number(membershipResult.rows[0].highest_level_rank) || null,
+        groupIds: membershipResult.rows[0].group_ids || [],
+        groupNames: membershipResult.rows[0].group_names || [],
       },
     })
   }
 
   const [
     membersResult,
+    groupsResult,
+    groupMembersResult,
     invitationsResult,
     requestsResult,
     levelsResult,
@@ -270,6 +311,24 @@ const listMembers = async (client, user, ministryId) => {
           CASE mm.level WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,
           lower(u.last_name),
           lower(u.first_name)
+      `,
+      [ministryId]
+    ),
+    client.query(
+      `
+        SELECT id, name, description, sort_order, automatic_membership, status
+        FROM ministry_groups
+        WHERE ministry_id = $1 AND status = 'active'
+        ORDER BY sort_order, lower(name)
+      `,
+      [ministryId]
+    ),
+    client.query(
+      `
+        SELECT group_member.ministry_member_id, group_member.group_id
+        FROM ministry_group_members group_member
+        JOIN ministry_groups ministry_group ON ministry_group.id = group_member.group_id
+        WHERE ministry_group.ministry_id = $1 AND ministry_group.status = 'active'
       `,
       [ministryId]
     ),
@@ -370,6 +429,17 @@ const listMembers = async (client, user, ministryId) => {
       highestLevelIconKey: member.highest_level_icon_key,
       highestLevelRank: Number(member.highest_level_rank) || null,
       joinedAt: member.joined_at,
+      groupIds: groupMembersResult.rows
+        .filter((row) => row.ministry_member_id === member.id)
+        .map((row) => row.group_id),
+    })),
+    groups: groupsResult.rows.map((group) => ({
+      id: group.id,
+      name: group.name,
+      description: group.description || "",
+      sortOrder: Number(group.sort_order),
+      automaticMembership: Boolean(group.automatic_membership),
+      status: group.status,
     })),
     levels: levelsResult.rows.map((level) => ({
       id: level.id,
@@ -883,6 +953,12 @@ const updateMembership = async (
               DO UPDATE SET status = 'active', can_serve = true, updated_at = now()
             `,
             [selectedMinistryId, targetUserId]
+          )
+          await addAutomaticGroupsForMembership(
+            client,
+            selectedMinistryId,
+            targetUserId,
+            actor.id
           )
         }
       }
@@ -1674,6 +1750,124 @@ const updateMembership = async (
     })
   }
 
+  if (["create_group", "update_group", "archive_group", "reorder_groups"].includes(action)) {
+    if (!canManageMinistry(managedMinistries, ministryId)) {
+      return jsonResponse(403, { message: "You cannot manage this ministry" })
+    }
+    const groupId = cleanText(body.groupId, 100)
+    await client.query("BEGIN")
+    try {
+      if (action === "create_group") {
+        const name = cleanText(body.name, 120)
+        if (!name) {
+          await client.query("ROLLBACK")
+          return jsonResponse(400, { message: "Group name is required" })
+        }
+        const result = await client.query(
+          `
+            INSERT INTO ministry_groups (
+              ministry_id, name, description, sort_order,
+              automatic_membership, created_by, updated_by
+            )
+            VALUES (
+              $1, $2, $3,
+              COALESCE((SELECT max(sort_order) + 1 FROM ministry_groups WHERE ministry_id = $1), 1),
+              $4, $5, $5
+            )
+            RETURNING id, name, description, sort_order, automatic_membership, status
+          `,
+          [ministryId, name, cleanText(body.description, 1000) || null, body.automaticMembership === true, actor.id]
+        )
+        const group = result.rows[0]
+        if (group.automatic_membership) {
+          await client.query(
+            `
+              INSERT INTO ministry_group_members (group_id, ministry_member_id, added_by)
+              SELECT $1, id, $2 FROM ministry_members
+              WHERE ministry_id = $3 AND status = 'active'
+              ON CONFLICT (group_id, ministry_member_id) DO NOTHING
+            `,
+            [group.id, actor.id, ministryId]
+          )
+        }
+        await writeLevelAudit(client, {
+          actor, user, action: "ministry_group.created", entityType: "ministry_group",
+          entityId: group.id, ministryId, beforeData: null, afterData: group,
+        })
+      } else if (action === "reorder_groups") {
+        const groupIds = Array.isArray(body.groupIds) ? [...new Set(body.groupIds.map(String))] : []
+        const valid = await client.query(
+          `SELECT id FROM ministry_groups WHERE ministry_id = $1 AND status = 'active'`,
+          [ministryId]
+        )
+        if (groupIds.length !== valid.rowCount || valid.rows.some((row) => !groupIds.includes(row.id))) {
+          await client.query("ROLLBACK")
+          return jsonResponse(400, { message: "Include every active group once" })
+        }
+        for (let index = 0; index < groupIds.length; index += 1) {
+          await client.query(
+            `UPDATE ministry_groups SET sort_order = $2, updated_by = $3, updated_at = now() WHERE id = $1`,
+            [groupIds[index], index + 1, actor.id]
+          )
+        }
+      } else {
+        const existingResult = await client.query(
+          `SELECT * FROM ministry_groups WHERE id = $1 AND ministry_id = $2 AND status = 'active' FOR UPDATE`,
+          [groupId, ministryId]
+        )
+        const existing = existingResult.rows[0]
+        if (!existing) {
+          await client.query("ROLLBACK")
+          return jsonResponse(404, { message: "Group not found" })
+        }
+        if (action === "archive_group") {
+          if (existing.automatic_membership) {
+            await client.query("ROLLBACK")
+            return jsonResponse(409, { message: "Disable automatic membership before archiving this group" })
+          }
+          await client.query(
+            `UPDATE ministry_groups SET status = 'archived', updated_by = $2, updated_at = now() WHERE id = $1`,
+            [groupId, actor.id]
+          )
+        } else {
+          const name = cleanText(body.name, 120)
+          if (!name) {
+            await client.query("ROLLBACK")
+            return jsonResponse(400, { message: "Group name is required" })
+          }
+          const automaticMembership = body.automaticMembership === true
+          await client.query(
+            `UPDATE ministry_groups SET name = $2, description = $3, automatic_membership = $4, updated_by = $5, updated_at = now() WHERE id = $1`,
+            [groupId, name, cleanText(body.description, 1000) || null, automaticMembership, actor.id]
+          )
+          if (automaticMembership && !existing.automatic_membership) {
+            await client.query(
+              `
+                INSERT INTO ministry_group_members (group_id, ministry_member_id, added_by)
+                SELECT $1, id, $2 FROM ministry_members
+                WHERE ministry_id = $3 AND status = 'active'
+                ON CONFLICT (group_id, ministry_member_id) DO NOTHING
+              `,
+              [groupId, actor.id, ministryId]
+            )
+          }
+        }
+        await writeLevelAudit(client, {
+          actor, user,
+          action: action === "archive_group" ? "ministry_group.archived" : "ministry_group.updated",
+          entityType: "ministry_group", entityId: groupId, ministryId,
+          beforeData: existing, afterData: action === "archive_group" ? { ...existing, status: "archived" } : { name: cleanText(body.name, 120), description: cleanText(body.description, 1000), automaticMembership: body.automaticMembership === true },
+        })
+      }
+      await client.query("COMMIT")
+      return jsonResponse(200, { success: true, message: "Groups updated" })
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {})
+      if (error?.code === "23505") return jsonResponse(409, { message: "A group with that name already exists" })
+      throw error
+    }
+  }
+
   if (["approve_request", "decline_request"].includes(action)) {
     if (!canManageMinistry(managedMinistries, ministryId)) {
       return jsonResponse(403, { message: "You cannot manage this ministry" })
@@ -1707,6 +1901,12 @@ const updateMembership = async (
             DO UPDATE SET level = 'member', status = 'active', can_serve = true, updated_at = now()
           `,
           [ministryId, request.child_user_id]
+        )
+        await addAutomaticGroupsForMembership(
+          client,
+          ministryId,
+          request.child_user_id,
+          actor.id
         )
       }
       await client.query(
@@ -1945,6 +2145,78 @@ const updateMembership = async (
           level === "admin"
             ? "Member assigned as Ministry Admin"
             : "Member role updated",
+      })
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {})
+      throw error
+    }
+  }
+
+  if (action === "set_member_groups") {
+    const requestedGroupIds = Array.isArray(body.groupIds)
+      ? [...new Set(body.groupIds.map(String))]
+      : []
+    await client.query("BEGIN")
+    try {
+      const existingResult = await client.query(
+        `
+          SELECT id
+          FROM ministry_members
+          WHERE ministry_id = $1
+            AND user_id = $2
+            AND status = 'active'
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [ministryId, targetUserId]
+      )
+      const existing = existingResult.rows[0]
+      if (!existing) {
+        await client.query("ROLLBACK")
+        return jsonResponse(404, { message: "Member not found" })
+      }
+      const groupsResult = await client.query(
+        `
+          SELECT id, automatic_membership
+          FROM ministry_groups
+          WHERE ministry_id = $1 AND status = 'active'
+        `,
+        [ministryId]
+      )
+      const validIds = new Set(groupsResult.rows.map((group) => group.id))
+      if (requestedGroupIds.some((id) => !validIds.has(id))) {
+        await client.query("ROLLBACK")
+        return jsonResponse(400, { message: "Select active groups from this ministry" })
+      }
+      const finalGroupIds = [...new Set([
+        ...requestedGroupIds,
+        ...groupsResult.rows.filter((group) => group.automatic_membership).map((group) => group.id),
+      ])]
+      const beforeResult = await client.query(
+        `SELECT group_id FROM ministry_group_members WHERE ministry_member_id = $1`,
+        [existing.id]
+      )
+      await client.query(`DELETE FROM ministry_group_members WHERE ministry_member_id = $1`, [existing.id])
+      for (const groupId of finalGroupIds) {
+        await client.query(
+          `INSERT INTO ministry_group_members (group_id, ministry_member_id, added_by) VALUES ($1, $2, $3)`,
+          [groupId, existing.id, actor.id]
+        )
+      }
+      await writeLevelAudit(client, {
+        actor,
+        user,
+        action: "ministry_member.groups_changed",
+        entityType: "ministry_member",
+        entityId: existing.id,
+        ministryId,
+        beforeData: { groupIds: beforeResult.rows.map((row) => row.group_id), targetUserId },
+        afterData: { groupIds: finalGroupIds, targetUserId },
+      })
+      await client.query("COMMIT")
+      return jsonResponse(200, {
+        success: true,
+        message: "Member groups updated",
       })
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {})

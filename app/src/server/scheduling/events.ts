@@ -861,6 +861,9 @@ const fillAndReviewAutomaticSchedule = async (
   context: any,
   eventId: string,
   eventConflicts: any[] = [],
+  targetMinistryId: string | null = null,
+  generation = "repeating_schedule",
+  reviewPublication = true,
 ): Promise<AutomaticScheduleResult> => {
   const eventResult = await client.query(
     `SELECT * FROM events WHERE id = $1 FOR UPDATE`,
@@ -897,12 +900,16 @@ const fillAndReviewAutomaticSchedule = async (
         ON required_level.id = responsibility.required_ministry_level_id
       WHERE responsibility.event_id = $1
         AND responsibility.status <> 'cancelled'
+        AND (
+          $2::UUID IS NULL
+          OR COALESCE(responsibility.ministry_id, event.ministry_id) = $2
+        )
       ORDER BY
         required_level.rank_order DESC NULLS LAST,
         responsibility.sort_order,
         responsibility.id
     `,
-    [eventId],
+    [eventId, targetMinistryId],
   )
 
   const assignmentIds: string[] = []
@@ -1114,7 +1121,7 @@ const fillAndReviewAutomaticSchedule = async (
           status: "assigned",
         },
         metadata: {
-          generation: "repeating_schedule",
+          generation,
           responsibilityName: responsibility.name,
           memberName: `${candidate.first_name} ${candidate.last_name}`,
         },
@@ -1176,8 +1183,11 @@ const fillAndReviewAutomaticSchedule = async (
     ministryId: row.ministry_id,
     missing: Number(row.missing),
   }))
-  const published = shortages.length === 0 && eventConflicts.length === 0
-  await client.query(
+  const published = reviewPublication
+    ? shortages.length === 0 && eventConflicts.length === 0
+    : event.status === "published"
+  if (reviewPublication) {
+    await client.query(
     `
       UPDATE events
       SET status = $2,
@@ -1191,7 +1201,7 @@ const fillAndReviewAutomaticSchedule = async (
     `,
     [event.id, published ? "published" : "draft"],
   )
-  await client.query(
+    await client.query(
     `
       UPDATE event_ministries
       SET schedule_status = $2,
@@ -1204,7 +1214,7 @@ const fillAndReviewAutomaticSchedule = async (
     `,
     [event.id, published ? "published" : "incomplete"],
   )
-  await writeSchedulingAudit(client, context, {
+    await writeSchedulingAudit(client, context, {
     action: published ? "event.auto_published" : "event.auto_publish_held",
     entityType: "event",
     entityId: event.id,
@@ -1215,10 +1225,10 @@ const fillAndReviewAutomaticSchedule = async (
       shortages,
       conflicts: eventConflicts,
     },
-    metadata: { generation: "repeating_schedule" },
+    metadata: { generation },
   })
-  if (!published) {
-    const adminResult = await client.query(
+    if (!published) {
+      const adminResult = await client.query(
       `
         SELECT DISTINCT administrator.id
         FROM ministry_accounts administrator
@@ -1239,7 +1249,7 @@ const fillAndReviewAutomaticSchedule = async (
         ...shortages.map((shortage) => shortage.ministryId),
       ])).filter(Boolean)],
     )
-    const issueSummary = [
+      const issueSummary = [
       shortages.length
         ? `${shortages.length} unfilled required position${shortages.length === 1 ? "" : "s"}`
         : null,
@@ -1247,8 +1257,8 @@ const fillAndReviewAutomaticSchedule = async (
         ? `${eventConflicts.length} overlapping event${eventConflicts.length === 1 ? "" : "s"}`
         : null,
     ].filter(Boolean).join(" and ")
-    for (const administrator of adminResult.rows) {
-      await client.query(
+      for (const administrator of adminResult.rows) {
+        await client.query(
         `
           INSERT INTO ministry_alerts (
             subject_user_id, recipient_user_id, kind, title, message,
@@ -1279,7 +1289,21 @@ const fillAndReviewAutomaticSchedule = async (
           }),
         ],
       )
+      }
     }
+  } else {
+    await writeSchedulingAudit(client, context, {
+      action: "event.assignments_auto_filled",
+      entityType: "event",
+      entityId: event.id,
+      ministryId: targetMinistryId || event.ministry_id,
+      afterData: {
+        status: event.status,
+        automaticAssignments: assignmentIds.length,
+        shortages,
+      },
+      metadata: { generation },
+    })
   }
   return {
     eventId: event.id,
@@ -1682,8 +1706,28 @@ const loadEventDetails = async (
     event.location = null
   }
 
-  const participantResult = await client.query(
+  const ministryGroupSchemaResult = await client.query(
     `
+      SELECT
+        EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'event_responsibilities'
+            AND column_name = 'required_group_id'
+        )
+        AND to_regclass(current_schema() || '.event_ministry_groups') IS NOT NULL
+        AND to_regclass(current_schema() || '.ministry_group_members') IS NOT NULL
+          AS is_available
+    `,
+  )
+  const hasMinistryGroupSchema = Boolean(
+    ministryGroupSchemaResult.rows[0]?.is_available,
+  )
+
+  const participantResult = await client.query(
+    hasMinistryGroupSchema
+      ? `
       SELECT
         event_ministry.ministry_id,
         ministry.name AS ministry_name,
@@ -1705,8 +1749,26 @@ const loadEventDetails = async (
       JOIN ministries ministry ON ministry.id = event_ministry.ministry_id
       WHERE event_ministry.event_id = $1
       ORDER BY lower(ministry.name)
+    `
+      : `
+      SELECT
+        event_ministry.ministry_id,
+        ministry.name AS ministry_name,
+        event_ministry.is_required,
+        event_ministry.schedule_status,
+        event_ministry.instructions,
+        event_ministry.reviewed_at,
+        event_ministry.published_at,
+        ARRAY[]::UUID[] AS group_ids,
+        true AS belongs_to_scoped_group
+      FROM event_ministries event_ministry
+      JOIN ministries ministry ON ministry.id = event_ministry.ministry_id
+      WHERE event_ministry.event_id = $1
+      ORDER BY lower(ministry.name)
     `,
-    [eventId, context.user.id],
+    hasMinistryGroupSchema
+      ? [eventId, context.user.id]
+      : [eventId],
   )
   const rawAccessChecks = await Promise.all(
     participantResult.rows.map((participant) =>
@@ -1748,6 +1810,9 @@ const loadEventDetails = async (
     ? ["owner", "super_admin"].includes(context.user.global_role) ||
       event.created_by === context.user.id
     : coordinatorAccess.canManage
+  const canManageAllResponsibilities = ["owner", "super_admin"].includes(
+    context.user.global_role,
+  )
   const publicView = !canViewAny && !canManageEvent
   if (
     publicView &&
@@ -1768,7 +1833,8 @@ const loadEventDetails = async (
   }
 
   const responsibilityResult = await client.query(
-    `
+    hasMinistryGroupSchema
+      ? `
       SELECT
         responsibility.id,
         responsibility.ministry_id,
@@ -1808,6 +1874,47 @@ const loadEventDetails = async (
         ON required_level.id = responsibility.required_ministry_level_id
       LEFT JOIN ministry_groups required_group
         ON required_group.id = responsibility.required_group_id
+      WHERE responsibility.event_id = $1
+      ORDER BY lower(ministry.name), responsibility.sort_order, lower(responsibility.name)
+    `
+      : `
+      SELECT
+        responsibility.id,
+        responsibility.ministry_id,
+        responsibility.template_responsibility_id,
+        ministry.name AS ministry_name,
+        responsibility.name,
+        responsibility.description,
+        responsibility.responsibility_type,
+        responsibility.quantity_needed,
+        responsibility.is_public_assignment,
+        responsibility.unlimited_capacity,
+        responsibility.approval_required,
+        responsibility.substitution_allowed,
+        responsibility.is_required,
+        responsibility.required_ministry_level_id,
+        required_level.name AS required_level_name,
+        required_level.rank_order AS required_level_rank,
+        NULL::UUID AS required_group_id,
+        NULL::STRING AS required_group_name,
+        responsibility.required_qualification,
+        responsibility.relative_start_minutes,
+        responsibility.instructions,
+        responsibility.status,
+        responsibility.sort_order,
+        (
+          SELECT count(*)
+          FROM responsibility_assignments assignment
+          WHERE assignment.responsibility_id = responsibility.id
+            AND assignment.status IN (
+              'interested', 'pending', 'assigned', 'confirmed',
+              'change_requested', 'completed'
+            )
+        ) AS assigned_quantity
+      FROM event_responsibilities responsibility
+      LEFT JOIN ministries ministry ON ministry.id = responsibility.ministry_id
+      LEFT JOIN ministry_levels required_level
+        ON required_level.id = responsibility.required_ministry_level_id
       WHERE responsibility.event_id = $1
       ORDER BY lower(ministry.name), responsibility.sort_order, lower(responsibility.name)
     `,
@@ -1851,7 +1958,7 @@ const loadEventDetails = async (
   ) {
     manageableMinistryIds.push(event.ministry_id)
   }
-  if (canManageEvent) {
+  if (canManageAllResponsibilities) {
     for (const ministryId of responsibilityMinistryIds) {
       if (!manageableMinistryIds.includes(ministryId)) {
         manageableMinistryIds.push(ministryId)
@@ -1913,7 +2020,8 @@ const loadEventDetails = async (
   )
   const candidateResult = manageableMinistryIds.length
     ? await client.query(
-        `
+        hasMinistryGroupSchema
+          ? `
           SELECT
             responsibility.id AS responsibility_id,
             member.id AS user_id,
@@ -2026,6 +2134,111 @@ const loadEventDetails = async (
             overall_monthly_count,
             lower(member.last_name),
             lower(member.first_name)
+        `
+          : `
+          SELECT
+            responsibility.id AS responsibility_id,
+            member.id AS user_id,
+            member.first_name,
+            member.last_name,
+            granted_level.name AS highest_level_name,
+            granted_level.rank_order AS highest_level_rank,
+            membership.serving_preference,
+            membership.monthly_frequency_limit,
+            member.automatic_assignment_monthly_limit,
+            (
+              SELECT count(*)
+              FROM responsibility_assignments monthly_assignment
+              JOIN events monthly_event ON monthly_event.id = monthly_assignment.event_id
+              JOIN event_responsibilities monthly_responsibility
+                ON monthly_responsibility.id = monthly_assignment.responsibility_id
+              WHERE monthly_assignment.user_id = member.id
+                AND monthly_assignment.status = ANY($5)
+                AND date_trunc('month', monthly_event.start_time AT TIME ZONE 'America/New_York')
+                  = date_trunc('month', $6::TIMESTAMPTZ AT TIME ZONE 'America/New_York')
+                AND COALESCE(monthly_responsibility.ministry_id, monthly_event.ministry_id)
+                  = COALESCE(responsibility.ministry_id, $2)
+            )::INT AS ministry_monthly_count,
+            (
+              SELECT count(*)
+              FROM responsibility_assignments monthly_assignment
+              JOIN events monthly_event ON monthly_event.id = monthly_assignment.event_id
+              WHERE monthly_assignment.user_id = member.id
+                AND monthly_assignment.status = ANY($5)
+                AND date_trunc('month', monthly_event.start_time AT TIME ZONE 'America/New_York')
+                  = date_trunc('month', $6::TIMESTAMPTZ AT TIME ZONE 'America/New_York')
+            )::INT AS overall_monthly_count
+          FROM event_responsibilities responsibility
+          JOIN ministry_members membership
+            ON membership.ministry_id = COALESCE(responsibility.ministry_id, $2)
+           AND membership.status = 'active'
+           AND membership.serving_preference <> 'cannot_serve'
+          JOIN ministry_accounts member ON member.id = membership.user_id
+          LEFT JOIN ministry_levels required_level
+            ON required_level.id = responsibility.required_ministry_level_id
+          LEFT JOIN ministry_levels granted_level
+            ON granted_level.id = membership.highest_level_id
+          WHERE responsibility.event_id = $1
+            AND responsibility.status <> 'cancelled'
+            AND COALESCE(member.is_volunteer_profile, false) = false
+            AND COALESCE(responsibility.ministry_id, $2) = ANY($3::UUID[])
+            AND (
+              required_level.id IS NULL
+              OR (
+                granted_level.ministry_id = COALESCE(responsibility.ministry_id, $2)
+                AND granted_level.rank_order >= required_level.rank_order
+              )
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM availability_blocks block
+              WHERE block.user_id = member.id
+                AND block.status = 'active'
+                AND (
+                  block.ministry_id IS NULL
+                  OR block.ministry_id = COALESCE(responsibility.ministry_id, $2)
+                )
+                AND block.start_date <= $4::DATE
+                AND block.end_date >= $4::DATE
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM responsibility_assignments current_assignment
+              WHERE current_assignment.event_id = $1
+                AND current_assignment.user_id = member.id
+                AND current_assignment.status NOT IN ('declined', 'cancelled')
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM responsibility_assignments other_assignment
+              JOIN events other_event ON other_event.id = other_assignment.event_id
+              JOIN event_responsibilities other_responsibility
+                ON other_responsibility.id = other_assignment.responsibility_id
+              WHERE other_assignment.user_id = member.id
+                AND other_assignment.status = ANY($5)
+                AND other_event.id <> $1
+                AND other_event.status NOT IN ('cancelled', 'archived')
+                AND other_event.start_time
+                  + COALESCE(other_responsibility.relative_start_minutes, 0)
+                    * INTERVAL '1 minute' < $7
+                AND other_event.end_time >
+                  $6::TIMESTAMPTZ
+                  + COALESCE(responsibility.relative_start_minutes, 0)
+                    * INTERVAL '1 minute'
+            )
+          ORDER BY
+            responsibility.id,
+            CASE membership.serving_preference
+              WHEN 'prefer' THEN 0
+              WHEN 'sometimes' THEN 1
+              WHEN 'if_necessary' THEN 2
+              ELSE 3
+            END,
+            granted_level.rank_order DESC NULLS LAST,
+            ministry_monthly_count,
+            overall_monthly_count,
+            lower(member.last_name),
+            lower(member.first_name)
         `,
         [
           eventId,
@@ -2054,7 +2267,7 @@ const loadEventDetails = async (
       responsibility?.is_public_assignment
         ? null
         : responsibility?.ministry_id || event.ministry_id
-    const canManageAssignment = canManageEvent || (responsibilityMinistryId
+    const canManageAssignment = canManageAllResponsibilities || (responsibilityMinistryId
       ? Boolean(
           responsibilityAccessByMinistry.get(responsibilityMinistryId)
             ?.canManage,
@@ -2256,7 +2469,8 @@ const loadEventDetails = async (
       )
     : { rows: [] }
   const groupResult = manageableMinistryIds.length
-    ? await client.query(
+    && hasMinistryGroupSchema
+      ? await client.query(
         `SELECT id, ministry_id, name, description, automatic_membership FROM ministry_groups WHERE ministry_id = ANY($1::UUID[]) AND status = 'active' ORDER BY ministry_id, sort_order, lower(name)`,
         [manageableMinistryIds],
       )
@@ -2316,9 +2530,18 @@ const loadEventDetails = async (
           ministryName: responsibility.ministry_name,
           name: responsibility.name,
           summaryOnly: true,
+          canManage: false,
           assignments,
         }
       }
+      const canManageResponsibility =
+        canManageAllResponsibilities ||
+        (responsibilityMinistryId
+          ? Boolean(
+              responsibilityAccessByMinistry.get(responsibilityMinistryId)
+                ?.canManage,
+            )
+          : canManageEvent)
       return {
       id: responsibility.id,
       ministryId: responsibility.ministry_id,
@@ -2343,6 +2566,7 @@ const loadEventDetails = async (
       instructions: responsibility.instructions || "",
       status: responsibility.status,
       sortOrder: Number(responsibility.sort_order),
+      canManage: canManageResponsibility,
       assignments,
       availableMembers:
         candidatesByResponsibility.get(responsibility.id) || [],
@@ -3223,14 +3447,52 @@ const assignMemberToResponsibility = async (
     )
   }
 
-  const responsibilityResult = await client.query(
+  const ministryGroupSchemaResult = await client.query(
     `
+      SELECT
+        EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'event_responsibilities'
+            AND column_name = 'required_group_id'
+        )
+        AND to_regclass(current_schema() || '.ministry_group_members') IS NOT NULL
+          AS is_available
+    `,
+  )
+  const hasMinistryGroupSchema = Boolean(
+    ministryGroupSchemaResult.rows[0]?.is_available,
+  )
+
+  const responsibilityResult = await client.query(
+    hasMinistryGroupSchema
+      ? `
       SELECT
         responsibility.id,
         COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id,
         responsibility.name,
         responsibility.quantity_needed,
         responsibility.required_ministry_level_id,
+        responsibility.required_group_id,
+        responsibility.required_qualification,
+        responsibility.relative_start_minutes,
+        responsibility.status
+      FROM event_responsibilities responsibility
+      JOIN events event ON event.id = responsibility.event_id
+      WHERE responsibility.id = $1
+        AND responsibility.event_id = $2
+      LIMIT 1
+      FOR UPDATE
+    `
+      : `
+      SELECT
+        responsibility.id,
+        COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id,
+        responsibility.name,
+        responsibility.quantity_needed,
+        responsibility.required_ministry_level_id,
+        NULL::UUID AS required_group_id,
         responsibility.required_qualification,
         responsibility.relative_start_minutes,
         responsibility.status
@@ -3249,21 +3511,17 @@ const assignMemberToResponsibility = async (
       status: 404,
     })
   }
-  const coordinatorAccess = event.ministry_id
-    ? await getMinistryAccess(client, context.user, event.ministry_id)
-    : { canManage: false }
-  if (!coordinatorAccess.canManage) {
-    await requireMinistryAccess(
-      client,
-      context.user,
-      responsibility.ministry_id,
-      true,
-    )
-  }
+  await requireMinistryAccess(
+    client,
+    context.user,
+    responsibility.ministry_id,
+    true,
+  )
 
   const eventDate = toChapelDateKey(event.start_time)
   const eligibleResult = await client.query(
-    `
+    hasMinistryGroupSchema
+      ? `
       SELECT member.id, member.first_name, member.last_name
       FROM ministry_members membership
       JOIN ministry_accounts member ON member.id = membership.user_id
@@ -3322,19 +3580,82 @@ const assignMemberToResponsibility = async (
               + COALESCE($9::INT, 0) * INTERVAL '1 minute'
         )
       LIMIT 1
+    `
+      : `
+      SELECT member.id, member.first_name, member.last_name
+      FROM ministry_members membership
+      JOIN ministry_accounts member ON member.id = membership.user_id
+      LEFT JOIN ministry_levels required_level ON required_level.id = $8
+      LEFT JOIN ministry_levels granted_level ON granted_level.id = membership.highest_level_id
+      WHERE membership.ministry_id = $1
+        AND membership.user_id = $2
+        AND membership.status = 'active'
+        AND COALESCE(member.is_volunteer_profile, false) = false
+        AND membership.serving_preference <> 'cannot_serve'
+        AND (
+          required_level.id IS NULL
+          OR (
+            granted_level.ministry_id = $1
+            AND granted_level.rank_order >= required_level.rank_order
+          )
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM availability_blocks block
+          WHERE block.user_id = member.id
+            AND block.status = 'active'
+            AND (block.ministry_id IS NULL OR block.ministry_id = $1)
+            AND block.start_date <= $3::DATE
+            AND block.end_date >= $3::DATE
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM responsibility_assignments event_assignment
+          WHERE event_assignment.user_id = member.id
+            AND event_assignment.event_id = $5
+            AND event_assignment.status = ANY($4)
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM responsibility_assignments other_assignment
+          JOIN events other_event ON other_event.id = other_assignment.event_id
+          JOIN event_responsibilities other_responsibility
+            ON other_responsibility.id = other_assignment.responsibility_id
+          WHERE other_assignment.user_id = member.id
+            AND other_assignment.status = ANY($4)
+            AND other_event.id <> $5
+            AND other_event.status NOT IN ('cancelled', 'archived')
+            AND other_event.start_time
+              + COALESCE(other_responsibility.relative_start_minutes, 0)
+                * INTERVAL '1 minute' < $7
+            AND other_event.end_time >
+              $6::TIMESTAMPTZ
+              + COALESCE($9::INT, 0) * INTERVAL '1 minute'
+        )
+      LIMIT 1
     `,
-    [
-      responsibility.ministry_id,
-      userId,
-      eventDate,
-      ACTIVE_ASSIGNMENT_STATUSES,
-      event.id,
-      event.start_time,
-      event.end_time,
-      responsibility.required_ministry_level_id,
-      Number(responsibility.relative_start_minutes || 0),
-      responsibility.required_group_id,
-    ],
+    hasMinistryGroupSchema
+      ? [
+          responsibility.ministry_id,
+          userId,
+          eventDate,
+          ACTIVE_ASSIGNMENT_STATUSES,
+          event.id,
+          event.start_time,
+          event.end_time,
+          responsibility.required_ministry_level_id,
+          Number(responsibility.relative_start_minutes || 0),
+          responsibility.required_group_id,
+        ]
+      : [
+          responsibility.ministry_id,
+          userId,
+          eventDate,
+          ACTIVE_ASSIGNMENT_STATUSES,
+          event.id,
+          event.start_time,
+          event.end_time,
+          responsibility.required_ministry_level_id,
+          Number(responsibility.relative_start_minutes || 0),
+        ],
   )
   const member = eligibleResult.rows[0]
   if (!member) {
@@ -3555,9 +3876,6 @@ const saveEventAssignments = async (
       status: 409,
     })
   }
-  const coordinatorAccess = event.ministry_id
-    ? await getMinistryAccess(client, context.user, event.ministry_id)
-    : { canManage: false }
   for (const responsibility of responsibilityResult.rows) {
     if (responsibility.is_public_assignment) {
       throw Object.assign(
@@ -3565,14 +3883,12 @@ const saveEventAssignments = async (
         { status: 409 },
       )
     }
-    if (!coordinatorAccess.canManage) {
-      await requireMinistryAccess(
-        client,
-        context.user,
-        responsibility.ministry_id,
-        true,
-      )
-    }
+    await requireMinistryAccess(
+      client,
+      context.user,
+      responsibility.ministry_id,
+      true,
+    )
     const positionSlots = normalizedSlots.filter(
       (slot: any) => slot.responsibilityId === responsibility.id,
     )
@@ -4346,6 +4662,59 @@ const updateEvent = async (
 
   if (body.action === "save_assignments") {
     return saveEventAssignments(client, context, event, body)
+  }
+
+  if (body.action === "auto_fill_event") {
+    const targetMinistryId = cleanText(body.ministryId, 100)
+    if (!targetMinistryId) {
+      throw Object.assign(new Error("Ministry is required"), { status: 400 })
+    }
+    await requireMinistryAccess(
+      client,
+      context.user,
+      targetMinistryId,
+      true,
+    )
+    const eventMinistryResult = await client.query(
+      `
+        SELECT 1
+        WHERE $1::UUID = $2::UUID
+          OR EXISTS (
+            SELECT 1
+            FROM event_ministries
+            WHERE event_id = $3
+              AND ministry_id = $2
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM event_responsibilities
+            WHERE event_id = $3
+              AND ministry_id = $2
+          )
+      `,
+      [event.ministry_id, targetMinistryId, event.id],
+    )
+    if (!eventMinistryResult.rowCount) {
+      throw Object.assign(
+        new Error("This ministry does not participate in the event"),
+        { status: 409 },
+      )
+    }
+    const schedule = await fillAndReviewAutomaticSchedule(
+      client,
+      context,
+      event.id,
+      [],
+      targetMinistryId,
+      "ministry_overview_auto_fill",
+      false,
+    )
+    return {
+      ...schedule,
+      shortages: schedule.shortages.filter(
+        (shortage) => shortage.ministryId === targetMinistryId,
+      ),
+    }
   }
 
   if (body.action === "apply_matching_conflicts") {

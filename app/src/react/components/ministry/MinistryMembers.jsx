@@ -19,6 +19,7 @@ import {
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 import MinistryPendingInvitations from "./MinistryPendingInvitations"
+import { MinistryListSkeleton } from "./MinistryLoadingSkeleton"
 
 const roleLabels = {
   owner: "Owner",
@@ -319,7 +320,7 @@ const MinistryMembers = ({ data, activeAction }) => {
   }
 
   if (isLoading) {
-    return <p className="p-6 text-center text-gray-500">Loading members...</p>
+    return <MinistryListSkeleton label="Loading ministry members" />
   }
 
   if (!memberData) {

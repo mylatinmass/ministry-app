@@ -5,6 +5,7 @@ import {
   ChevronRightIcon,
   EyeIcon,
   EyeSlashIcon,
+  InformationCircleIcon,
   UserCircleIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline"
@@ -45,11 +46,14 @@ const MinistryWorkspace = ({ data }) => {
     isMember ? "schedule" : "overview",
   )
   const [actionId, setActionId] = React.useState(() =>
-    isMember ? "month" : "summary",
+    isMember ? "month" : "upcoming",
   )
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false)
   const closeMobileMenu = React.useCallback(() => setMobileMenuOpen(false), [])
   const mobileMenuRef = useAccessibleDialog(mobileMenuOpen, closeMobileMenu)
+  const [learnMoreOpen, setLearnMoreOpen] = React.useState(false)
+  const closeLearnMore = React.useCallback(() => setLearnMoreOpen(false), [])
+  const learnMoreRef = useAccessibleDialog(learnMoreOpen, closeLearnMore)
   const [profileMenuOpen, setProfileMenuOpen] = React.useState(false)
   const [familyData, setFamilyData] = React.useState(null)
   const [messageUnreadCount, setMessageUnreadCount] = React.useState(0)
@@ -60,9 +64,6 @@ const MinistryWorkspace = ({ data }) => {
   const activeAction =
     activeSection.actions.find((item) => item.id === actionId) ||
     activeSection.actions[0]
-  const isMobileCalendarView =
-    activeSection.id === "schedule" &&
-    ["month", "week", "today", "custom"].includes(activeAction.id)
   const isSchedule = activeSection.id === "schedule"
 
   React.useEffect(() => {
@@ -244,45 +245,42 @@ const MinistryWorkspace = ({ data }) => {
           <header className="ministry-workspace-header ministry-responsive-header flex items-center border-b border-gray-100 px-4 py-2 bg-white">
             <div className="contents">
               <div className="order-1 min-w-0 flex-1">
-                <div className="flex items-center gap-2 lg:hidden">
+                <div className="flex items-start gap-2">
                   <button
                     type="button"
                     onClick={() => setMobileMenuOpen(true)}
                     aria-label="Open account menu"
-                    className="rounded-lg border border-gray-200 bg-white p-2 text-gray-600"
+                    className="mt-0.5 rounded-lg border border-gray-200 bg-white p-2 text-gray-600 lg:hidden"
                   >
                     <Bars3Icon className="size-5 shrink-0" />
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => openWorkspaceArea("overview", "summary")}
-                    className="min-w-0 text-left text-sm font-semibold leading-tight text-[#6f4f34]"
-                  >
-                    Ministry · {activeSection.label}
-                  </button>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#C1A387] sm:text-xs">
+                      Ministry
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => openWorkspaceArea("overview", "upcoming")}
+                      className="mt-0.5 block max-w-full truncate text-left century-font text-xl uppercase leading-tight text-gray-900 sm:text-2xl lg:mt-1 lg:text-4xl"
+                    >
+                      {data.ministry.name}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLearnMoreOpen(true)}
+                      className="mt-1 inline-flex items-center gap-1.5 text-xs font-semibold text-[#896542] transition hover:text-[#6f4f34] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#896542] sm:text-sm"
+                    >
+                      <InformationCircleIcon
+                        aria-hidden="true"
+                        className="size-4"
+                      />
+                      <span className="lg:hidden">Learn more</span>
+                      <span className="hidden lg:inline">
+                        Learn more about this ministry
+                      </span>
+                    </button>
+                  </div>
                 </div>
-                <p className="hidden text-xs font-semibold uppercase tracking-[0.16em] text-[#C1A387] lg:block">
-                  {data.ministry.name}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => openWorkspaceArea("overview", "summary")}
-                  className={`hidden lg:block century-font text-3xl text-gray-900 lg:mt-1 lg:text-4xl ${
-                    isMobileCalendarView ? "sr-only lg:not-sr-only" : ""
-                  }`}
-                >
-                  Ministry
-                </button>
-                <p className="mt-1 hidden text-sm font-semibold text-[#896542] lg:block">
-                  {activeSection.label}
-                </p>
-                <p
-                  className={` hidden lg:block mt-2 max-w-2xl text-sm leading-relaxed text-gray-500 sm:text-base ${
-                    isMobileCalendarView ? "hidden lg:block" : ""
-                  }`}
-                >
-                  {activeSection.description}
-                </p>
               </div>
               <div className="relative order-3 ml-auto flex shrink-0 items-center gap-2">
                 <div className="text-right">
@@ -495,6 +493,62 @@ const MinistryWorkspace = ({ data }) => {
           </div>
         </div>
       )}
+
+      <div
+        className={`fixed inset-0 z-[80] transition ${
+          learnMoreOpen ? "pointer-events-auto" : "pointer-events-none"
+        }`}
+        aria-hidden={!learnMoreOpen}
+      >
+        <button
+          type="button"
+          aria-label="Close ministry information"
+          onClick={closeLearnMore}
+          tabIndex={learnMoreOpen ? 0 : -1}
+          className={`absolute inset-0 bg-black/35 backdrop-blur-[1px] transition-opacity duration-300 ${
+            learnMoreOpen ? "opacity-100" : "opacity-0"
+          }`}
+        />
+        <aside
+          ref={learnMoreRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ministry-learn-more-title"
+          tabIndex={-1}
+          className={`absolute inset-y-0 right-0 flex w-[92%] max-w-md flex-col bg-white shadow-2xl transition-transform duration-300 ease-out ${
+            learnMoreOpen ? "translate-x-0" : "translate-x-full"
+          }`}
+        >
+          <div className="flex items-start justify-between border-b border-gray-100 p-5 sm:p-6">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#C1A387]">
+                About this ministry
+              </p>
+              <h2
+                id="ministry-learn-more-title"
+                className="mt-1 century-font text-3xl uppercase leading-tight text-[#6f4f34]"
+              >
+                {data.ministry.name}
+              </h2>
+            </div>
+            <button
+              type="button"
+              onClick={closeLearnMore}
+              tabIndex={learnMoreOpen ? 0 : -1}
+              className="rounded-lg border border-gray-200 bg-white p-2 text-gray-500 transition hover:border-[#C1A387] hover:text-[#896542]"
+              aria-label="Close ministry information"
+            >
+              <XMarkIcon aria-hidden="true" className="size-5" />
+            </button>
+          </div>
+          <div className="ministry-scroll-region flex-1 overflow-y-auto p-5 sm:p-6">
+            <p className="text-base leading-7 text-gray-600">
+              {data.ministry.description ||
+                "No description has been added for this ministry yet."}
+            </p>
+          </div>
+        </aside>
+      </div>
 
       <nav
         aria-label={`${activeSection.label} actions`}

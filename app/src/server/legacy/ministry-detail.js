@@ -90,6 +90,7 @@ const handler = async (event) => {
       statsResult,
       templatesResult,
       eventsResult,
+      openRolesResult,
       calendarEventsResult,
       familyResult,
       familyAssignmentsResult,
@@ -130,18 +131,22 @@ const handler = async (event) => {
                 AND e.status IN ('draft', 'published')
             ) AS upcoming_events,
             (
-              SELECT count(*)
+              SELECT coalesce(sum(greatest(
+                er.quantity_needed - coalesce((
+                  SELECT sum(ra.quantity)
+                  FROM responsibility_assignments ra
+                  WHERE ra.responsibility_id = er.id
+                    AND ra.status NOT IN ('declined', 'cancelled')
+                ), 0),
+                0
+              )), 0)
               FROM event_responsibilities er
               JOIN events e ON e.id = er.event_id
-              WHERE (
-                  er.ministry_id = $1
-                  OR (
-                    er.ministry_id IS NULL
-                    AND e.ministry_id = $1
-                  )
-                )
-                AND er.status = 'open'
+              WHERE coalesce(er.ministry_id, e.ministry_id) = $1
+                AND er.status <> 'cancelled'
+                AND coalesce(er.unlimited_capacity, false) = false
                 AND e.status IN ('draft', 'published')
+                AND e.end_time >= now()
             ) AS open_responsibilities,
             (
               SELECT count(*)
@@ -216,6 +221,22 @@ const handler = async (event) => {
               FROM event_responsibilities er
               WHERE er.event_id = e.id
             ) AS responsibility_count,
+            (
+              SELECT coalesce(sum(greatest(
+                er.quantity_needed - coalesce((
+                  SELECT sum(ra.quantity)
+                  FROM responsibility_assignments ra
+                  WHERE ra.responsibility_id = er.id
+                    AND ra.status NOT IN ('declined', 'cancelled')
+                ), 0),
+                0
+              )), 0)
+              FROM event_responsibilities er
+              WHERE er.event_id = e.id
+                AND er.status <> 'cancelled'
+                AND er.is_required = true
+                AND coalesce(er.unlimited_capacity, false) = false
+            ) AS open_position_count,
             EXISTS (
               SELECT 1
               FROM responsibility_assignments ra
@@ -255,6 +276,56 @@ const handler = async (event) => {
         `,
         [ministry.id, user.id, isRegularMember]
       ),
+      isRegularMember
+        ? Promise.resolve({ rows: [] })
+        : client.query(
+        `
+          SELECT
+            e.id AS event_id,
+            e.title AS event_title,
+            e.start_time,
+            e.status AS event_status,
+            er.id AS responsibility_id,
+            er.name AS responsibility_name,
+            er.quantity_needed,
+            greatest(
+              er.quantity_needed - coalesce(sum(ra.quantity) FILTER (
+                WHERE ra.status NOT IN ('declined', 'cancelled')
+              ), 0),
+              0
+            )::INT AS open_quantity,
+            level.name AS required_level_name
+          FROM event_responsibilities er
+          JOIN events e ON e.id = er.event_id
+          LEFT JOIN responsibility_assignments ra
+            ON ra.responsibility_id = er.id
+          LEFT JOIN ministry_levels level
+            ON level.id = er.required_ministry_level_id
+          WHERE coalesce(er.ministry_id, e.ministry_id) = $1
+            AND er.status <> 'cancelled'
+            AND coalesce(er.unlimited_capacity, false) = false
+            AND e.status IN ('draft', 'published')
+            AND e.end_time >= now()
+          GROUP BY
+            e.id,
+            e.title,
+            e.start_time,
+            e.status,
+            er.id,
+            er.name,
+            er.quantity_needed,
+            er.sort_order,
+            level.name
+          HAVING greatest(
+            er.quantity_needed - coalesce(sum(ra.quantity) FILTER (
+              WHERE ra.status NOT IN ('declined', 'cancelled')
+            ), 0),
+            0
+          ) > 0
+          ORDER BY e.start_time, lower(e.title), er.sort_order, lower(er.name)
+        `,
+        [ministry.id]
+      ),
       client.query(
         `
           SELECT
@@ -277,7 +348,23 @@ const handler = async (event) => {
               FROM event_responsibilities er
               WHERE er.event_id = e.id
                 AND er.status <> 'cancelled'
-            ) AS responsibility_count
+            ) AS responsibility_count,
+            (
+              SELECT coalesce(sum(greatest(
+                er.quantity_needed - coalesce((
+                  SELECT sum(ra.quantity)
+                  FROM responsibility_assignments ra
+                  WHERE ra.responsibility_id = er.id
+                    AND ra.status NOT IN ('declined', 'cancelled')
+                ), 0),
+                0
+              )), 0)
+              FROM event_responsibilities er
+              WHERE er.event_id = e.id
+                AND er.status <> 'cancelled'
+                AND er.is_required = true
+                AND coalesce(er.unlimited_capacity, false) = false
+            ) AS open_position_count
           FROM events e
           JOIN ministries coordinator ON coordinator.id = e.ministry_id
           LEFT JOIN templates template ON template.id = e.template_id
@@ -358,6 +445,7 @@ const handler = async (event) => {
       return {
         ...event,
         responsibility_count: Number(event.responsibility_count),
+        open_position_count: Number(event.open_position_count),
         is_assigned: profileAssignments.some(
           (assignment) => assignment.profileId === user.id
         ),
@@ -410,6 +498,17 @@ const handler = async (event) => {
         responsibility_count: Number(template.responsibility_count),
       })),
       events: eventsResult.rows.map(addProfileAssignments),
+      openRoles: openRolesResult.rows.map((role) => ({
+        eventId: role.event_id,
+        eventTitle: role.event_title,
+        startTime: role.start_time,
+        eventStatus: role.event_status,
+        responsibilityId: role.responsibility_id,
+        responsibilityName: role.responsibility_name,
+        quantityNeeded: Number(role.quantity_needed),
+        openQuantity: Number(role.open_quantity),
+        requiredLevelName: role.required_level_name || "",
+      })),
       calendarEvents: Array.from(calendarEventMap.values()).sort(
         (left, right) =>
           new Date(left.start_time).getTime() -

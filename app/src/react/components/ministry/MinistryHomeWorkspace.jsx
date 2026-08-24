@@ -7,9 +7,22 @@ import {
   ChatBubbleLeftRightIcon,
   ChevronRightIcon,
   ExclamationTriangleIcon,
+  AcademicCapIcon,
+  BookOpenIcon,
+  CameraIcon,
+  HandRaisedIcon,
+  HeartIcon,
+  MagnifyingGlassIcon,
+  MegaphoneIcon,
+  MusicalNoteIcon,
   PlusIcon,
+  ShieldCheckIcon,
+  SparklesIcon,
+  StarIcon,
+  UserGroupIcon,
   UserCircleIcon,
   UserMinusIcon,
+  WrenchScrewdriverIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
@@ -36,6 +49,53 @@ const accessLabels = {
   super_admin: "Super Admin",
   admin: "Leader",
   member: "Member",
+}
+
+const ministryIconRules = [
+  { words: ["choir", "music", "schola", "organ"], Icon: MusicalNoteIcon },
+  { words: ["altar", "sacrist", "acolyte", "server"], Icon: SparklesIcon },
+  { words: ["usher", "hospitality", "greeter"], Icon: HandRaisedIcon },
+  { words: ["school", "catech", "education", "class"], Icon: AcademicCapIcon },
+  { words: ["book", "library", "liturgy", "lector"], Icon: BookOpenIcon },
+  { words: ["charity", "outreach", "care", "mercy"], Icon: HeartIcon },
+  { words: ["security", "safety"], Icon: ShieldCheckIcon },
+  { words: ["communication", "bulletin", "announcement"], Icon: MegaphoneIcon },
+  { words: ["photo", "video", "media"], Icon: CameraIcon },
+  {
+    words: ["maintenance", "grounds", "clean", "facility"],
+    Icon: WrenchScrewdriverIcon,
+  },
+  { words: ["youth", "family", "men", "women"], Icon: UserGroupIcon },
+]
+
+const getMinistryIcon = (name = "") => {
+  const normalizedName = name.toLowerCase()
+  return (
+    ministryIconRules.find(({ words }) =>
+      words.some((word) => normalizedName.includes(word)),
+    )?.Icon || StarIcon
+  )
+}
+
+const ministrySortOptions = {
+  name_asc: {
+    label: "Name: A–Z",
+    compare: (a, b) => a.name.localeCompare(b.name),
+  },
+  name_desc: {
+    label: "Name: Z–A",
+    compare: (a, b) => b.name.localeCompare(a.name),
+  },
+  members_desc: {
+    label: "Most members",
+    compare: (a, b) =>
+      b.memberCount - a.memberCount || a.name.localeCompare(b.name),
+  },
+  templates_desc: {
+    label: "Most templates",
+    compare: (a, b) =>
+      b.templateCount - a.templateCount || a.name.localeCompare(b.name),
+  },
 }
 
 const EmptyDashboardBlock = ({ title, text }) => (
@@ -87,8 +147,76 @@ const DashboardAction = ({ icon: Icon, count, label, onClick, urgent = false }) 
   </button>
 )
 
-const MinistryCards = ({ ministries, isManagedProfile, actor, onReturn }) => {
-  if (!ministries.length) {
+const MinistryCards = ({
+  ministries,
+  isManagedProfile,
+  actor,
+  onReturn,
+  canAddMinistry,
+}) => {
+  const [ministryItems, setMinistryItems] = React.useState(ministries)
+  const [searchQuery, setSearchQuery] = React.useState("")
+  const [sortBy, setSortBy] = React.useState("name_asc")
+  const [isAddOpen, setIsAddOpen] = React.useState(false)
+  const [newMinistry, setNewMinistry] = React.useState({
+    name: "",
+    description: "",
+  })
+  const [createError, setCreateError] = React.useState("")
+  const [isCreating, setIsCreating] = React.useState(false)
+  const closeAddDialog = React.useCallback(() => setIsAddOpen(false), [])
+  const addDialogRef = useAccessibleDialog(isAddOpen, closeAddDialog)
+
+  React.useEffect(() => setMinistryItems(ministries), [ministries])
+
+  const visibleMinistries = React.useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    return ministryItems
+      .filter(
+        (ministry) =>
+          !query ||
+          ministry.name.toLowerCase().includes(query) ||
+          ministry.description?.toLowerCase().includes(query),
+      )
+      .sort(ministrySortOptions[sortBy].compare)
+  }, [ministryItems, searchQuery, sortBy])
+
+  const openAddDialog = () => {
+    setCreateError("")
+    setIsAddOpen(true)
+  }
+
+  const createMinistry = async (event) => {
+    event.preventDefault()
+    setCreateError("")
+    setIsCreating(true)
+
+    try {
+      const token = window.sessionStorage.getItem(MINISTRY_SESSION_KEY)
+      const response = await fetch(getFunctionEndpoint("ministry-create"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(newMinistry),
+      })
+      const result = await response.json()
+      if (!response.ok) {
+        throw new Error(result.message || "Unable to add ministry")
+      }
+
+      setMinistryItems((current) => [...current, result.ministry])
+      setNewMinistry({ name: "", description: "" })
+      setIsAddOpen(false)
+    } catch (error) {
+      setCreateError(error.message)
+    } finally {
+      setIsCreating(false)
+    }
+  }
+
+  if (!ministryItems.length && !canAddMinistry) {
     return (
       <div className="rounded-xl border border-gray-200 p-8 text-center text-gray-500">
         This profile does not have access to any ministries yet.
@@ -106,43 +234,197 @@ const MinistryCards = ({ ministries, isManagedProfile, actor, onReturn }) => {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
-      {ministries.map((ministry) => (
-        <Link
-          key={ministry.id}
-          to={`/${ministry.slug}`}
-          className="flex min-h-56 flex-col rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:border-[#C1A387] hover:shadow-md"
-        >
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <h3 className="century-font text-2xl text-[#896542]">
-              {ministry.name}
-            </h3>
-            <span className="rounded-full bg-gray-100 px-2 py-1 text-xs uppercase text-gray-500">
-              {ministry.status}
-            </span>
-          </div>
-          <p className="flex-grow text-sm leading-relaxed text-gray-600">
-            {ministry.description || "No description has been added yet."}
+    <div>
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center">
+        <label className="relative flex-1">
+          <span className="sr-only">Search ministries</span>
+          <MagnifyingGlassIcon
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3.5 top-1/2 size-5 -translate-y-1/2 text-gray-400"
+          />
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search ministries"
+            className="h-12 w-full rounded-xl border border-gray-200 bg-white pl-11 pr-4 text-gray-800 shadow-sm outline-none transition placeholder:text-gray-400 focus:border-[#C1A387] focus:ring-2 focus:ring-[#C1A387]/20"
+          />
+        </label>
+        <label>
+          <span className="sr-only">Sort ministries</span>
+          <select
+            value={sortBy}
+            onChange={(event) => setSortBy(event.target.value)}
+            className="h-12 w-full rounded-xl border border-gray-200 bg-white px-4 text-gray-700 shadow-sm outline-none transition focus:border-[#C1A387] focus:ring-2 focus:ring-[#C1A387]/20 sm:w-auto"
+          >
+            {Object.entries(ministrySortOptions).map(([value, option]) => (
+              <option key={value} value={value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {canAddMinistry && (
+          <button
+            type="button"
+            onClick={openAddDialog}
+            className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-[#896542] px-5 font-semibold text-white shadow-sm transition hover:bg-[#6f4f34] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#896542]"
+          >
+            <PlusIcon aria-hidden="true" className="size-5" />
+            Add ministry
+          </button>
+        )}
+      </div>
+
+      {visibleMinistries.length ? (
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+          {visibleMinistries.map((ministry) => {
+            const MinistryIcon = getMinistryIcon(ministry.name)
+            return (
+              <Link
+                key={ministry.id}
+                to={`/${ministry.slug}`}
+                className="flex flex-col rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition hover:-translate-y-1 hover:border-[#C1A387] hover:shadow-md"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#f4ede6] text-[#896542]">
+                    <MinistryIcon aria-hidden="true" className="size-5" />
+                  </span>
+                  <h3 className="century-font text-2xl text-[#896542]">
+                    {ministry.name}
+                  </h3>
+                </div>
+                <div className="mt-4 border-t border-gray-100 pt-3 text-sm text-gray-500">
+                  <p className="font-semibold text-[#896542]">
+                    {accessLabels[ministry.accessLevel] || ministry.accessLevel}
+                  </p>
+                  {ministry.canServe && (
+                    <p className="font-semibold text-green-700">
+                      Serving member
+                    </p>
+                  )}
+                  <p>
+                    {ministry.memberCount} serving{" "}
+                    {ministry.memberCount === 1 ? "member" : "members"} ·{" "}
+                    {ministry.templateCount}{" "}
+                    {ministry.templateCount === 1 ? "template" : "templates"}
+                  </p>
+                </div>
+              </Link>
+            )
+          })}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed border-gray-300 px-6 py-12 text-center">
+          <p className="font-semibold text-gray-700">
+            {searchQuery ? "No ministries found" : "No ministries yet"}
           </p>
-          <div className="mt-5 border-t border-gray-100 pt-4 text-sm text-gray-500">
-            <p className="font-semibold text-[#896542]">
-              {accessLabels[ministry.accessLevel] || ministry.accessLevel}
-            </p>
-            {ministry.canServe && (
-              <p className="font-semibold text-green-700">Serving member</p>
-            )}
-            <p>
-              {ministry.memberCount} serving{" "}
-              {ministry.memberCount === 1 ? "member" : "members"} ·{" "}
-              {ministry.templateCount}{" "}
-              {ministry.templateCount === 1 ? "template" : "templates"}
-            </p>
+          <p className="mt-1 text-sm text-gray-500">
+            {searchQuery
+              ? "Try a different search."
+              : "Add the first ministry to get started."}
+          </p>
+        </div>
+      )}
+
+      {isAddOpen && canAddMinistry && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeAddDialog()
+          }}
+        >
+          <div
+            ref={addDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-ministry-title"
+            tabIndex={-1}
+            className="ministry-dialog-surface w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl sm:p-8"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2
+                  id="add-ministry-title"
+                  className="century-font text-3xl text-[#896542]"
+                >
+                  Add ministry
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Create a new ministry workspace.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeAddDialog}
+                className="rounded-lg p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
+                aria-label="Close add ministry dialog"
+              >
+                <XMarkIcon aria-hidden="true" className="size-6" />
+              </button>
+            </div>
+            <form onSubmit={createMinistry} className="mt-6 space-y-5">
+              <label className="block">
+                <span className="text-sm font-semibold text-gray-700">
+                  Ministry name
+                </span>
+                <input
+                  required
+                  maxLength={120}
+                  value={newMinistry.name}
+                  onChange={(event) =>
+                    setNewMinistry((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
+                  }
+                  className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-4 outline-none focus:border-[#C1A387] focus:ring-2 focus:ring-[#C1A387]/20"
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-semibold text-gray-700">
+                  Description{" "}
+                  <span className="font-normal text-gray-400">(optional)</span>
+                </span>
+                <textarea
+                  rows={4}
+                  maxLength={500}
+                  value={newMinistry.description}
+                  onChange={(event) =>
+                    setNewMinistry((current) => ({
+                      ...current,
+                      description: event.target.value,
+                    }))
+                  }
+                  className="mt-2 w-full resize-none rounded-xl border border-gray-200 px-4 py-3 outline-none focus:border-[#C1A387] focus:ring-2 focus:ring-[#C1A387]/20"
+                />
+              </label>
+              {createError && (
+                <p role="alert" className="text-sm text-red-600">
+                  {createError}
+                </p>
+              )}
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={closeAddDialog}
+                  className="rounded-xl border border-gray-200 px-5 py-3 font-semibold text-gray-600 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isCreating || !newMinistry.name.trim()}
+                  className="rounded-xl bg-[#896542] px-5 py-3 font-semibold text-white transition hover:bg-[#6f4f34] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isCreating ? "Adding…" : "Add ministry"}
+                </button>
+              </div>
+            </form>
           </div>
-          <span className="mt-4 text-sm font-semibold text-[#896542]">
-            Open ministry →
-          </span>
-        </Link>
-      ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -744,6 +1026,7 @@ const MinistryHomeWorkspace = ({ data }) => {
         isManagedProfile={data.isManagedProfile}
         actor={data.actor}
         onReturn={returnToGuardian}
+        canAddMinistry={currentUser.globalRole === "super_admin"}
       />
     )
   } else if (sectionId === "members" && canManageMembers) {

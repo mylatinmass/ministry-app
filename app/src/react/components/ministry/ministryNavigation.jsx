@@ -19,7 +19,6 @@ import {
   NoSymbolIcon,
   PencilSquareIcon,
   PlusIcon,
-  Squares2X2Icon,
   TableCellsIcon,
   UserCircleIcon,
   UserGroupIcon,
@@ -47,14 +46,15 @@ const supportSection = {
 const ministrySections = [
   {
     id: "overview",
-    label: "Overview",
+    label: "Ministry",
     icon: HomeIcon,
     description:
       "A clear view of upcoming work, coverage, and ministry activity.",
     actions: [
-      action("summary", "Summary", Squares2X2Icon),
-      action("activity", "Activity", ListBulletIcon),
-      action("alerts", "Alerts", BellAlertIcon),
+      action("upcoming", "Upcoming", CalendarDaysIcon),
+      action("members", "Members", UserGroupIcon),
+      action("roles", "Open Roles", CheckCircleIcon),
+      action("templates", "Templates", DocumentDuplicateIcon),
     ],
   },
   {

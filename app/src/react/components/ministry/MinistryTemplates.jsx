@@ -9,6 +9,7 @@ import {
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
+import { MinistryCardGridSkeleton } from "./MinistryLoadingSkeleton"
 
 const emptyResponsibility = (ministryId = "") => ({
   clientId:
@@ -22,7 +23,7 @@ const emptyResponsibility = (ministryId = "") => ({
   quantityNeeded: 1,
   approvalRequired: false,
   substitutionAllowed: true,
-  isRequired: true,
+  isRequired: false,
   requiredLevelId: "",
   requiredGroupId: "",
   relativeStartMinutes: 0,
@@ -66,6 +67,8 @@ const MinistryTemplates = ({ data, activeAction }) => {
   const [isSaving, setIsSaving] = React.useState(false)
   const [message, setMessage] = React.useState("")
   const [errorMessage, setErrorMessage] = React.useState("")
+  const [levelErrors, setLevelErrors] = React.useState({})
+  const [editingMinistryId, setEditingMinistryId] = React.useState("")
 
   const endpoint = React.useMemo(() => {
     if (typeof window === "undefined") return ""
@@ -104,6 +107,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
   React.useEffect(() => {
     if (activeAction.id === "new-template" && !form.templateId) {
       setForm(initialForm(data.ministry.id))
+      setEditingMinistryId("")
     }
   }, [activeAction.id, data.ministry.id])
 
@@ -155,7 +159,14 @@ const MinistryTemplates = ({ data, activeAction }) => {
       ],
     }))
 
-  const updateResponsibility = (clientId, field, value) =>
+  const updateResponsibility = (clientId, field, value) => {
+    if (field === "requiredLevelId") {
+      setLevelErrors((current) => {
+        const next = { ...current }
+        delete next[clientId]
+        return next
+      })
+    }
     setForm((current) => ({
       ...current,
       responsibilities: current.responsibilities.map((responsibility) =>
@@ -164,8 +175,14 @@ const MinistryTemplates = ({ data, activeAction }) => {
           : responsibility,
       ),
     }))
+  }
 
-  const changeResponsibilityMinistry = (clientId, ministryId) =>
+  const changeResponsibilityMinistry = (clientId, ministryId) => {
+    setLevelErrors((current) => {
+      const next = { ...current }
+      delete next[clientId]
+      return next
+    })
     setForm((current) => ({
       ...current,
       ministries: current.ministries.some(
@@ -187,6 +204,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
           : responsibility,
       ),
     }))
+  }
 
   const removeResponsibility = (clientId) =>
     setForm((current) => ({
@@ -199,6 +217,14 @@ const MinistryTemplates = ({ data, activeAction }) => {
   const editTemplate = (template) => {
     setMessage("")
     setErrorMessage("")
+    setLevelErrors({})
+    setEditingMinistryId(
+      template.canEditTemplate
+        ? ""
+        : template.editableMinistryIds?.includes(data.ministry.id)
+          ? data.ministry.id
+          : template.editableMinistryIds?.[0] || "",
+    )
     setForm({
       templateId: template.id,
       name: template.name,
@@ -222,16 +248,75 @@ const MinistryTemplates = ({ data, activeAction }) => {
 
   const submitTemplate = async (event) => {
     event.preventDefault()
-    setIsSaving(true)
     setMessage("")
     setErrorMessage("")
+
+    const editableResponsibilities = editingMinistryId
+      ? form.responsibilities.filter(
+          (responsibility) =>
+            responsibility.ministryId === editingMinistryId,
+        )
+      : form.responsibilities
+    const nextLevelErrors = editableResponsibilities.reduce(
+      (errors, responsibility) => {
+        if (!responsibility.requiredLevelId) return errors
+        const selectedLevel = library.levels.find(
+          (level) => level.id === responsibility.requiredLevelId,
+        )
+        if (
+          !selectedLevel ||
+          selectedLevel.ministryId !== responsibility.ministryId
+        ) {
+          const ministry = library.ministries.find(
+            (item) => item.id === responsibility.ministryId,
+          )
+          errors[responsibility.clientId] = `${
+            responsibility.name || "This responsibility"
+          } has an unavailable level. Choose a level from ${
+            ministry?.name || "this ministry"
+          }, or choose No level required.`
+        }
+        return errors
+      },
+      {},
+    )
+
+    if (Object.keys(nextLevelErrors).length) {
+      setLevelErrors(nextLevelErrors)
+      setErrorMessage(
+        Object.keys(nextLevelErrors).length === 1
+          ? "One required level needs your attention. The field is highlighted below."
+          : `${Object.keys(nextLevelErrors).length} required levels need your attention. The fields are highlighted below.`,
+      )
+      window.requestAnimationFrame(() => {
+        const firstError = document.querySelector("[data-level-error='true']")
+        firstError?.scrollIntoView({ behavior: "smooth", block: "center" })
+        firstError?.querySelector("select")?.focus({ preventScroll: true })
+      })
+      return
+    }
+
+    setLevelErrors({})
+    setIsSaving(true)
     try {
       const response = await fetch(
         getFunctionEndpoint("scheduling/templates"),
         {
           method: form.templateId ? "PATCH" : "POST",
           headers: requestHeaders(),
-          body: JSON.stringify(form),
+          body: JSON.stringify(
+            editingMinistryId
+              ? {
+                  action: "update_ministry_block",
+                  templateId: form.templateId,
+                  ministryId: editingMinistryId,
+                  block: form.ministries.find(
+                    (block) => block.ministryId === editingMinistryId,
+                  ),
+                  responsibilities: editableResponsibilities,
+                }
+              : form,
+          ),
         },
       )
       const result = await response.json()
@@ -239,9 +324,14 @@ const MinistryTemplates = ({ data, activeAction }) => {
         throw new Error(result.message || "Unable to save template")
       }
       setMessage(
-        form.templateId ? "Template updated." : "Template created.",
+        editingMinistryId
+          ? `${ministryName(editingMinistryId)} section updated for future events.`
+          : form.templateId
+            ? "Template updated."
+            : "Template created.",
       )
       setForm(initialForm(data.ministry.id))
+      setEditingMinistryId("")
       await loadTemplates()
     } catch (error) {
       setErrorMessage(error.message)
@@ -309,9 +399,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
     "Ministry"
 
   if (isLoading) {
-    return (
-      <p className="p-6 text-center text-gray-500">Loading templates...</p>
-    )
+    return <MinistryCardGridSkeleton label="Loading ministry templates" />
   }
 
   const actionIsLibrary = ["duplicate", "archive"].includes(activeAction.id)
@@ -360,7 +448,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
                 <button
                   type="button"
                   onClick={() => duplicateTemplate(template)}
-                  disabled={!template.canEdit}
+                  disabled={!template.canEditTemplate}
                   className="mt-5 inline-flex items-center gap-2 rounded-lg bg-[#896542] px-4 py-2 text-sm font-semibold text-white hover:bg-[#6f4f34]"
                 >
                   <DocumentDuplicateIcon className="size-4" />
@@ -375,7 +463,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
                       template.status === "archived" ? "active" : "archived",
                     )
                   }
-                  disabled={!template.canEdit}
+                  disabled={!template.canEditTemplate}
                   className="mt-5 inline-flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:border-[#C1A387]"
                 >
                   <ArchiveBoxIcon className="size-4" />
@@ -392,16 +480,31 @@ const MinistryTemplates = ({ data, activeAction }) => {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-[#896542]">
-                    Master event template
+                    {editingMinistryId
+                      ? "Ministry-managed section"
+                      : "Master event template"}
                   </p>
                   <h3 className="mt-2 century-font text-2xl text-gray-900">
-                    {form.templateId ? "Edit template" : "New template"}
+                    {editingMinistryId
+                      ? `${ministryName(editingMinistryId)} · ${form.name}`
+                      : form.templateId
+                        ? "Edit template"
+                        : "New template"}
                   </h3>
+                  {editingMinistryId && (
+                    <p className="mt-2 text-sm text-gray-500">
+                      Your changes apply to this ministry’s section on future
+                      events. Other ministry sections remain unchanged.
+                    </p>
+                  )}
                 </div>
                 {form.templateId && (
                   <button
                     type="button"
-                    onClick={() => setForm(initialForm(data.ministry.id))}
+                    onClick={() => {
+                      setForm(initialForm(data.ministry.id))
+                      setEditingMinistryId("")
+                    }}
                     className="text-sm font-semibold text-gray-500 hover:text-[#896542]"
                   >
                     New instead
@@ -417,6 +520,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
                     onChange={(event) =>
                       updateField("name", event.target.value)
                     }
+                    disabled={Boolean(editingMinistryId)}
                     required
                     placeholder="High Mass with Procession"
                     className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-4 font-normal outline-none focus:border-[#896542] focus:ring-2 focus:ring-[#896542]/15"
@@ -429,6 +533,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
                     onChange={(event) =>
                       updateField("participationType", event.target.value)
                     }
+                    disabled={Boolean(editingMinistryId)}
                     className="mt-2 h-12 w-full rounded-xl border border-gray-200 bg-white px-4 font-normal"
                   >
                     <option value="members">Members</option>
@@ -444,12 +549,14 @@ const MinistryTemplates = ({ data, activeAction }) => {
                   onChange={(event) =>
                     updateField("description", event.target.value)
                   }
+                  disabled={Boolean(editingMinistryId)}
                   rows={3}
                   className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-3 font-normal outline-none focus:border-[#896542] focus:ring-2 focus:ring-[#896542]/15"
                 />
               </label>
             </section>
 
+            {!editingMinistryId && (
             <section className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
               <h3 className="century-font text-2xl text-gray-900">
                 Participating ministries
@@ -490,8 +597,15 @@ const MinistryTemplates = ({ data, activeAction }) => {
                 })}
               </div>
             </section>
+            )}
 
-            {form.ministries.map((block) => {
+            {form.ministries
+              .filter(
+                (block) =>
+                  !editingMinistryId ||
+                  block.ministryId === editingMinistryId,
+              )
+              .map((block) => {
               const responsibilities = form.responsibilities.filter(
                 (responsibility) =>
                   responsibility.ministryId === block.ministryId,
@@ -516,7 +630,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
                       className="inline-flex items-center gap-2 rounded-lg bg-[#896542] px-3 py-2 text-sm font-semibold text-white hover:bg-[#6f4f34]"
                     >
                       <PlusIcon className="size-4" />
-                      Add responsibility
+                      Add position or responsibility
                     </button>
                   </div>
                   <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -630,6 +744,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
                           <div className="mt-3 grid gap-3 sm:grid-cols-2">
                             <select
                               value={responsibility.ministryId}
+                              disabled={Boolean(editingMinistryId)}
                               onChange={(event) =>
                                 changeResponsibilityMinistry(
                                   responsibility.clientId,
@@ -668,33 +783,53 @@ const MinistryTemplates = ({ data, activeAction }) => {
                                 {library.ministries.find((ministry) => ministry.id === responsibility.ministryId).groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
                               </select>
                             )}
-                            <select
-                              value={responsibility.requiredLevelId || ""}
-                              onChange={(event) =>
-                                updateResponsibility(
-                                  responsibility.clientId,
-                                  "requiredLevelId",
-                                  event.target.value,
-                                )
+                            <div
+                              data-level-error={
+                                levelErrors[responsibility.clientId]
+                                  ? "true"
+                                  : undefined
                               }
-                              aria-label={`Required level for ${
-                                responsibility.name || "responsibility"
-                              }`}
-                              className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm"
                             >
-                              <option value="">No level required</option>
-                              {library.levels
-                                .filter(
-                                  (level) =>
-                                    level.ministryId ===
-                                    responsibility.ministryId,
-                                )
-                                .map((level) => (
-                                  <option key={level.id} value={level.id}>
-                                    Level {level.rankOrder} · {level.name}
-                                  </option>
-                                ))}
-                            </select>
+                              <select
+                                value={responsibility.requiredLevelId || ""}
+                                onChange={(event) =>
+                                  updateResponsibility(
+                                    responsibility.clientId,
+                                    "requiredLevelId",
+                                    event.target.value,
+                                  )
+                                }
+                                aria-label={`Required level for ${
+                                  responsibility.name || "responsibility"
+                                }`}
+                                aria-invalid={Boolean(
+                                  levelErrors[responsibility.clientId],
+                                )}
+                                className={`h-10 w-full rounded-lg border bg-white px-3 text-sm outline-none ${
+                                  levelErrors[responsibility.clientId]
+                                    ? "border-red-500 bg-red-50 ring-2 ring-red-200"
+                                    : "border-gray-200 focus:border-[#896542]"
+                                }`}
+                              >
+                                <option value="">No level required</option>
+                                {library.levels
+                                  .filter(
+                                    (level) =>
+                                      level.ministryId ===
+                                      responsibility.ministryId,
+                                  )
+                                  .map((level) => (
+                                    <option key={level.id} value={level.id}>
+                                      Level {level.rankOrder} · {level.name}
+                                    </option>
+                                  ))}
+                              </select>
+                              {levelErrors[responsibility.clientId] && (
+                                <p className="mt-1 text-xs font-medium text-red-700">
+                                  {levelErrors[responsibility.clientId]}
+                                </p>
+                              )}
+                            </div>
                             <select
                               value={responsibility.relativeStartMinutes}
                               onChange={(event) =>
@@ -780,9 +915,15 @@ const MinistryTemplates = ({ data, activeAction }) => {
                         </div>
                       ))
                     ) : (
-                      <p className="rounded-xl border border-dashed border-gray-200 p-5 text-center text-sm text-gray-500">
-                        No responsibilities in this ministry block yet.
-                      </p>
+                      <div className="rounded-xl border border-dashed border-gray-200 p-5 text-center">
+                        <p className="text-sm font-semibold text-gray-700">
+                          Flexible ministry staffing
+                        </p>
+                        <p className="mt-1 text-sm text-gray-500">
+                          No positions are required. This ministry can organize
+                          as many participants as needed for each event.
+                        </p>
+                      </div>
                     )}
                   </div>
                 </section>
@@ -797,7 +938,9 @@ const MinistryTemplates = ({ data, activeAction }) => {
               <CheckIcon className="size-5" />
               {isSaving
                 ? "Saving..."
-                : form.templateId
+                : editingMinistryId
+                  ? `Update ${ministryName(editingMinistryId)} section`
+                  : form.templateId
                   ? "Update template"
                   : "Create template"}
             </button>

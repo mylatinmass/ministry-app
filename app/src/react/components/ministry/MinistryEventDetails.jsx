@@ -236,7 +236,14 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
   const eventCanChange =
     !["cancelled", "completed", "archived"].includes(
       displayedEvent.status,
-    ) && manageableMinistries.length > 0
+    ) &&
+    (Boolean(details?.canManageEvent) ||
+      manageableMinistries.length > 0 ||
+      Boolean(
+        details?.responsibilities?.some(
+          (responsibility) => responsibility.canManage,
+        ),
+      ))
 
   const startAddingResponsibility = () => {
     setMessage("")
@@ -483,13 +490,20 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
           body: JSON.stringify({
             action: "save_assignments",
             eventId: displayedEvent.id,
-            slots: Object.entries(assignmentSelections).map(
-              ([slotKey, selection]) => ({
+            slots: Object.entries(assignmentSelections)
+              .filter(([slotKey]) => {
+                const responsibilityId = slotKey.split(":")[0]
+                return details?.responsibilities?.some(
+                  (responsibility) =>
+                    responsibility.id === responsibilityId &&
+                    responsibility.canManage,
+                )
+              })
+              .map(([slotKey, selection]) => ({
                 responsibilityId: slotKey.split(":")[0],
                 assignmentId: selection?.assignmentId || null,
                 userId: selection?.userId || null,
-              }),
-            ),
+              })),
           }),
         },
       )
@@ -1503,13 +1517,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                   </h3>
                   <div className="mt-3 space-y-2">
                     {group.items.map((responsibility) => {
-                      const canManage = details.canManageEvent || responsibility.isPublicAssignment
-                        ? details.canManageEvent
-                        : manageableMinistries.some(
-                            (ministry) =>
-                              ministry.ministryId ===
-                              responsibility.ministryId,
-                          )
+                      const canManage = Boolean(responsibility.canManage)
                       return (
                         <article
                           key={responsibility.id}

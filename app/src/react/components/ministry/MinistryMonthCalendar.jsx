@@ -4,16 +4,10 @@ import MinistryEventAgenda, { toDateKey } from "./MinistryEventAgenda"
 
 const getMonthCells = (month) => {
   const firstDay = new Date(month.getFullYear(), month.getMonth(), 1)
-  const daysInMonth = new Date(
-    month.getFullYear(),
-    month.getMonth() + 1,
-    0,
-  ).getDate()
-  const cellCount = firstDay.getDay() + daysInMonth > 35 ? 42 : 35
   const gridStart = new Date(firstDay)
   gridStart.setDate(firstDay.getDate() - firstDay.getDay())
 
-  return Array.from({ length: cellCount }, (_, index) => {
+  return Array.from({ length: 42 }, (_, index) => {
     const date = new Date(gridStart)
     date.setDate(gridStart.getDate() + index)
     return date
@@ -31,20 +25,29 @@ const MinistryMonthCalendar = ({
     const startingDate = selectedDate || new Date()
     return new Date(startingDate.getFullYear(), startingDate.getMonth(), 1)
   })
-  const monthCells = React.useMemo(
-    () => getMonthCells(visibleMonth),
+  const [showsTwoMonths, setShowsTwoMonths] = React.useState(false)
+  const visibleMonths = React.useMemo(
+    () => [
+      visibleMonth,
+      new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 1),
+    ],
     [visibleMonth],
+  )
+  const displayedMonths = React.useMemo(
+    () => (showsTwoMonths ? visibleMonths : [visibleMonth]),
+    [showsTwoMonths, visibleMonth, visibleMonths],
   )
   const monthEvents = React.useMemo(
     () =>
       events.filter((event) => {
         const eventDate = new Date(event.start_time)
-        return (
-          eventDate.getFullYear() === visibleMonth.getFullYear() &&
-          eventDate.getMonth() === visibleMonth.getMonth()
+        return displayedMonths.some(
+          (month) =>
+            eventDate.getFullYear() === month.getFullYear() &&
+            eventDate.getMonth() === month.getMonth(),
         )
       }),
-    [events, visibleMonth],
+    [displayedMonths, events],
   )
   const selectedKey = selectedDate ? toDateKey(selectedDate) : null
   const agendaEvents = selectedKey
@@ -60,16 +63,34 @@ const MinistryMonthCalendar = ({
 
   React.useEffect(() => {
     if (!selectedDate) return
+    const selectedMonthIsVisible = displayedMonths.some(
+      (month) =>
+        selectedDate.getFullYear() === month.getFullYear() &&
+        selectedDate.getMonth() === month.getMonth(),
+    )
+    if (selectedMonthIsVisible) return
     setVisibleMonth(
       new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1),
     )
-  }, [selectedDate])
+  }, [displayedMonths, selectedDate])
+
+  React.useEffect(() => {
+    const media = window.matchMedia("(min-width: 1024px)")
+    const updateMonthCount = () => setShowsTwoMonths(media.matches)
+    updateMonthCount()
+    media.addEventListener("change", updateMonthCount)
+    return () => media.removeEventListener("change", updateMonthCount)
+  }, [])
 
   React.useEffect(() => {
     const start = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1)
-    const end = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 0)
+    const end = new Date(
+      visibleMonth.getFullYear(),
+      visibleMonth.getMonth() + (showsTwoMonths ? 2 : 1),
+      0,
+    )
     onVisibleRangeChange?.(toDateKey(start), toDateKey(end))
-  }, [onVisibleRangeChange, visibleMonth])
+  }, [onVisibleRangeChange, showsTwoMonths, visibleMonth])
 
   const moveMonth = (amount) => {
     onSelectedDateChange(null)
@@ -86,20 +107,20 @@ const MinistryMonthCalendar = ({
       return
     }
 
-    if (date.getMonth() !== visibleMonth.getMonth()) {
-      setVisibleMonth(new Date(date.getFullYear(), date.getMonth(), 1))
-    }
     onSelectedDateChange(date)
   }
 
+  const visibleMonthLabel = displayedMonths
+    .map((month) =>
+      new Intl.DateTimeFormat("en-US", { month: "long" }).format(month),
+    )
+    .join(" and ")
   const agendaLabel = selectedDate
     ? `Events on ${new Intl.DateTimeFormat("en-US", {
         month: "short",
         day: "numeric",
       }).format(selectedDate)}`
-    : `Events in ${new Intl.DateTimeFormat("en-US", {
-        month: "long",
-      }).format(visibleMonth)}`
+    : `Events in ${visibleMonthLabel}`
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-white">
@@ -107,104 +128,110 @@ const MinistryMonthCalendar = ({
         aria-label="Monthly calendar"
         className="shrink-0 bg-white px-1 sm:px-4 lg:px-0"
       >
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex w-full items-center gap-2">
-            <div className="grid grid-cols-[auto_1fr_auto] w-full justify-center items-center text-gray-300 gap-3 ">
-              <button
-                type="button"
-                aria-label="Previous month"
-                onClick={() => moveMonth(-1)}
-                className="w-max p-2 rounded-xl transition hover:bg-gray-100"
-              >
-                <ChevronLeftIcon className="size-5" />
-              </button>
-              <h3 className="mx-auto text-black ">
-                {new Intl.DateTimeFormat("en-US", {
-                  month: "long",
-                  year: "numeric",
-                }).format(visibleMonth)}
-              </h3>
+        <div className="relative xl:mx-12">
+          <button
+            type="button"
+            aria-label="Previous month"
+            onClick={() => moveMonth(-1)}
+            className="absolute left-2 top-1 z-10 rounded-xl p-2 text-gray-400 transition hover:bg-gray-100 lg:top-1/2 lg:-translate-y-1/2 xl:-left-12"
+          >
+            <ChevronLeftIcon className="size-5" />
+          </button>
+          <button
+            type="button"
+            aria-label="Next month"
+            onClick={() => moveMonth(1)}
+            className="absolute right-2 top-1 z-10 rounded-xl p-2 text-gray-400 transition hover:bg-gray-100 lg:top-1/2 lg:-translate-y-1/2 xl:-right-12"
+          >
+            <ChevronRightIcon className="size-5" />
+          </button>
 
-              <button
-                type="button"
-                aria-label="Next month"
-                onClick={() => moveMonth(1)}
-                className="w-max p-2 rounded-xl transition hover:bg-gray-100"
-              >
-                <ChevronRightIcon className="size-5" />
-              </button>
-            </div>
-            {/* <div className="flex items-center text-gray-300">
-                <button
-                  type="button"
-                  aria-label="Previous month"
-                  onClick={() => moveMonth(-1)}
-                  className="rounded-full p-1.5 transition hover:bg-gray-50 hover:text-gray-700"
+          <div className="grid gap-6 lg:grid-cols-2">
+            {displayedMonths.map((month) => {
+              const monthKey = `${month.getFullYear()}-${month.getMonth()}`
+              const monthCells = getMonthCells(month)
+
+              return (
+                <section
+                  key={monthKey}
+                  aria-label={new Intl.DateTimeFormat("en-US", {
+                    month: "long",
+                    year: "numeric",
+                  }).format(month)}
+                  className="w-full rounded-xl border border-gray-100 p-3"
                 >
-                  <ChevronLeftIcon className="size-5" />
-                </button>
-                <button
-                  type="button"
-                  aria-label="Next month"
-                  onClick={() => moveMonth(1)}
-                  className="rounded-full p-1.5 transition hover:bg-gray-50 hover:text-gray-700"
-                >
-                  <ChevronRightIcon className="size-5" />
-                </button>
-              </div> */}
+                  <h3 className="text-center font-semibold text-gray-900">
+                    {new Intl.DateTimeFormat("en-US", {
+                      month: "long",
+                      year: "numeric",
+                    }).format(month)}
+                  </h3>
+                  <div className="mt-2 grid grid-cols-7 text-center text-xs font-semibold uppercase tracking-[0.14em] text-gray-700 sm:text-sm">
+                    {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((day) => (
+                      <div key={day} className="py-2">
+                        <abbr title={day} className="no-underline" aria-label={day}>
+                          {day.slice(0, 1)}
+                        </abbr>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-7 gap-y-2 text-center sm:gap-y-3">
+                    {monthCells.map((date) => {
+                      const key = toDateKey(date)
+                      const inMonth =
+                        date.getMonth() === month.getMonth() &&
+                        date.getFullYear() === month.getFullYear()
+
+                      if (!inMonth) {
+                        return (
+                          <span
+                            key={`${monthKey}-${key}`}
+                            aria-hidden="true"
+                            className="mx-auto size-10 sm:size-12"
+                          />
+                        )
+                      }
+
+                      const dayEvents = eventsByDate[key] || []
+                      const hasEvents = dayEvents.length > 0
+                      const hasAssignment = dayEvents.some((event) => event.is_assigned)
+                      const selected = key === selectedKey
+                      const isToday = key === todayKey
+
+                      return (
+                        <button
+                          key={`${monthKey}-${key}`}
+                          type="button"
+                          onClick={() => selectDay(date)}
+                          aria-pressed={selected}
+                          className={`mx-auto flex size-10 items-center justify-center rounded-2xl text-sm font-semibold text-gray-900 transition sm:size-12 sm:text-base ${
+                            selected
+                              ? "bg-[#eee2d5] text-[#6f4f34] ring-2 ring-[#C1A387]"
+                              : hasEvents
+                                ? hasAssignment
+                                  ? "ring-2 ring-orange-400"
+                                  : "ring-2 ring-gray-300"
+                                : isToday
+                                  ? "ring-1 ring-gray-300"
+                                  : ""
+                          } hover:bg-gray-50`}
+                          aria-current={isToday ? "date" : undefined}
+                          aria-label={`${new Intl.DateTimeFormat("en-US", {
+                            weekday: "long",
+                            month: "long",
+                            day: "numeric",
+                            year: "numeric",
+                          }).format(date)}; ${dayEvents.length} ${dayEvents.length === 1 ? "event" : "events"}${hasAssignment ? "; includes your assignment" : ""}`}
+                        >
+                          {date.getDate()}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </section>
+              )
+            })}
           </div>
-        </div>
-
-        <div className="grid grid-cols-7 text-center text-xs font-semibold uppercase tracking-[0.14em] text-gray-700 sm:text-sm">
-          {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((day) => (
-            <div key={day} className="py-2">
-              <abbr title={day} className="no-underline" aria-label={day}>
-                {day.slice(0, 1)}
-              </abbr>
-            </div>
-          ))}
-        </div>
-
-        <div className="grid grid-cols-7 gap-y-2 text-center sm:gap-y-3">
-          {monthCells.map((date) => {
-            const key = toDateKey(date)
-            const inMonth = date.getMonth() === visibleMonth.getMonth()
-            const dayEvents = eventsByDate[key] || []
-            const hasEvents = dayEvents.length > 0
-            const hasAssignment = dayEvents.some((event) => event.is_assigned)
-            const selected = key === selectedKey
-            const isToday = key === todayKey
-
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => selectDay(date)}
-                aria-pressed={selected}
-                className={`mx-auto flex size-10 items-center justify-center rounded-2xl text-sm font-semibold transition sm:size-12 sm:text-base ${
-                  inMonth ? "text-gray-900" : "text-gray-300"
-                } ${
-                  selected
-                    ? "bg-[#eee2d5] text-[#6f4f34] ring-2 ring-[#C1A387]"
-                    : hasEvents
-                      ? hasAssignment
-                        ? "ring-2 ring-orange-400"
-                        : "ring-2 ring-gray-300"
-                      : isToday
-                        ? "ring-1 ring-gray-300"
-                        : ""
-                } hover:bg-gray-50`}
-                aria-label={`${new Intl.DateTimeFormat("en-US", {
-                  weekday: "long",
-                  month: "long",
-                  day: "numeric",
-                  year: "numeric",
-                }).format(date)}; ${dayEvents.length} ${dayEvents.length === 1 ? "event" : "events"}${hasAssignment ? "; includes your assignment" : ""}`}
-              >
-                {date.getDate()}
-              </button>
-            )
-          })}
         </div>
       </section>
 

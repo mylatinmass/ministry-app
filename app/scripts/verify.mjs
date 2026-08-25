@@ -120,6 +120,9 @@ const conflictTicker = await read(
 const eventAgenda = await read(
   "src/react/components/ministry/MinistryEventAgenda.jsx",
 )
+const eventPinsMigration = await read(
+  "migrations/20260824_01_add_profile_event_pins.sql",
+)
 const globalStyles = await read("src/styles/global.css")
 const priestMinistryMigration = await read(
   "migrations/20260813_01_add_priest_ministry_and_event_conflicts.sql",
@@ -860,7 +863,16 @@ assert.doesNotMatch(accountNavigation, /label:\s*"My Events"/)
 assert.match(homeWorkspace, /Create event/)
 assert.match(homeWorkspace, /<MinistryEvents/)
 assert.match(homeWorkspace, /events=\{data\.calendarEvents\}/)
-assert.match(homeWorkspace, /Public events, ministry events visible to this profile/)
+assert.match(homeWorkspace, /Pinned Events/)
+assert.match(homeWorkspace, /action: "set_pin"/)
+assert.match(homeWorkspace, /eventView === "pinned"/)
+assert.match(eventAgenda, /onTogglePin/)
+assert.match(eventAgenda, /aria-pressed=\{isPinned\}/)
+assert.match(schedulingEvents, /const setEventPin/)
+assert.match(schedulingEvents, /profile\.event_pinned/)
+assert.match(ministryList, /AS is_pinned/)
+assert.match(eventPinsMigration, /CREATE TABLE IF NOT EXISTS ministry_event_pins/)
+assert.match(eventPinsMigration, /PRIMARY KEY \(user_id, event_id\)/)
 assert.match(ministryList, /WHERE e\.status IN \('published', 'cancelled', 'completed'\)/)
 assert.match(ministryList, /pendingSubRequestEventIds/)
 assert.match(ministryList, /unfilledPositionEventIds/)

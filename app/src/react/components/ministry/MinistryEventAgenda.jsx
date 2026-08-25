@@ -1,5 +1,5 @@
 import * as React from "react"
-import { MapPinIcon } from "@heroicons/react/24/outline"
+import { StarIcon } from "@heroicons/react/24/outline"
 
 const useIsomorphicLayoutEffect =
   typeof window === "undefined" ? React.useEffect : React.useLayoutEffect
@@ -31,6 +31,9 @@ const MinistryEventAgenda = ({
   focusRequestKey,
   onPastStart,
   onFutureEnd,
+  pinnedEventIds = [],
+  pinUpdatingEventIds = [],
+  onTogglePin,
 }) => {
   const scrollContainerRef = React.useRef(null)
   const boundaryLockRef = React.useRef(false)
@@ -216,27 +219,34 @@ const MinistryEventAgenda = ({
                           ? event.title
                           : ordoEventName || event.title
                         : event.title
+                      const isPinned = pinnedEventIds.includes(event.id)
+                      const isPinUpdating = pinUpdatingEventIds.includes(event.id)
 
                       return (
-                        <button
+                        <div
                           key={event.id}
-                          type="button"
-                          onClick={() => onEventSelect?.(event)}
-                          aria-label={`${eventName || templateName || "Event"}, ${new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(displayTime))}${event.is_assigned ? ", includes your assignment" : ""}`}
-                          className={`relative flex w-full flex-col gap-1 px-4 py-3 transition hover:bg-gray-50 ${
+                          className={`relative w-full transition hover:bg-gray-50 ${
                             showDateRail
-                              ? `items-stretch rounded-xl border ${
+                              ? `rounded-xl border ${
                                   event.is_assigned
                                     ? "border-l-8 border-orange-500 bg-orange-50/30"
                                     : "border-gray-100 bg-white"
                                 }`
-                              : `items-center border border-l-8 py-2 ${
+                              : `border border-l-8 ${
                                   event.is_assigned
                                     ? "border-orange-400"
                                     : "border-gray-200"
                                 }`
                           }`}
                         >
+                          <button
+                            type="button"
+                            onClick={() => onEventSelect?.(event)}
+                            aria-label={`${eventName || templateName || "Event"}, ${new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(displayTime))}${event.is_assigned ? ", includes your assignment" : ""}`}
+                            className={`flex w-full flex-col gap-1 px-4 py-3 text-left ${
+                              onTogglePin ? "pr-14" : ""
+                            } ${showDateRail ? "items-stretch" : "items-center py-2"}`}
+                          >
                           <div className="flex w-full flex-row items-center gap-2 text-sm leading-relaxed text-gray-400">
                             {showDateRail && (
                               <span className="font-semibold uppercase text-gray-500">
@@ -280,7 +290,26 @@ const MinistryEventAgenda = ({
                           </p>
                         )} */}
                           </div>
-                        </button>
+                          </button>
+                          {onTogglePin && (
+                            <button
+                              type="button"
+                              onClick={() => onTogglePin(event)}
+                              disabled={isPinUpdating}
+                              aria-pressed={isPinned}
+                              aria-label={`${isPinned ? "Unpin" : "Pin"} ${eventName || templateName || "event"}`}
+                              className={`absolute right-3 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-full transition disabled:opacity-50 ${
+                                isPinned
+                                  ? "bg-[#f4ede6] text-[#896542]"
+                                  : "text-gray-400 hover:bg-[#f7f3ef] hover:text-[#896542]"
+                              }`}
+                            >
+                              <StarIcon
+                                className={`size-5 ${isPinned ? "fill-current" : ""}`}
+                              />
+                            </button>
+                          )}
+                        </div>
                       )
                     })}
                   </div>

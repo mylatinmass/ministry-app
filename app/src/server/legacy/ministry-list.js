@@ -167,6 +167,12 @@ const handler = async (event) => {
             e.end_time,
             e.status,
             e.participation_type,
+            EXISTS (
+              SELECT 1
+              FROM ministry_event_pins pin
+              WHERE pin.event_id = e.id
+                AND pin.user_id = $1
+            ) AS is_pinned,
             (
               SELECT count(*)
               FROM event_responsibilities er

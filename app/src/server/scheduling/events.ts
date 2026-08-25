@@ -5513,6 +5513,82 @@ const previewRecurrenceChange = async (
   }
 }
 
+const setEventPin = async (
+  client: PoolClient,
+  context: any,
+  body: any,
+) => {
+  const eventId = cleanText(body.eventId, 100)
+  if (!eventId) {
+    throw Object.assign(new Error("Event is required"), { status: 400 })
+  }
+
+  const visibleEvent = await client.query(
+    `
+      SELECT event.id
+      FROM events event
+      WHERE event.id = $1
+        AND event.status IN ('published', 'cancelled', 'completed')
+        AND (
+          COALESCE(event.visibility, 'public') <> 'private'
+          OR EXISTS (
+            SELECT 1
+            FROM responsibility_assignments assignment
+            WHERE assignment.event_id = event.id
+              AND assignment.user_id = $2
+              AND assignment.status NOT IN ('declined', 'cancelled')
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM ministry_members access
+            JOIN ministries ministry ON ministry.id = access.ministry_id
+            WHERE access.user_id = $2
+              AND access.status = 'active'
+              AND access.level IN ('owner', 'admin')
+              AND ministry.slug = 'priests'
+          )
+          OR $3::BOOL
+        )
+      LIMIT 1
+    `,
+    [
+      eventId,
+      context.user.id,
+      ["owner", "super_admin"].includes(context.user.global_role),
+    ],
+  )
+  if (!visibleEvent.rows[0]) {
+    throw Object.assign(new Error("Event not found"), { status: 404 })
+  }
+
+  const pinned = body.pinned !== false
+  if (pinned) {
+    await client.query(
+      `
+        INSERT INTO ministry_event_pins (user_id, event_id, pinned_at)
+        VALUES ($1, $2, now())
+        ON CONFLICT (user_id, event_id)
+        DO UPDATE SET pinned_at = excluded.pinned_at
+      `,
+      [context.user.id, eventId],
+    )
+  } else {
+    await client.query(
+      `DELETE FROM ministry_event_pins WHERE user_id = $1 AND event_id = $2`,
+      [context.user.id, eventId],
+    )
+  }
+
+  await writeSchedulingAudit(client, context, {
+    action: pinned ? "profile.event_pinned" : "profile.event_unpinned",
+    entityType: "event",
+    entityId: eventId,
+    beforeData: { pinned: !pinned },
+    afterData: { pinned },
+  })
+  return { eventId, pinned }
+}
+
 export const handleEvents = async (request: Request) => {
   const client = await getPool().connect()
   try {
@@ -5614,6 +5690,11 @@ export const handleEvents = async (request: Request) => {
         )
       }
       if (request.method === "PATCH") {
+        if (body.action === "set_pin") {
+          const result = await setEventPin(client, context, body)
+          await client.query("COMMIT")
+          return json(result)
+        }
         const result: any = await updateEvent(client, context, body)
         await client.query("COMMIT")
         for (const eventId of result?.publishedEventIds || []) {

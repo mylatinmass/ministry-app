@@ -5,6 +5,7 @@ import {
   BellAlertIcon,
   CalendarDaysIcon,
   ChatBubbleLeftRightIcon,
+  CheckCircleIcon,
   ChevronRightIcon,
   ExclamationTriangleIcon,
   AcademicCapIcon,
@@ -473,6 +474,11 @@ const MinistryHomeWorkspace = ({ data }) => {
   })
   const [showCreateEvent, setShowCreateEvent] = React.useState(false)
   const [eventView, setEventView] = React.useState("all")
+  const [pinnedEventIds, setPinnedEventIds] = React.useState(() =>
+    data.calendarEvents.filter((event) => event.is_pinned).map((event) => event.id),
+  )
+  const [pinUpdatingEventIds, setPinUpdatingEventIds] = React.useState([])
+  const [pinError, setPinError] = React.useState("")
   const alertsSectionRef = React.useRef(null)
   const manageableMinistries = React.useMemo(
     () =>
@@ -524,6 +530,10 @@ const MinistryHomeWorkspace = ({ data }) => {
   }
   const eventSectionEvents = React.useMemo(() => {
     if (eventView === "mine") return upcomingAssignments
+    if (eventView === "pinned") {
+      const pinnedIds = new Set(pinnedEventIds)
+      return upcomingEvents.filter((event) => pinnedIds.has(event.id))
+    }
     const ids = eventView === "sub_requests"
       ? attention.pendingSubRequestEventIds
       : eventView === "unfilled"
@@ -532,7 +542,7 @@ const MinistryHomeWorkspace = ({ data }) => {
     if (!ids) return upcomingEvents
     const idSet = new Set(ids)
     return upcomingEvents.filter((event) => idSet.has(event.id))
-  }, [attention.pendingSubRequestEventIds, attention.unfilledPositionEventIds, eventView, upcomingAssignments, upcomingEvents])
+  }, [attention.pendingSubRequestEventIds, attention.unfilledPositionEventIds, eventView, pinnedEventIds, upcomingAssignments, upcomingEvents])
   const today = React.useMemo(() => new Date(), [])
   const todayLabel = React.useMemo(
     () =>
@@ -700,6 +710,135 @@ const MinistryHomeWorkspace = ({ data }) => {
 
   const returnToGuardian = () => {
     if (data.actor?.id) switchProfile(data.actor.id)
+  }
+
+  const togglePinnedEvent = async (event) => {
+    const wasPinned = pinnedEventIds.includes(event.id)
+    const nextPinned = !wasPinned
+    setPinError("")
+    setPinUpdatingEventIds((current) => [...current, event.id])
+    setPinnedEventIds((current) =>
+      nextPinned
+        ? [...new Set([...current, event.id])]
+        : current.filter((eventId) => eventId !== event.id),
+    )
+
+    try {
+      const token = window.sessionStorage.getItem(MINISTRY_SESSION_KEY)
+      const response = await fetch(getFunctionEndpoint("scheduling/events"), {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action: "set_pin",
+          eventId: event.id,
+          pinned: nextPinned,
+        }),
+      })
+      const result = await response.json()
+      if (!response.ok) {
+        throw new Error(result.message || "Unable to update this pin")
+      }
+    } catch (error) {
+      setPinnedEventIds((current) =>
+        wasPinned
+          ? [...new Set([...current, event.id])]
+          : current.filter((eventId) => eventId !== event.id),
+      )
+      setPinError(error.message)
+    } finally {
+      setPinUpdatingEventIds((current) =>
+        current.filter((eventId) => eventId !== event.id),
+      )
+    }
+  }
+
+  const guardianProfileName =
+    [data.actor?.firstName, data.actor?.lastName].filter(Boolean).join(" ") ||
+    data.actor?.username ||
+    "my profile"
+  const isViewingManagedProfile = Boolean(
+    data.isManagedProfile &&
+      data.actor?.id &&
+      currentUser?.id &&
+      data.actor.id !== currentUser.id,
+  )
+
+  const renderProfileMenu = (positionClassName) => {
+    if (!profileMenuOpen) return null
+
+    return (
+      <div
+        className={`ministry-profile-menu absolute z-50 rounded-xl border border-gray-200 bg-white text-left shadow-xl ${positionClassName}`}
+      >
+        {isViewingManagedProfile && (
+          <button
+            type="button"
+            onClick={returnToGuardian}
+            className="w-full rounded-t-xl bg-[#f7f3ef] px-4 py-3 text-left text-sm font-semibold text-[#6f4f34] hover:bg-[#f1e8df]"
+          >
+            Return to {guardianProfileName}
+          </button>
+        )}
+        {familyData?.profiles?.length > 0 && (
+          <div className="max-h-72 overflow-y-auto p-2">
+            {familyData.profiles.map((profile) => {
+              const active = familyData.activeProfile.id === profile.id
+              return (
+                <button
+                  key={profile.id}
+                  type="button"
+                  onClick={() => switchProfile(profile.id)}
+                  aria-current={active ? "true" : undefined}
+                  className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50 ${
+                    active
+                      ? "font-semibold text-[#6f4f34]"
+                      : "text-gray-700"
+                  }`}
+                >
+                  <span
+                    className={`size-2 shrink-0 rounded-full ${
+                      profile.alertCount > 0
+                        ? "bg-orange-400"
+                        : "bg-gray-300"
+                    }`}
+                    aria-label={
+                      profile.alertCount > 0
+                        ? `${profile.alertCount} unread alerts`
+                        : "No unread alerts"
+                    }
+                  />
+                  <span className="min-w-0 flex-1 truncate">
+                    {profile.firstName} {profile.lastName}
+                  </span>
+                  {active && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-[#896542]">
+                      Active
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => selectSection("profile")}
+          className="w-full border-t border-gray-100 px-4 py-3 text-left text-sm font-semibold text-[#896542] hover:bg-[#f7f3ef]"
+        >
+          Manage Profiles
+        </button>
+        <button
+          type="button"
+          onClick={signOut}
+          className="w-full border-t border-gray-100 px-4 py-3 text-left text-sm font-semibold text-[#896542] hover:bg-[#f7f3ef]"
+        >
+          Sign Out
+        </button>
+      </div>
+    )
   }
 
   let content
@@ -946,69 +1085,115 @@ const MinistryHomeWorkspace = ({ data }) => {
         />
       </div>
     ) : (
-      <div className="space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="century-font text-3xl text-gray-950">
-              {eventView === "mine"
-                ? "My Events"
-                : eventView === "sub_requests"
-                  ? "Sub Requests"
-                  : eventView === "unfilled"
-                    ? "Unfilled Positions"
-                    : "Events"}
-            </h2>
-            <p className="mt-1 text-sm text-gray-500">
-              {eventView === "mine"
-                ? "Upcoming events assigned to this profile."
-                : eventView === "sub_requests"
-                  ? "Events with substitute requests that need an administrator."
-                  : eventView === "unfilled"
-                    ? "Published events with required positions still open."
-                    : "Public events, ministry events visible to this profile, and assigned duties."}
-            </p>
+      <div className="flex h-full min-h-0 flex-col gap-5 pb-[calc(env(safe-area-inset-bottom)+4.75rem)] lg:pb-0">
+        <div className="relative flex shrink-0 flex-wrap items-center justify-center gap-3">
+          <div
+            className="hidden grid-cols-3 gap-1 rounded-2xl bg-gray-50 p-1.5 shadow-sm ring-1 ring-gray-100 lg:grid"
+            aria-label="Filter events"
+          >
+            {[
+              { id: "all", label: "All Events", icon: CalendarDaysIcon },
+              { id: "mine", label: "My Events", icon: CheckCircleIcon },
+              { id: "pinned", label: "Pinned Events", icon: StarIcon },
+            ].map((filter) => {
+              const Icon = filter.icon
+              const active = eventView === filter.id
+              return (
+                <button
+                  key={filter.id}
+                  type="button"
+                  onClick={() => setEventView(filter.id)}
+                  aria-pressed={active}
+                  className={`flex min-w-0 items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-medium transition sm:min-w-28 sm:px-4 sm:text-sm ${
+                    active
+                      ? "bg-white text-[#6f4f34] shadow-sm"
+                      : "text-gray-500 hover:bg-white/70 hover:text-gray-800"
+                  }`}
+                >
+                  <Icon className="size-5 shrink-0" />
+                  <span className="hidden sm:inline">{filter.label}</span>
+                  <span className="sm:hidden">
+                    {filter.id === "pinned" ? "Pinned" : filter.id === "mine" ? "Mine" : "All"}
+                  </span>
+                </button>
+              )
+            })}
           </div>
           {(hasGlobalAccess || manageableMinistries.length > 0) && (
             <button
               type="button"
               onClick={() => setShowCreateEvent(true)}
-              className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#6f4f34]"
+              className="hidden items-center gap-2 rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#6f4f34] lg:absolute lg:right-0 lg:inline-flex"
             >
               <PlusIcon className="size-5" />
               Create event
             </button>
           )}
         </div>
-        <div className="flex flex-wrap gap-2" aria-label="Filter events">
-          <button
-            type="button"
-            onClick={() => setEventView("all")}
-            className={`rounded-lg border px-3 py-2 text-sm font-semibold ${eventView === "all" ? "border-[#896542] bg-[#f7f3ef] text-[#6f4f34]" : "border-gray-200 bg-white text-gray-600"}`}
-          >
-            All Events
-          </button>
-          <button
-            type="button"
-            onClick={() => setEventView("mine")}
-            className={`rounded-lg border px-3 py-2 text-sm font-semibold ${eventView === "mine" ? "border-[#896542] bg-[#f7f3ef] text-[#6f4f34]" : "border-gray-200 bg-white text-gray-600"}`}
-          >
-            My Events
-          </button>
-          {["sub_requests", "unfilled"].includes(eventView) && (
+        {["sub_requests", "unfilled"].includes(eventView) && (
+          <div className="flex shrink-0 justify-center">
             <span className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-700">
-              Needs Attention
+              {eventView === "sub_requests"
+                ? "Substitute requests needing attention"
+                : "Required positions needing attention"}
             </span>
-          )}
-        </div>
-        {hasGlobalAccess && <VolunteerEvents />}
+          </div>
+        )}
+        {pinError && (
+          <p role="alert" className="shrink-0 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+            {pinError}
+          </p>
+        )}
         <MinistryEventAgenda
           events={eventSectionEvents}
-          label={eventView === "mine" ? "My events" : "Available events"}
-          emptyTitle={eventView === "mine" ? "No assigned events" : "Nothing needs attention"}
-          emptyText={eventView === "mine" ? "Upcoming duties assigned to this profile will appear here." : "There are no events matching this filter."}
+          label={eventView === "mine" ? "My events" : eventView === "pinned" ? "Pinned events" : "Available events"}
+          emptyTitle={eventView === "mine" ? "No assigned events" : eventView === "pinned" ? "No pinned events" : "Nothing needs attention"}
+          emptyText={eventView === "mine" ? "Upcoming duties assigned to this profile will appear here." : eventView === "pinned" ? "Use the star on an upcoming event to keep it in this profile's pinned list." : "There are no events matching this filter."}
           onEventSelect={setSelectedEvent}
+          showDateRail
           useAssignmentTime={eventView === "mine"}
+          pinnedEventIds={pinnedEventIds}
+          pinUpdatingEventIds={pinUpdatingEventIds}
+          onTogglePin={togglePinnedEvent}
         />
+        <nav
+          aria-label="Event actions"
+          className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 shadow-[0_-8px_30px_rgba(63,45,29,0.10)] backdrop-blur lg:hidden"
+        >
+          <div className="mx-auto grid max-w-xl grid-cols-4 gap-1">
+            {[
+              { id: "all", label: "All", icon: CalendarDaysIcon },
+              { id: "mine", label: "My Events", icon: CheckCircleIcon },
+              { id: "pinned", label: "Pinned", icon: StarIcon },
+            ].map((filter) => {
+              const Icon = filter.icon
+              const active = eventView === filter.id
+              return (
+                <button
+                  key={filter.id}
+                  type="button"
+                  onClick={() => setEventView(filter.id)}
+                  aria-pressed={active}
+                  className={`flex flex-col items-center gap-1 rounded-xl px-2 py-2 text-[11px] font-medium transition ${
+                    active ? "bg-[#f7f3ef] text-[#6f4f34]" : "text-gray-500"
+                  }`}
+                >
+                  <Icon className="size-5" />
+                  <span>{filter.label}</span>
+                </button>
+              )
+            })}
+            <button
+              type="button"
+              onClick={() => setShowCreateEvent(true)}
+              disabled={!(hasGlobalAccess || manageableMinistries.length > 0)}
+              className="flex flex-col items-center gap-1 rounded-xl px-2 py-2 text-[11px] font-medium text-gray-500 transition hover:bg-[#f7f3ef] hover:text-[#6f4f34] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <PlusIcon className="size-5" />
+              <span>Create New</span>
+            </button>
+          </div>
+        </nav>
       </div>
     )
   } else if (sectionId === "availability") {
@@ -1090,7 +1275,7 @@ const MinistryHomeWorkspace = ({ data }) => {
         </aside>
 
         <main className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
-          <header className="ministry-responsive-header flex items-center border-b border-gray-100 bg-white px-4 py-2 lg:hidden">
+          <header className="ministry-responsive-header flex shrink-0 items-center border-b border-gray-100 bg-white px-4 py-2 lg:px-6 lg:py-5">
             <div className="min-w-0 flex-1">
               <button
                 type="button"
@@ -1144,58 +1329,7 @@ const MinistryHomeWorkspace = ({ data }) => {
                 <UserCircleIcon className="size-7" />
               </button>
 
-              {profileMenuOpen && (
-                <div className="ministry-profile-menu absolute right-0 top-full z-50 mt-2 rounded-xl border border-gray-200 bg-white text-left shadow-xl">
-                  {familyData?.profiles?.length > 0 && (
-                    <div className="max-h-72 overflow-y-auto p-2">
-                      {familyData.profiles.map((profile) => {
-                        const active =
-                          familyData.activeProfile.id === profile.id
-                        return (
-                          <button
-                            key={profile.id}
-                            type="button"
-                            onClick={() => switchProfile(profile.id)}
-                            className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50 ${
-                              active
-                                ? "font-semibold text-[#6f4f34]"
-                                : "text-gray-700"
-                            }`}
-                          >
-                            <span
-                              className={`size-2 shrink-0 rounded-full ${
-                                profile.alertCount > 0
-                                  ? "bg-orange-400"
-                                  : "bg-gray-300"
-                              }`}
-                              aria-label={
-                                profile.alertCount > 0
-                                  ? `${profile.alertCount} unread alerts`
-                                  : "No unread alerts"
-                              }
-                            />
-                            <span>{profile.firstName} {profile.lastName}</span>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => selectSection("profile")}
-                    className="w-full border-t border-gray-100 px-4 py-3 text-left text-sm font-semibold text-[#896542] hover:bg-[#f7f3ef]"
-                  >
-                    Manage Profiles
-                  </button>
-                  <button
-                    type="button"
-                    onClick={signOut}
-                    className="w-full border-t border-gray-100 px-4 py-3 text-left text-sm font-semibold text-[#896542] hover:bg-[#f7f3ef]"
-                  >
-                    Sign Out
-                  </button>
-                </div>
-              )}
+              {renderProfileMenu("right-0 top-full mt-2")}
             </div>
           </header>
 
@@ -1207,7 +1341,8 @@ const MinistryHomeWorkspace = ({ data }) => {
 
           <div
             className={`min-h-0 flex-1 px-4 py-5 lg:px-6 ${
-              sectionId === "calendar"
+              sectionId === "calendar" ||
+              (sectionId === "events" && !showCreateEvent)
                 ? "overflow-hidden"
                 : "ministry-scroll-region overflow-y-auto"
             }`}

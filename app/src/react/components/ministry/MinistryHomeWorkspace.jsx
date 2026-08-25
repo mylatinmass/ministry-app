@@ -40,7 +40,6 @@ import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import MinistrySupport from "./MinistrySupport"
 import MinistryEvents from "./MinistryEvents"
 import MinistryMessages from "./MinistryMessages"
-import VolunteerEvents from "./VolunteerEvents"
 import ChapelSettings from "./ChapelSettings"
 import MinistryConflictTicker from "./MinistryConflictTicker"
 import { accountSections } from "./accountNavigation"
@@ -1050,9 +1049,7 @@ const MinistryHomeWorkspace = ({ data }) => {
     const createMinistry = manageableMinistries.find(
       (ministry) => ministry.id === createMinistryId,
     )
-    content = showCreateEvent && hasGlobalAccess ? (
-      <VolunteerEvents creating onBack={() => setShowCreateEvent(false)} />
-    ) : showCreateEvent && createMinistry ? (
+    content = showCreateEvent && createMinistry ? (
       <div className="space-y-5">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <label className="min-w-64 text-sm font-semibold text-gray-700">

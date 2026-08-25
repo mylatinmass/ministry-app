@@ -6,7 +6,6 @@ import {
   ExclamationTriangleIcon,
   NoSymbolIcon,
   PencilSquareIcon,
-  PlusIcon,
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
@@ -51,6 +50,7 @@ const initialForm = () => ({
   updateScope: "this_event",
   participationType: "members",
   visibility: "public",
+  rsvpEnabled: false,
 })
 
 const formatEventDate = (value) =>
@@ -159,7 +159,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
     () => templates.find((template) => template.id === form.templateId) || null,
     [templates, form.templateId],
   )
-  const priestPublishNeedsDraft =
+  const priestPublishNeedsAssignment =
     data.ministry?.slug === "priests" &&
     prioryOverview?.settings?.enabled &&
     !Object.values(assignmentSelections).some(Boolean)
@@ -332,7 +332,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
 
   const requestPriestAvailability = async () => {
     if (!form.eventId) {
-      setErrorMessage("Save this event as a draft before requesting Priory availability.")
+      setErrorMessage("Open an existing event before requesting Priory availability.")
       return
     }
     setIsRequestingPriest(true)
@@ -383,9 +383,9 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
     setForm((current) => ({
       ...current,
       templateId,
-      title: current.title || template?.name || "",
+      title: template ? template.name : "",
       description: current.description || template?.description || "",
-      participationType: template?.participationType || "members",
+      participationType: template?.participationType || current.participationType,
       visibility: privateByDefault ? "private" : current.visibility,
       roomIds:
         data.ministry?.slug === "priests" && current.roomIds.length === 0
@@ -448,6 +448,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       updateScope: "this_event",
       participationType: event.participation_type || "members",
       visibility: event.visibility || "public",
+      rsvpEnabled: Boolean(event.rsvp_enabled),
     })
   }
 
@@ -456,7 +457,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       ...initialForm(),
       sourceEventId: event.id,
       templateId: event.template_id || "",
-      title: `${event.title} Copy`,
+      title: event.template_id ? event.title : `${event.title} Copy`,
       description: event.description || "",
       location: event.location || "",
       roomIds: event.room_ids || [],
@@ -464,6 +465,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       endTime: "",
       participationType: event.participation_type || "members",
       visibility: event.visibility || "public",
+      rsvpEnabled: Boolean(event.rsvp_enabled),
     })
 
   const persistEvent = async (body, { editing, cloning }) => {
@@ -501,12 +503,9 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
     try {
       const editing = Boolean(form.eventId)
       const cloning = Boolean(form.sourceEventId)
-      const requestedStatus =
-        event.nativeEvent?.submitter?.value === "published"
-          ? "published"
-          : "draft"
       const body = {
         ...form,
+        ministryId: data.ministry.id,
         startTime: new Date(form.startTime).toISOString(),
         endTime: new Date(form.endTime).toISOString(),
         confirmationDeadline: form.confirmationDeadline
@@ -521,7 +520,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
         },
         updateScope: form.updateScope,
         action: cloning ? "clone" : undefined,
-        status: editing ? undefined : requestedStatus,
+        status: editing ? undefined : "published",
         assignments:
           !editing &&
           !cloning &&
@@ -886,14 +885,13 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
 
           {!form.eventId && !form.sourceEventId && (
             <label className="mt-6 block text-sm font-semibold text-gray-700">
-              Event template
+              Event template <span className="font-normal text-gray-500">(optional)</span>
               <select
                 value={form.templateId}
                 onChange={(event) => selectTemplate(event.target.value)}
-                required
                 className="mt-2 h-12 w-full rounded-xl border border-gray-200 bg-white px-4 font-normal"
               >
-                <option value="">Choose a template</option>
+                <option value="">No template — start with a blank event</option>
                 {templates.map((template) => (
                   <option key={template.id} value={template.id}>
                     {template.name} —{" "}
@@ -903,6 +901,9 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                   </option>
                 ))}
               </select>
+              <span className="mt-2 block text-xs font-normal text-gray-500">
+                Templates are optional presets for events that reuse predetermined logistics and positions.
+              </span>
             </label>
           )}
 
@@ -917,6 +918,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                   }
                   className="mt-2 h-12 w-full rounded-xl border border-gray-200 bg-white px-4 font-normal"
                 >
+                  <option value="">No template</option>
                   {templates.map((template) => (
                     <option key={template.id} value={template.id}>
                       {template.name}
@@ -977,8 +979,8 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
           )}
 
           {!templates.length && !form.eventId && !form.sourceEventId && (
-            <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-              Create an active template before creating an event.
+            <p className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+              No templates are available for this ministry. You can still publish a blank event and add its logistics later.
             </p>
           )}
 
@@ -1017,14 +1019,34 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                 Volunteer events can receive signups through a public link after the event is published.
               </span>
             </label>
+            <label className="flex items-start gap-3 rounded-xl border border-gray-200 p-4 text-sm text-gray-700 sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={form.rsvpEnabled}
+                onChange={(event) => updateField("rsvpEnabled", event.target.checked)}
+                className="mt-0.5 size-4 rounded border-gray-300 text-[#896542]"
+              />
+              <span>
+                <span className="block font-semibold">Allow member RSVP</span>
+                <span className="mt-1 block text-xs font-normal text-gray-500">
+                  Ministry members can answer whether they can attend. This is separate from position assignments.
+                </span>
+              </span>
+            </label>
             <label className="text-sm font-semibold text-gray-700 sm:col-span-2">
-              Event title
+              Event name
               <input
                 value={form.title}
                 onChange={(event) => updateField("title", event.target.value)}
                 required
-                className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-4 font-normal outline-none focus:border-[#896542] focus:ring-2 focus:ring-[#896542]/15"
+                disabled={Boolean(form.templateId)}
+                className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-4 font-normal outline-none focus:border-[#896542] focus:ring-2 focus:ring-[#896542]/15 disabled:bg-gray-50 disabled:text-gray-600"
               />
+              {form.templateId && (
+                <span className="mt-2 block text-xs font-normal text-gray-500">
+                  This event uses the template name. Remove the template to enter a different event name.
+                </span>
+              )}
             </label>
             <label className="text-sm font-semibold text-gray-700">
               Starts
@@ -1198,7 +1220,9 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                     </button>
                   </div>
                   {!form.eventId && (
-                    <p className="mt-2 text-xs text-gray-600">Save the event as a draft first. Then edit it and send the Priory request.</p>
+                    <p className="mt-2 text-xs text-gray-600">
+                      Priory requests can be sent while editing an existing event. New events must select an allocated priest before publishing.
+                    </p>
                   )}
                   {form.eventId && prioryOverview.requests
                     .filter((request) => request.eventId === form.eventId)
@@ -1230,7 +1254,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                       Position assignments
                     </h3>
                     <p className="mt-1 text-sm text-gray-500">
-                      Choose every position now. Nothing is saved until you save the draft or publish the event.
+                      Choose every position now. Nothing is saved until you publish the event.
                     </p>
                   </div>
                   {form.participationType !== "volunteers" &&
@@ -1247,7 +1271,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                 </div>
                 {creatingRepeatingEvent ? (
                   <p className="mt-4 rounded-lg bg-[#f7f3ef] p-3 text-sm text-gray-600">
-                    The app will fill each occurrence using eligible, available members and publish every conflict-free schedule. Dates with shortages or conflicts will be held for review.
+                    The app will fill each occurrence using eligible, available members. Any unfilled positions can be assigned after the events are published.
                   </p>
                 ) : form.participationType === "volunteers" ? (
                   <p className="mt-4 rounded-lg bg-[#f7f3ef] p-3 text-sm text-gray-600">
@@ -1481,51 +1505,46 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
           )}
 
           <div className="mt-6 flex flex-wrap gap-2">
-            <button
-              type="submit"
-              name="eventStatus"
-              value="draft"
-              disabled={
-                isSaving ||
-                (!form.eventId && !form.sourceEventId && !form.templateId)
-              }
-              className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-5 py-3 font-semibold text-white hover:bg-[#6f4f34] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {form.eventId ? (
+            {form.eventId ? (
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-5 py-3 font-semibold text-white hover:bg-[#6f4f34] disabled:cursor-not-allowed disabled:opacity-50"
+              >
                 <CheckIcon className="size-5" />
-              ) : form.sourceEventId ? (
-                <DocumentDuplicateIcon className="size-5" />
-              ) : (
-                <PlusIcon className="size-5" />
-              )}
-              {isSaving
-                ? "Saving..."
-                : form.eventId
-                  ? form.updateScope === "this_and_future" && !recurrencePreview
+                {isSaving
+                  ? "Saving..."
+                  : form.updateScope === "this_and_future" && !recurrencePreview
                     ? "Preview changes"
                     : form.updateScope === "this_and_future"
                       ? "Apply to this and future events"
-                      : "Update event"
-                  : form.sourceEventId
-                    ? "Create draft copy"
-                    : "SAVE DRAFT"}
-            </button>
-            {!form.eventId && !form.sourceEventId && (
+                      : "Update event"}
+              </button>
+            ) : (
               <button
                 type="submit"
-                name="eventStatus"
-                value="published"
-                disabled={isSaving || !form.templateId || priestPublishNeedsDraft}
+                disabled={
+                  isSaving ||
+                  priestPublishNeedsAssignment
+                }
                 className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <CheckIcon className="size-5" />
-                {isSaving ? "Saving..." : "PUBLISH EVENT"}
+                {form.sourceEventId ? (
+                  <DocumentDuplicateIcon className="size-5" />
+                ) : (
+                  <CheckIcon className="size-5" />
+                )}
+                {isSaving
+                  ? "Publishing..."
+                  : form.sourceEventId
+                    ? "PUBLISH COPY"
+                    : "PUBLISH EVENT"}
               </button>
             )}
           </div>
-          {priestPublishNeedsDraft && !form.eventId && !form.sourceEventId && (
+          {priestPublishNeedsAssignment && !form.eventId && !form.sourceEventId && (
             <p className="mt-2 text-sm font-semibold text-orange-700">
-              Select a priest covered by the Priory allocation, or save the event as a draft and request availability.
+              Select a priest covered by the Priory allocation before publishing.
             </p>
           )}
         </form>

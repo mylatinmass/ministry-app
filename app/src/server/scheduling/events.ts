@@ -321,22 +321,29 @@ const previewEventConflicts = async (
       new Set([event.ministry_id, ...participants.rows.map((row) => row.ministry_id)]),
     ).filter(Boolean) as string[]
   } else {
-    const structure = await loadTemplateStructure(
-      client,
-      cleanText(body.templateId, 100),
-    )
-    await requireMinistryAccess(
-      client,
-      context.user,
-      structure.template.ministry_id,
-      true,
-    )
-    ministryIds = Array.from(
-      new Set([
+    const templateId = cleanText(body.templateId, 100)
+    if (templateId) {
+      const structure = await loadTemplateStructure(client, templateId)
+      await requireMinistryAccess(
+        client,
+        context.user,
         structure.template.ministry_id,
-        ...structure.blocks.map((block: any) => block.ministry_id),
-      ]),
-    ).filter(Boolean) as string[]
+        true,
+      )
+      ministryIds = Array.from(
+        new Set([
+          structure.template.ministry_id,
+          ...structure.blocks.map((block: any) => block.ministry_id),
+        ]),
+      ).filter(Boolean) as string[]
+    } else {
+      const ministryId = cleanText(body.ministryId, 100)
+      if (!ministryId) {
+        throw Object.assign(new Error("Ministry is required"), { status: 400 })
+      }
+      await requireMinistryAccess(client, context.user, ministryId, true)
+      ministryIds = [ministryId]
+    }
   }
   ministryIds = await excludeReservationMinistry(client, ministryIds)
   const [scheduleConflicts, roomConflicts] = await Promise.all([
@@ -874,6 +881,21 @@ const fillAndReviewAutomaticSchedule = async (
     throw Object.assign(new Error("Event not found"), { status: 404 })
   }
 
+  const ministryGroupSchemaResult = await client.query(
+    `
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'event_responsibilities'
+          AND column_name = 'required_group_id'
+      ) AS is_available
+    `,
+  )
+  const hasResponsibilityGroupColumn = Boolean(
+    ministryGroupSchemaResult.rows[0]?.is_available,
+  )
+
   const responsibilities = await client.query(
     `
       SELECT
@@ -884,7 +906,11 @@ const fillAndReviewAutomaticSchedule = async (
         responsibility.is_required,
         responsibility.is_public_assignment,
         responsibility.required_ministry_level_id,
-        responsibility.required_group_id,
+        ${
+          hasResponsibilityGroupColumn
+            ? "responsibility.required_group_id"
+            : "NULL::UUID"
+        } AS required_group_id,
         responsibility.required_qualification,
         responsibility.relative_start_minutes,
         COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id,
@@ -1376,6 +1402,7 @@ const createEventFromStructure = async (
     conflictOverride = false,
     conflictOverrideReason = null,
     roomIds = [],
+    rsvpEnabled = false,
   }: any,
 ) => {
   const resolvedParticipationType = PARTICIPATION_TYPES.has(participationType)
@@ -1444,6 +1471,10 @@ const createEventFromStructure = async (
     ],
   )
   const eventId = eventResult.rows[0].id
+  await client.query(
+    `UPDATE events SET rsvp_enabled = $2 WHERE id = $1`,
+    [eventId, Boolean(rsvpEnabled)],
+  )
   await replaceEventRooms(client, eventId, roomIds, context.actor.id)
 
   for (const block of structure.blocks) {
@@ -1529,7 +1560,10 @@ const createEventFromStructure = async (
     ministryId: structure.template.ministry_id,
     afterData: {
       templateId: structure.template.id,
-      templateVersion: Number(structure.template.version),
+      templateVersion:
+        structure.template.version == null
+          ? null
+          : Number(structure.template.version),
       title,
       startTime: start,
       endTime: end,
@@ -1541,6 +1575,7 @@ const createEventFromStructure = async (
       conflictOverride: Boolean(conflictOverride),
       conflictOverrideReason: conflictOverrideReason || null,
       roomIds,
+      rsvpEnabled: Boolean(rsvpEnabled),
     },
   })
   return eventId
@@ -1831,6 +1866,49 @@ const loadEventDetails = async (
       status: 403,
     })
   }
+
+  const rsvpEligibilityResult = event.rsvp_enabled
+    ? await client.query(
+        `
+          SELECT EXISTS (
+            SELECT 1
+            FROM ministry_members membership
+            WHERE membership.user_id = $2
+              AND membership.status = 'active'
+              AND (
+                membership.ministry_id = $3
+                OR EXISTS (
+                  SELECT 1
+                  FROM event_ministries participant
+                  WHERE participant.event_id = $1
+                    AND participant.ministry_id = membership.ministry_id
+                )
+              )
+          ) AS eligible
+        `,
+        [eventId, context.user.id, event.ministry_id],
+      )
+    : { rows: [{ eligible: false }] }
+  const rsvpResult = event.rsvp_enabled
+    ? await client.query(
+        `
+          SELECT
+            rsvp.user_id,
+            rsvp.response,
+            rsvp.responded_at,
+            account.first_name,
+            account.last_name
+          FROM event_rsvps rsvp
+          JOIN ministry_accounts account ON account.id = rsvp.user_id
+          WHERE rsvp.event_id = $1
+          ORDER BY lower(account.last_name), lower(account.first_name), rsvp.user_id
+        `,
+        [eventId],
+      )
+    : { rows: [] }
+  const currentRsvp = rsvpResult.rows.find(
+    (rsvp: any) => rsvp.user_id === context.user.id,
+  )
 
   const responsibilityResult = await client.query(
     hasMinistryGroupSchema
@@ -2587,6 +2665,30 @@ const loadEventDetails = async (
       automaticMembership: Boolean(group.automatic_membership),
     })),
     canManageEvent: publicView ? false : canManageEvent,
+    rsvp: {
+      enabled: Boolean(event.rsvp_enabled),
+      canRespond:
+        Boolean(event.rsvp_enabled) &&
+        event.status === "published" &&
+        Boolean(rsvpEligibilityResult.rows[0]?.eligible),
+      response: currentRsvp?.response || null,
+      attendingCount: rsvpResult.rows.filter(
+        (rsvp: any) => rsvp.response === "attending",
+      ).length,
+      notAttendingCount: rsvpResult.rows.filter(
+        (rsvp: any) => rsvp.response === "not_attending",
+      ).length,
+      responses:
+        canManageEvent || canManageAny
+          ? rsvpResult.rows.map((rsvp: any) => ({
+              userId: rsvp.user_id,
+              firstName: rsvp.first_name,
+              lastName: rsvp.last_name || "",
+              response: rsvp.response,
+              respondedAt: rsvp.responded_at,
+            }))
+          : [],
+    },
     canSeeProtectedDetails: privacyAccess.canSeeProtectedDetails,
     isPublicView: publicView,
     assignmentVisibilityRestricted:
@@ -2606,6 +2708,77 @@ const loadEventDetails = async (
       requesterLastName: offer.last_name || "",
     })),
   }
+}
+
+const recordEventRsvp = async (
+  client: PoolClient,
+  context: any,
+  event: any,
+  body: any,
+) => {
+  if (!event.rsvp_enabled) {
+    throw Object.assign(new Error("RSVP is not enabled for this event"), {
+      status: 409,
+    })
+  }
+  if (event.status !== "published") {
+    throw Object.assign(new Error("RSVP is available only for published events"), {
+      status: 409,
+    })
+  }
+  const response = cleanText(body.response, 30)
+  if (!new Set(["attending", "not_attending"]).has(response)) {
+    throw Object.assign(new Error("Choose whether you can attend"), {
+      status: 400,
+    })
+  }
+  const eligibleResult = await client.query(
+    `
+      SELECT EXISTS (
+        SELECT 1
+        FROM ministry_members membership
+        WHERE membership.user_id = $2
+          AND membership.status = 'active'
+          AND (
+            membership.ministry_id = $3
+            OR EXISTS (
+              SELECT 1
+              FROM event_ministries participant
+              WHERE participant.event_id = $1
+                AND participant.ministry_id = membership.ministry_id
+            )
+          )
+      ) AS eligible
+    `,
+    [event.id, context.user.id, event.ministry_id],
+  )
+  if (!eligibleResult.rows[0]?.eligible) {
+    throw Object.assign(
+      new Error("Only active members of this event's ministries can RSVP"),
+      { status: 403 },
+    )
+  }
+  await client.query(
+    `
+      INSERT INTO event_rsvps (event_id, user_id, response)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (event_id, user_id) DO UPDATE SET
+        response = excluded.response,
+        responded_at = now(),
+        updated_at = now()
+    `,
+    [event.id, context.user.id, response],
+  )
+  await writeSchedulingAudit(client, context, {
+    action: "event.rsvp_recorded",
+    entityType: "event_rsvp",
+    entityId: event.id,
+    ministryId: event.ministry_id,
+    afterData: { userId: context.user.id, response },
+  })
+  return response === "attending"
+    ? "Your RSVP is Yes"
+    : "Your RSVP is No"
 }
 
 const recordServiceOutcome = async (
@@ -2691,10 +2864,24 @@ export const createEvents = async (
   body: any,
 ) => {
   const templateId = cleanText(body.templateId, 100)
-  if (!templateId) {
-    throw Object.assign(new Error("Select an event template"), { status: 400 })
+  const ministryId = cleanText(body.ministryId, 100)
+  if (!templateId && !ministryId) {
+    throw Object.assign(new Error("Ministry is required"), { status: 400 })
   }
-  const structure = await loadTemplateStructure(client, templateId)
+  const structure = templateId
+    ? await loadTemplateStructure(client, templateId)
+    : {
+        template: {
+          id: null,
+          version: null,
+          ministry_id: ministryId,
+          name: "",
+          description: "",
+          participation_type: "members",
+        },
+        blocks: [],
+        responsibilities: [],
+      }
   await requireMinistryAccess(
     client,
     context.user,
@@ -2702,7 +2889,12 @@ export const createEvents = async (
     true,
   )
 
-  const title = cleanText(body.title, 250) || structure.template.name
+  const title = templateId
+    ? structure.template.name
+    : cleanText(body.title, 250)
+  if (!title) {
+    throw Object.assign(new Error("Event title is required"), { status: 400 })
+  }
   let description =
     cleanText(body.description) || structure.template.description || ""
   let location = cleanText(body.location, 500)
@@ -2742,7 +2934,7 @@ export const createEvents = async (
     occurrenceStarts.length > 1
       ? { ...normalizeRecurrence(body.recurrence), effectiveFrom: start.toISOString() }
       : null
-  const status = body.status === "published" ? "published" : "draft"
+  const status = "published"
   const participationType = PARTICIPATION_TYPES.has(body.participationType)
     ? body.participationType
     : structure.template.participation_type || "members"
@@ -2836,7 +3028,7 @@ export const createEvents = async (
       if (!selectedPriestAssignments.length) {
         throw Object.assign(
           new Error(
-            "Save this event as a draft and request Priory availability before publishing",
+            "Select a priest covered by the Priory allocation before publishing",
           ),
           { status: 409, prioryAllocationRequired: true },
         )
@@ -2877,8 +3069,7 @@ export const createEvents = async (
     const conflicts = [...scheduleConflicts, ...roomConflicts]
     if (
       conflicts.length &&
-      !conflictOverride &&
-      occurrenceStarts.length === 1
+      !conflictOverride
     ) {
       throw Object.assign(
         new Error("This event overlaps another event. Fix the time or explicitly ignore the warning."),
@@ -2892,7 +3083,7 @@ export const createEvents = async (
         location,
         start: occurrenceStart,
         end: occurrenceEnd,
-        status: occurrenceStarts.length > 1 ? "draft" : status,
+        status,
         recurrenceGroupId,
         recurrenceRule,
         recurrenceAnchorAt:
@@ -2906,6 +3097,7 @@ export const createEvents = async (
         conflictOverride: conflicts.length > 0 && conflictOverride,
         conflictOverrideReason,
         roomIds,
+        rsvpEnabled: body.rsvpEnabled === true,
       })
     eventIds.push(eventId)
     if (occurrenceStarts.length > 1) {
@@ -2914,6 +3106,9 @@ export const createEvents = async (
         context,
         eventId,
         conflicts,
+        null,
+        "repeating_schedule",
+        false,
       )
       generatedSchedules.push(generated)
       assignmentIds.push(...generated.assignmentIds)
@@ -3218,7 +3413,9 @@ const cloneEvent = async (
   }
   return createEventFromStructure(client, context, {
     structure,
-    title: cleanText(body.title, 250) || `${source.title} Copy`,
+    title: source.template_id
+      ? source.title
+      : cleanText(body.title, 250) || `${source.title} Copy`,
     description:
       body.description === undefined
         ? source.description
@@ -3227,7 +3424,7 @@ const cloneEvent = async (
       body.location === undefined ? source.location : cleanText(body.location),
     start,
     end,
-    status: "draft",
+    status: "published",
     recurrenceGroupId: null,
     recurrenceRule: null,
     confirmationDeadline,
@@ -3237,6 +3434,7 @@ const cloneEvent = async (
       ? cleanText(body.conflictOverrideReason, 500) || "Overlap reviewed by ministry administrator"
       : null,
     roomIds,
+    rsvpEnabled: body.rsvpEnabled === true,
   })
 }
 
@@ -4725,6 +4923,10 @@ const updateEvent = async (
     return recordServiceOutcome(client, context, event, body)
   }
 
+  if (body.action === "record_rsvp") {
+    return recordEventRsvp(client, context, event, body)
+  }
+
   if (body.action === "configure_volunteer_signup") {
     return configureVolunteerSignup(client, context, event, body)
   }
@@ -4939,7 +5141,8 @@ const updateEvent = async (
         SET ministry_id = $2,
             template_id = $3,
             template_version = $4,
-            participation_type = $5,
+            title = $5,
+            participation_type = $6,
             version = version + 1,
             updated_at = now()
         WHERE id = $1
@@ -4949,6 +5152,7 @@ const updateEvent = async (
         structure.template.ministry_id,
         structure.template.id,
         structure.template.version,
+        structure.template.name,
         structure.template.participation_type,
       ],
     )
@@ -5083,10 +5287,20 @@ const updateEvent = async (
     return
   }
 
-  const title = cleanText(body.title, 250)
+  const templateNameResult = event.template_id
+    ? await client.query(`SELECT name FROM templates WHERE id = $1 LIMIT 1`, [
+        event.template_id,
+      ])
+    : { rows: [] }
+  const title = event.template_id
+    ? cleanText(templateNameResult.rows[0]?.name, 250) || event.title
+    : cleanText(body.title, 250)
   const participationType = PARTICIPATION_TYPES.has(body.participationType)
     ? body.participationType
     : event.participation_type
+  const rsvpEnabled = body.rsvpEnabled === undefined
+    ? Boolean(event.rsvp_enabled)
+    : body.rsvpEnabled === true
   const visibility = EVENT_VISIBILITIES.has(body.visibility)
     ? body.visibility
     : event.visibility || "public"
@@ -5252,6 +5466,10 @@ const updateEvent = async (
         roomIds,
         context.actor.id,
       )
+      await client.query(
+        `UPDATE events SET rsvp_enabled = $2 WHERE id = $1`,
+        [affectedEvent.id, rsvpEnabled],
+      )
       if (
         toChapelDateKey(affectedEvent.start_time) !==
         toChapelDateKey(occurrenceStart)
@@ -5379,6 +5597,10 @@ const updateEvent = async (
     ],
   )
   await replaceEventRooms(client, eventId, roomIds, context.actor.id)
+  await client.query(
+    `UPDATE events SET rsvp_enabled = $2 WHERE id = $1`,
+    [eventId, rsvpEnabled],
+  )
   if (["volunteers", "both"].includes(participationType)) {
     await ensureDefaultGeneralVolunteer(client, eventId)
   }
@@ -5650,7 +5872,7 @@ export const handleEvents = async (request: Request) => {
         if (body.action === "clone") {
           const eventId = await cloneEvent(client, context, body)
           await client.query("COMMIT")
-          return json({ message: "Event copied as a draft", eventIds: [eventId] }, 201)
+          return json({ message: "Event copy published", eventIds: [eventId] }, 201)
         }
         const creation = await createEvents(client, context, body)
         await client.query("COMMIT")
@@ -5667,19 +5889,12 @@ export const handleEvents = async (request: Request) => {
             },
           )
         }
-        const heldCount = creation.generatedSchedules.filter(
-          (schedule) => !schedule.published,
-        ).length
         return json(
           {
             message:
               creation.eventIds.length === 1
-                ? body.status === "published"
-                  ? "Event published"
-                  : "Event saved as a draft"
-                : heldCount
-                  ? `${publishedEventIds.length} repeating events published; ${heldCount} need review`
-                  : `${creation.eventIds.length} repeating events created and published`,
+                ? "Event published"
+                : `${creation.eventIds.length} repeating events created and published`,
             eventIds: creation.eventIds,
             publishedEventIds,
             heldSchedules: creation.generatedSchedules.filter(

@@ -428,6 +428,54 @@ assert.match(schedulingEvents, /friday_before_first_saturday/)
 assert.match(schedulingEvents, /previewRecurrenceChange/)
 assert.match(schedulingEvents, /event\.recurrence_rule_changed/)
 assert.match(schedulingEvents, /body\.updateScope === "this_and_future"/)
+const ministryEventsComponent = await read(
+  "src/react/components/ministry/MinistryEvents.jsx",
+)
+assert.match(ministryEventsComponent, /status: editing \? undefined : "published"/)
+assert.match(ministryEventsComponent, /"PUBLISH EVENT"/)
+assert.match(ministryEventsComponent, /"PUBLISH COPY"/)
+assert.match(ministryEventsComponent, /Event template[\s\S]*\(optional\)/)
+assert.match(ministryEventsComponent, /No template — start with a blank event/)
+assert.match(ministryEventsComponent, /ministryId: data\.ministry\.id/)
+assert.match(ministryEventsComponent, /Event name/)
+assert.match(ministryEventsComponent, /disabled=\{Boolean\(form\.templateId\)\}/)
+assert.match(ministryEventsComponent, /This event uses the template name/)
+assert.doesNotMatch(ministryEventsComponent, /Create an active template before creating an event/)
+assert.doesNotMatch(
+  ministryEventsComponent,
+  /\(!form\.sourceEventId && !form\.templateId\)/,
+)
+assert.doesNotMatch(
+  ministryEventsComponent,
+  /SAVE DRAFT|Create draft copy|save the event as a draft/i,
+)
+assert.doesNotMatch(
+  ministryEventsComponent,
+  /name="eventStatus"[\s\S]{0,100}value="draft"/,
+)
+assert.match(schedulingEvents, /const status = "published"/)
+assert.match(schedulingEvents, /templateId\s*\? await loadTemplateStructure/)
+assert.match(schedulingEvents, /responsibilities: \[\]/)
+assert.match(schedulingEvents, /Event title is required/)
+assert.match(schedulingEvents, /const title = templateId[\s\S]*structure\.template\.name/)
+assert.match(schedulingEvents, /title = \$5,[\s\S]*participation_type = \$6/)
+const eventRsvpMigration = await read(
+  "migrations/20260825_04_add_event_rsvps.sql",
+)
+assert.match(eventRsvpMigration, /ADD COLUMN IF NOT EXISTS rsvp_enabled/)
+assert.match(eventRsvpMigration, /CREATE TABLE IF NOT EXISTS event_rsvps/)
+assert.match(eventRsvpMigration, /'attending', 'not_attending'/)
+assert.match(ministryEventsComponent, /Allow member RSVP/)
+assert.match(ministryEventsComponent, /rsvpEnabled/)
+assert.match(schedulingEvents, /body\.action === "record_rsvp"/)
+assert.match(schedulingEvents, /event\.rsvp_recorded/)
+assert.match(eventDetails, /Yes, I can attend/)
+assert.match(eventDetails, /No, I cannot attend/)
+assert.match(schedulingEvents, /status: "published",[\s\S]{0,200}sourceEventId/)
+assert.doesNotMatch(
+  schedulingEvents,
+  /status: occurrenceStarts\.length > 1 \? "draft" : status/,
+)
 assert.match(reminders, /AS duty_start_time/)
 assert.match(reminders, /dutyStart\.getTime\(\) - Number\(candidate\.lead_minutes\)/)
 assert.match(substitutionMigration, /assignment_substitution_offers/)
@@ -862,6 +910,7 @@ assert.match(accountNavigation, /label:\s*"Events"/)
 assert.doesNotMatch(accountNavigation, /label:\s*"My Events"/)
 assert.match(homeWorkspace, /Create event/)
 assert.match(homeWorkspace, /<MinistryEvents/)
+assert.doesNotMatch(homeWorkspace, /VolunteerEvents/)
 assert.match(homeWorkspace, /events=\{data\.calendarEvents\}/)
 assert.match(homeWorkspace, /Pinned Events/)
 assert.match(homeWorkspace, /action: "set_pin"/)
@@ -920,7 +969,6 @@ assert.match(volunteerEventsComponent, /A ministry is optional/)
 assert.match(volunteerSignupPage, /Choose an available assignment/)
 assert.match(volunteerSignupPage, /Unlimited openings/)
 assert.doesNotMatch(volunteerSignupPage, /<select name="responsibilityId"/)
-assert.match(homeWorkspace, /<VolunteerEvents creating/)
 assert.match(schedulingVolunteers, /is_public_assignment = true/)
 assert.match(schedulingVolunteers, /responsibility\.unlimited_capacity/)
 assert.match(schedulingEvents, /generalVolunteerUnlimited/)

@@ -73,7 +73,7 @@ const normalizeResponsibilities = (
           forcedMinistryId || cleanText(responsibility.ministryId, 100),
         name:
           assignmentMode === "all_available_members"
-            ? "Open to all members"
+            ? "Expected ministry attendance"
             : cleanText(responsibility.name, 250),
         description: cleanText(responsibility.description),
         responsibilityType: RESPONSIBILITY_TYPES.has(
@@ -176,17 +176,6 @@ const validateTemplateInput = (input: TemplateInput) => {
   ) {
     throw Object.assign(
       new Error("Every responsibility must belong to a participating ministry"),
-      { status: 400 },
-    )
-  }
-  if (
-    (input.responsibilities || []).filter(
-      (responsibility) =>
-        responsibility.assignmentMode === "all_available_members",
-    ).length > 1
-  ) {
-    throw Object.assign(
-      new Error("A template can include Open to all members only once"),
       { status: 400 },
     )
   }

@@ -255,11 +255,8 @@ const handler = async (event) => {
                   account.notification_schedule_changes_enabled,
                   account.notification_announcements_enabled,
                   account.notification_volunteer_opportunities_enabled,
-                  NULLIF(btrim(account.email), '') IS NOT NULL AS email_configured,
-                  COALESCE(
-                    NULLIF(btrim(account.phone), ''),
-                    NULLIF(btrim(account.telephone), '')
-                  ) IS NOT NULL AS sms_configured,
+                  account.notification_email_connected_value IS NOT NULL AS email_connected,
+                  account.notification_sms_connected_value IS NOT NULL AS sms_connected,
                   account.sms_transactional_consent_at IS NOT NULL AS sms_consented,
                   EXISTS (
                     SELECT 1
@@ -287,7 +284,7 @@ const handler = async (event) => {
           channels: {
             email: {
               enabled: Boolean(row.notification_email_enabled),
-              connected: Boolean(row.email_configured),
+              connected: Boolean(row.email_connected),
             },
             telegram: {
               enabled: Boolean(row.notification_telegram_enabled),
@@ -296,11 +293,10 @@ const handler = async (event) => {
             push: {
               enabled: Boolean(row.notification_push_enabled),
               connected: Number(row.active_push_devices) > 0,
-              activeDevices: Number(row.active_push_devices) || 0,
             },
             sms: {
               enabled: Boolean(row.notification_sms_enabled),
-              connected: Boolean(row.sms_configured),
+              connected: Boolean(row.sms_connected),
               consented: Boolean(row.sms_consented),
             },
           },

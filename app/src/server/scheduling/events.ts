@@ -23,6 +23,11 @@ import {
   assertPriestAllocation,
   checkPrioryAllocation,
 } from "./priory-allocations"
+import {
+  emptyReliabilitySummary,
+  loadReliabilitySummaries,
+} from "./reliability"
+import { filterAvailableMemberIds } from "./availability-rules"
 
 const EVENT_STATUSES = new Set([
   "draft",
@@ -60,7 +65,14 @@ const EVENT_VISIBILITIES = new Set(["public", "ministry", "private"])
 const RESPONSIBILITY_ASSIGNMENT_MODES = new Set([
   "standard",
   "all_available_members",
+  "all_active_members",
+  "source_event_assignees",
 ])
+const EXPECTED_ATTENDANCE_MODES = [
+  "all_available_members",
+  "all_active_members",
+  "source_event_assignees",
+]
 const SIGNUP_CODE_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const RESERVED_SIGNUP_CODES = new Set([
   "api",
@@ -136,14 +148,14 @@ const normalizeEventResponsibility = (body: any) => {
   return {
     name,
     responsibilityType,
-    quantityNeeded: assignmentMode === "all_available_members" ? 1 : quantityNeeded,
+    quantityNeeded: EXPECTED_ATTENDANCE_MODES.includes(assignmentMode) ? 1 : quantityNeeded,
     approvalRequired: Boolean(body.approvalRequired),
     substitutionAllowed:
-      assignmentMode === "all_available_members"
+      EXPECTED_ATTENDANCE_MODES.includes(assignmentMode)
         ? false
         : body.substitutionAllowed !== false,
     isRequired:
-      assignmentMode === "all_available_members"
+      EXPECTED_ATTENDANCE_MODES.includes(assignmentMode)
         ? false
         : body.isRequired !== false,
     requiredLevelId: cleanText(body.requiredLevelId, 100) || null,
@@ -164,17 +176,27 @@ const normalizeInlineResponsibilities = (value: unknown, ministryId: string) =>
       quantityNeeded: 1,
       relativeStartMinutes: 0,
       ...item,
+      assignmentMode:
+        item?.audienceScope === "all"
+          ? "all_active_members"
+          : item?.assignmentMode,
     })
     return {
       id: null,
       ministry_id: ministryId,
       name:
-        normalized.assignmentMode === "all_available_members"
-          ? "Open to all members"
+        EXPECTED_ATTENDANCE_MODES.includes(normalized.assignmentMode)
+          ? normalized.assignmentMode === "source_event_assignees"
+            ? "Source event roster"
+            : normalized.assignmentMode === "all_active_members"
+              ? "Expected all-member attendance"
+              : "Expected ministry attendance"
           : normalized.name,
       description:
-        normalized.assignmentMode === "all_available_members"
-          ? "All available serving members are expected to attend."
+        EXPECTED_ATTENDANCE_MODES.includes(normalized.assignmentMode)
+          ? normalized.assignmentMode === "all_active_members"
+            ? "All available active members are expected to attend."
+            : "All available serving members are expected to attend."
           : cleanText(item?.description) || null,
       responsibility_type: normalized.responsibilityType,
       quantity_needed: normalized.quantityNeeded,
@@ -855,8 +877,38 @@ const previewTemplateAssignments = async (
       responsibility.ministry_id || structure.template.ministry_id,
     ]),
   )
+  const availabilityByMinistry = new Map<string, Set<string>>()
+  for (const ministryId of new Set(responsibilityMinistries.values())) {
+    const candidateIds = result.rows
+      .filter(
+        (member) =>
+          responsibilityMinistries.get(member.responsibility_id) === ministryId,
+      )
+      .map((member) => member.user_id)
+    availabilityByMinistry.set(
+      ministryId,
+      new Set(
+        await filterAvailableMemberIds(
+          client,
+          candidateIds,
+          ministryId,
+          start,
+          end,
+        ),
+      ),
+    )
+  }
   const membersByResponsibility = new Map<string, any[]>()
   for (const member of result.rows) {
+    const responsibilityMinistryId = responsibilityMinistries.get(
+      member.responsibility_id,
+    )
+    if (
+      !responsibilityMinistryId ||
+      !availabilityByMinistry.get(responsibilityMinistryId)?.has(member.user_id)
+    ) {
+      continue
+    }
     if (
       responsibilityMinistries.get(member.responsibility_id) ===
       priestMinistryId
@@ -915,6 +967,22 @@ const previewMinistryMembers = async (
 ) => {
   const ministryId = cleanText(body.ministryId, 100)
   await requireMinistryAccess(client, context.user, ministryId, true)
+  const allMembers = body.audienceScope === "all"
+  if (
+    allMembers &&
+    !["owner", "super_admin"].includes(context.user.global_role)
+  ) {
+    throw Object.assign(
+      new Error("Only a Super Admin can call all active members"),
+      { status: 403 },
+    )
+  }
+  const requiredLevelId = cleanText(body.requiredLevelId, 100) || null
+  await validateRequiredMinistryLevel(
+    client,
+    allMembers ? null : requiredLevelId,
+    ministryId,
+  )
   const start = parseDate(body.startTime, "Start time")
   const end = parseDate(body.endTime, "End time")
   if (end <= start) {
@@ -922,26 +990,58 @@ const previewMinistryMembers = async (
       status: 400,
     })
   }
-  const members = await client.query(
-    `
-      SELECT account.id AS user_id, account.first_name, account.last_name
-      FROM ministry_members membership
-      JOIN ministry_accounts account ON account.id = membership.user_id
-      WHERE membership.ministry_id = $1
-        AND membership.status = 'active'
-        AND membership.can_serve = true
-        AND membership.serving_preference <> 'cannot_serve'
-        AND account.status = 'active'
+  const members = allMembers
+    ? await client.query(
+      `
+      SELECT account.id AS user_id, account.first_name, account.last_name,
+        EXISTS (
+          SELECT 1 FROM availability_blocks block
+          WHERE block.user_id = account.id
+            AND block.status = 'active'
+            AND block.start_date <= $1::DATE
+            AND block.end_date >= $1::DATE
+        ) AS unavailable,
+        EXISTS (
+          SELECT 1
+          FROM responsibility_assignments assignment
+          JOIN events event ON event.id = assignment.event_id
+          JOIN event_responsibilities responsibility
+            ON responsibility.id = assignment.responsibility_id
+          WHERE assignment.user_id = account.id
+            AND assignment.status = ANY($2)
+            AND event.status NOT IN ('cancelled', 'archived')
+            AND event.start_time
+              + COALESCE(responsibility.relative_start_minutes, 0)
+                * INTERVAL '1 minute' < $4
+            AND event.end_time > $3::TIMESTAMPTZ
+        ) AS schedule_conflict
+      FROM ministry_accounts account
+      WHERE account.status = 'active'
         AND COALESCE(account.is_volunteer_profile, false) = false
-        AND NOT EXISTS (
+        AND EXISTS (
+          SELECT 1
+          FROM ministry_members membership
+          WHERE membership.user_id = account.id
+            AND membership.status = 'active'
+            AND membership.can_serve = true
+            AND membership.serving_preference <> 'cannot_serve'
+        )
+      ORDER BY lower(account.last_name), lower(account.first_name), account.id
+      `,
+      [toChapelDateKey(start), ACTIVE_ASSIGNMENT_STATUSES, start, end],
+    )
+    : await client.query(
+    `
+      SELECT account.id AS user_id, account.first_name, account.last_name,
+        EXISTS (
           SELECT 1 FROM availability_blocks block
           WHERE block.user_id = account.id
             AND block.status = 'active'
             AND (block.ministry_id IS NULL OR block.ministry_id = $1)
             AND block.start_date <= $2::DATE
             AND block.end_date >= $2::DATE
-        )
-        AND NOT EXISTS (
+        ) AS unavailable,
+        EXISTS (
           SELECT 1
           FROM responsibility_assignments assignment
           JOIN events event ON event.id = assignment.event_id
@@ -954,6 +1054,24 @@ const previewMinistryMembers = async (
               + COALESCE(responsibility.relative_start_minutes, 0)
                 * INTERVAL '1 minute' < $5
             AND event.end_time > $4::TIMESTAMPTZ
+        ) AS schedule_conflict
+      FROM ministry_members membership
+      JOIN ministry_accounts account ON account.id = membership.user_id
+      LEFT JOIN ministry_levels required_level ON required_level.id = $6
+      LEFT JOIN ministry_levels granted_level
+        ON granted_level.id = membership.highest_level_id
+      WHERE membership.ministry_id = $1
+        AND membership.status = 'active'
+        AND membership.can_serve = true
+        AND membership.serving_preference <> 'cannot_serve'
+        AND account.status = 'active'
+        AND COALESCE(account.is_volunteer_profile, false) = false
+        AND (
+          required_level.id IS NULL
+          OR (
+            granted_level.ministry_id = $1
+            AND granted_level.rank_order >= required_level.rank_order
+          )
         )
       ORDER BY lower(account.last_name), lower(account.first_name), account.id
     `,
@@ -963,14 +1081,25 @@ const previewMinistryMembers = async (
       ACTIVE_ASSIGNMENT_STATUSES,
       start,
       end,
+      requiredLevelId,
     ],
+    )
+  const eligibleMembers = members.rows.filter(
+    (member) => !member.unavailable && !member.schedule_conflict,
   )
   return {
-    members: members.rows.map((member) => ({
+    members: eligibleMembers.map((member) => ({
       userId: member.user_id,
       firstName: member.first_name,
       lastName: member.last_name || "",
     })),
+    preview: {
+      expectedCount: eligibleMembers.length,
+      unavailableCount: members.rows.filter((member) => member.unavailable).length,
+      conflictCount: members.rows.filter(
+        (member) => !member.unavailable && member.schedule_conflict,
+      ).length,
+    },
   }
 }
 
@@ -1069,7 +1198,7 @@ const fillAndReviewAutomaticSchedule = async (
     if (
       responsibility.is_public_assignment ||
       event.participation_type === "volunteers" ||
-      responsibility.assignment_mode === "all_available_members" ||
+      EXPECTED_ATTENDANCE_MODES.includes(responsibility.assignment_mode) ||
       responsibility.preferred_assignee_user_id ||
       !responsibility.template_responsibility_id
     ) {
@@ -1222,11 +1351,51 @@ const fillAndReviewAutomaticSchedule = async (
           responsibility.required_group_id,
         ],
       )
-      let candidate = candidateResult.rows[0]
+      const availableCandidateIds = new Set(
+        await filterAvailableMemberIds(
+          client,
+          candidateResult.rows.map((item) => item.id),
+          responsibility.ministry_id,
+          event.start_time,
+          event.end_time,
+        ),
+      )
+      const candidateReliability = await loadReliabilitySummaries(
+        client,
+        [...availableCandidateIds],
+        [responsibility.ministry_id],
+      )
+      const automaticPreferenceRank: Record<string, number> = {
+        prefer: 0,
+        sometimes: 1,
+        if_necessary: 2,
+        not_specified: 3,
+      }
+      const orderedCandidates = candidateResult.rows
+        .filter((item) => availableCandidateIds.has(item.id))
+        .map((item, originalIndex) => ({
+          ...item,
+          originalIndex,
+          reliability:
+            candidateReliability.get(`${responsibility.ministry_id}:${item.id}`) ||
+            emptyReliabilitySummary(),
+        }))
+        .sort((a, b) =>
+          (Number(a.granted_level_rank || 0) - Number(a.required_level_rank || 0)) -
+            (Number(b.granted_level_rank || 0) - Number(b.required_level_rank || 0)) ||
+          (automaticPreferenceRank[a.serving_preference] ?? 3) -
+            (automaticPreferenceRank[b.serving_preference] ?? 3) ||
+          b.reliability.score - a.reliability.score ||
+          b.reliability.recentTrend - a.reliability.recentTrend ||
+          Number(a.ministry_monthly_count || 0) - Number(b.ministry_monthly_count || 0) ||
+          Number(a.overall_monthly_count || 0) - Number(b.overall_monthly_count || 0) ||
+          a.originalIndex - b.originalIndex,
+        )
+      let candidate = orderedCandidates[0]
       let prioryAllocationId: string | null = null
       if (isPriestResponsibility) {
         candidate = null
-        for (const possible of candidateResult.rows) {
+        for (const possible of orderedCandidates) {
           const allocation = await checkPrioryAllocation(
             client,
             possible.id,
@@ -1520,7 +1689,8 @@ export const syncAllAvailableMemberAssignments = async (
 ) => {
   const eventResult = await client.query(
     `SELECT event.id, event.ministry_id, event.title, event.start_time,
-      event.end_time, event.status, event.recurrence_group_id, ministry.slug AS ministry_slug
+      event.end_time, event.status, event.recurrence_group_id,
+      event.source_event_id, ministry.slug AS ministry_slug
      FROM events event
      JOIN ministries ministry ON ministry.id = event.ministry_id
      WHERE event.id = $1 LIMIT 1`,
@@ -1532,29 +1702,151 @@ export const syncAllAvailableMemberAssignments = async (
   }
   const responsibilities = await client.query(
     `
-      SELECT id, COALESCE(ministry_id, $2) AS ministry_id
+      SELECT id, COALESCE(ministry_id, $2) AS ministry_id,
+        assignment_mode, required_ministry_level_id, required_group_id
       FROM event_responsibilities
       WHERE event_id = $1
-        AND assignment_mode = 'all_available_members'
+        AND assignment_mode = ANY($3)
         AND status <> 'cancelled'
     `,
-    [event.id, event.ministry_id],
+    [event.id, event.ministry_id, EXPECTED_ATTENDANCE_MODES],
   )
   let added = 0
   let removed = 0
   const newlyRegisteredUserIds = new Set<string>()
   for (const responsibility of responsibilities.rows) {
-    const eligible = await client.query(
-      `
+    const eligible = responsibility.assignment_mode === "source_event_assignees"
+      ? await client.query(
+        `
+        SELECT DISTINCT account.id
+        FROM responsibility_assignments source_assignment
+        JOIN event_responsibilities source_responsibility
+          ON source_responsibility.id = source_assignment.responsibility_id
+        JOIN events source_event ON source_event.id = source_assignment.event_id
+        JOIN ministry_accounts account ON account.id = source_assignment.user_id
+        WHERE source_assignment.event_id = $1
+          AND source_assignment.user_id IS NOT NULL
+          AND source_assignment.status NOT IN ('declined', 'cancelled', 'replaced')
+          AND account.status = 'active'
+          AND COALESCE(account.is_volunteer_profile, false) = false
+          AND NOT EXISTS (
+            SELECT 1 FROM availability_blocks block
+            WHERE block.user_id = account.id
+              AND block.status = 'active'
+              AND (
+                block.ministry_id IS NULL
+                OR block.ministry_id = COALESCE(
+                  source_responsibility.ministry_id,
+                  source_event.ministry_id
+                )
+              )
+              AND block.start_date <= $2::DATE
+              AND block.end_date >= $2::DATE
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM responsibility_assignments other_assignment
+            JOIN events other_event ON other_event.id = other_assignment.event_id
+            JOIN event_responsibilities other_responsibility
+              ON other_responsibility.id = other_assignment.responsibility_id
+            WHERE other_assignment.user_id = account.id
+              AND other_assignment.status = ANY($3)
+              AND other_event.id <> $4
+              AND other_event.status NOT IN ('cancelled', 'archived')
+              AND other_event.start_time
+                + COALESCE(other_responsibility.relative_start_minutes, 0)
+                  * INTERVAL '1 minute' < $6
+              AND other_event.end_time > $5::TIMESTAMPTZ
+          )
+        ORDER BY account.id
+        `,
+        [
+          event.source_event_id,
+          toChapelDateKey(event.start_time),
+          ACTIVE_ASSIGNMENT_STATUSES,
+          event.id,
+          event.start_time,
+          event.end_time,
+        ],
+      )
+      : responsibility.assignment_mode === "all_active_members"
+        ? await client.query(
+          `
+          SELECT account.id
+          FROM ministry_accounts account
+          WHERE account.status = 'active'
+            AND COALESCE(account.is_volunteer_profile, false) = false
+            AND EXISTS (
+              SELECT 1
+              FROM ministry_members membership
+              WHERE membership.user_id = account.id
+                AND membership.status = 'active'
+                AND membership.can_serve = true
+                AND membership.serving_preference <> 'cannot_serve'
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM availability_blocks block
+              WHERE block.user_id = account.id
+                AND block.status = 'active'
+                AND block.start_date <= $1::DATE
+                AND block.end_date >= $1::DATE
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM responsibility_assignments other_assignment
+              JOIN events other_event ON other_event.id = other_assignment.event_id
+              JOIN event_responsibilities other_responsibility
+                ON other_responsibility.id = other_assignment.responsibility_id
+              WHERE other_assignment.user_id = account.id
+                AND other_assignment.status = ANY($2)
+                AND other_event.id <> $3
+                AND other_event.status NOT IN ('cancelled', 'archived')
+                AND other_event.start_time
+                  + COALESCE(other_responsibility.relative_start_minutes, 0)
+                    * INTERVAL '1 minute' < $5
+                AND other_event.end_time > $4::TIMESTAMPTZ
+            )
+          ORDER BY lower(account.last_name), lower(account.first_name), account.id
+          `,
+          [
+            toChapelDateKey(event.start_time),
+            ACTIVE_ASSIGNMENT_STATUSES,
+            event.id,
+            event.start_time,
+            event.end_time,
+          ],
+        )
+      : await client.query(
+        `
         SELECT account.id
         FROM ministry_members membership
         JOIN ministry_accounts account ON account.id = membership.user_id
+        LEFT JOIN ministry_levels required_level
+          ON required_level.id = $7
+        LEFT JOIN ministry_levels granted_level
+          ON granted_level.id = membership.highest_level_id
         WHERE membership.ministry_id = $1
           AND membership.status = 'active'
           AND membership.can_serve = true
           AND membership.serving_preference <> 'cannot_serve'
           AND account.status = 'active'
           AND COALESCE(account.is_volunteer_profile, false) = false
+          AND (
+            required_level.id IS NULL
+            OR (
+              granted_level.ministry_id = $1
+              AND granted_level.rank_order >= required_level.rank_order
+            )
+          )
+          AND (
+            $8::UUID IS NULL
+            OR EXISTS (
+              SELECT 1
+              FROM ministry_group_members group_member
+              WHERE group_member.ministry_member_id = membership.id
+                AND group_member.group_id = $8
+            )
+          )
           AND NOT EXISTS (
             SELECT 1 FROM availability_blocks block
             WHERE block.user_id = account.id
@@ -1587,9 +1879,17 @@ export const syncAllAvailableMemberAssignments = async (
         event.id,
         event.start_time,
         event.end_time,
+        responsibility.required_ministry_level_id,
+        responsibility.required_group_id,
       ],
+      )
+    const eligibleIds = await filterAvailableMemberIds(
+      client,
+      eligible.rows.map((row) => row.id),
+      responsibility.ministry_id,
+      event.start_time,
+      event.end_time,
     )
-    const eligibleIds = eligible.rows.map((row) => row.id)
     const existing = await client.query(
       `
         SELECT id, user_id, status
@@ -1676,10 +1976,10 @@ export const syncAllAvailableMemberAssignments = async (
          JOIN event_responsibilities series_responsibility
            ON series_responsibility.id = assignment.responsibility_id
          WHERE assignment.user_id = $1
-           AND series_responsibility.assignment_mode = 'all_available_members'
+           AND series_responsibility.assignment_mode = ANY($3)
            AND assignment.status IN ('assigned', 'confirmed')
            AND COALESCE(series_event.recurrence_group_id, series_event.id) = $2::UUID`,
-        [recipient.subject_user_id, seriesKey],
+        [recipient.subject_user_id, seriesKey, EXPECTED_ATTENDANCE_MODES],
       )
       const occurrenceCount = Number(
         seriesCountResult.rows[0]?.occurrence_count || 1,
@@ -1729,14 +2029,34 @@ export const syncFutureAllMemberAssignmentsForMinistry = async (
       SELECT DISTINCT event.id
       FROM events event
       JOIN event_responsibilities responsibility ON responsibility.event_id = event.id
-      WHERE COALESCE(responsibility.ministry_id, event.ministry_id) = $1
-        AND responsibility.assignment_mode = 'all_available_members'
+      WHERE responsibility.assignment_mode = ANY($2)
         AND responsibility.status <> 'cancelled'
         AND event.status = 'published'
         AND event.end_time >= now()
+        AND (
+          responsibility.assignment_mode = 'all_active_members'
+          OR
+          COALESCE(responsibility.ministry_id, event.ministry_id) = $1
+          OR (
+            responsibility.assignment_mode = 'source_event_assignees'
+            AND EXISTS (
+              SELECT 1
+              FROM responsibility_assignments source_assignment
+              JOIN event_responsibilities source_responsibility
+                ON source_responsibility.id = source_assignment.responsibility_id
+              JOIN events source_event ON source_event.id = source_assignment.event_id
+              WHERE source_assignment.event_id = event.source_event_id
+                AND source_assignment.status NOT IN ('declined', 'cancelled', 'replaced')
+                AND COALESCE(
+                  source_responsibility.ministry_id,
+                  source_event.ministry_id
+                ) = $1
+            )
+          )
+        )
       ORDER BY event.id
     `,
-    [ministryId],
+    [ministryId, EXPECTED_ATTENDANCE_MODES],
   )
   for (const event of events.rows) {
     await syncAllAvailableMemberAssignments(client, context, event.id)
@@ -2495,6 +2815,7 @@ const loadEventDetails = async (
           ? `
           SELECT
             responsibility.id AS responsibility_id,
+            COALESCE(responsibility.ministry_id, $2) AS ministry_id,
             member.id AS user_id,
             member.first_name,
             member.last_name,
@@ -2612,6 +2933,7 @@ const loadEventDetails = async (
           : `
           SELECT
             responsibility.id AS responsibility_id,
+            COALESCE(responsibility.ministry_id, $2) AS ministry_id,
             member.id AS user_id,
             member.first_name,
             member.last_name,
@@ -2798,7 +3120,7 @@ const loadEventDetails = async (
         : 0,
       canRequestSubstitute:
         assignment.user_id === context.user.id &&
-        responsibility.assignment_mode !== "all_available_members" &&
+        !EXPECTED_ATTENDANCE_MODES.includes(responsibility.assignment_mode) &&
         responsibility.substitution_allowed !== false &&
         ["pending", "assigned", "confirmed"].includes(assignment.status) &&
         event.status === "published" &&
@@ -2806,7 +3128,7 @@ const loadEventDetails = async (
         !substitutionRequest,
       canRequestAdminChange:
         assignment.user_id === context.user.id &&
-        responsibility.assignment_mode !== "all_available_members" &&
+        !EXPECTED_ATTENDANCE_MODES.includes(responsibility.assignment_mode) &&
         responsibility.substitution_allowed === false &&
         ["pending", "assigned", "confirmed"].includes(assignment.status) &&
         event.status === "published" &&
@@ -2814,7 +3136,7 @@ const loadEventDetails = async (
         !substitutionRequest,
       canDeclineExpectation:
         assignment.user_id === context.user.id &&
-        responsibility.assignment_mode === "all_available_members" &&
+        EXPECTED_ATTENDANCE_MODES.includes(responsibility.assignment_mode) &&
         ["pending", "assigned", "confirmed"].includes(assignment.status) &&
         event.status === "published" &&
         new Date(event.start_time).getTime() > Date.now(),
@@ -2844,70 +3166,44 @@ const loadEventDetails = async (
   const candidateIds = Array.from(
     new Set(candidateResult.rows.map((candidate) => candidate.user_id)),
   )
-  const reliabilityResult = candidateIds.length
-    ? await client.query(
-        `
-          SELECT
-            assignment.user_id,
-            assignment.service_outcome,
-            history_event.start_time
-          FROM responsibility_assignments assignment
-          JOIN events history_event ON history_event.id = assignment.event_id
-          JOIN event_responsibilities history_responsibility
-            ON history_responsibility.id = assignment.responsibility_id
-          WHERE assignment.user_id = ANY($1::UUID[])
-            AND assignment.service_outcome IS NOT NULL
-            AND history_event.start_time >= now() - INTERVAL '12 months'
-            AND COALESCE(history_responsibility.ministry_id, history_event.ministry_id)
-              = ANY($2::UUID[])
-        `,
-        [candidateIds, manageableMinistryIds],
-      )
-    : { rows: [] }
-  const reliabilityByUser = new Map<string, any[]>()
-  for (const row of reliabilityResult.rows) {
-    const history = reliabilityByUser.get(row.user_id) || []
-    history.push(row)
-    reliabilityByUser.set(row.user_id, history)
+  const candidateAvailabilityByMinistry = new Map<string, Set<string>>()
+  for (const ministryId of new Set(
+    candidateResult.rows.map((candidate) => candidate.ministry_id),
+  )) {
+    const ministryCandidateIds = candidateResult.rows
+      .filter((candidate) => candidate.ministry_id === ministryId)
+      .map((candidate) => candidate.user_id)
+    candidateAvailabilityByMinistry.set(
+      ministryId,
+      new Set(
+        await filterAvailableMemberIds(
+          client,
+          ministryCandidateIds,
+          ministryId,
+          event.start_time,
+          event.end_time,
+        ),
+      ),
+    )
   }
-  const eventTimeKey = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(event.start_time))
+  const reliabilitySummaries = await loadReliabilitySummaries(
+    client,
+    candidateIds,
+    manageableMinistryIds,
+  )
   for (const candidate of candidateResult.rows) {
+    if (
+      !candidateAvailabilityByMinistry
+        .get(candidate.ministry_id)
+        ?.has(candidate.user_id)
+    ) {
+      continue
+    }
     const candidates =
       candidatesByResponsibility.get(candidate.responsibility_id) || []
-    const history = reliabilityByUser.get(candidate.user_id) || []
-    const sameTimeHistory = history.filter(
-      (item) =>
-        new Intl.DateTimeFormat("en-US", {
-          timeZone: "America/New_York",
-          hour: "numeric",
-          minute: "2-digit",
-        }).format(new Date(item.start_time)) === eventTimeKey,
-    )
-    const summarizeReliability = (items: any[]) => {
-      const completed = items.filter((item) =>
-        ["served", "no_show"].includes(
-          item.service_outcome,
-        ),
-      )
-      const served = completed.filter((item) =>
-        item.service_outcome === "served",
-      ).length
-      const noShows = completed.filter(
-        (item) => item.service_outcome === "no_show",
-      ).length
-      return {
-        recorded: completed.length,
-        served,
-        noShows,
-        percent: completed.length
-          ? Math.round((served / completed.length) * 100)
-          : null,
-      }
-    }
+    const reliability =
+      reliabilitySummaries.get(`${candidate.ministry_id}:${candidate.user_id}`) ||
+      emptyReliabilitySummary()
     candidates.push({
       userId: candidate.user_id,
       firstName: candidate.first_name,
@@ -2932,13 +3228,29 @@ const loadEventDetails = async (
         (candidate.automatic_assignment_monthly_limit == null ||
           Number(candidate.overall_monthly_count || 0) <
             Number(candidate.automatic_assignment_monthly_limit)),
-      reliability: summarizeReliability(history),
-      sameTimeReliability: {
-        time: eventTimeKey,
-        ...summarizeReliability(sameTimeHistory),
-      },
+      reliability,
     })
     candidatesByResponsibility.set(candidate.responsibility_id, candidates)
+  }
+  const preferenceRank: Record<string, number> = {
+    prefer: 0,
+    sometimes: 1,
+    if_necessary: 2,
+    not_specified: 3,
+  }
+  for (const candidates of candidatesByResponsibility.values()) {
+    candidates.sort((a, b) =>
+      Number(b.automaticEligible) - Number(a.automaticEligible) ||
+      (preferenceRank[a.servingPreference] ?? 3) -
+        (preferenceRank[b.servingPreference] ?? 3) ||
+      b.reliability.score - a.reliability.score ||
+      b.reliability.recentTrend - a.reliability.recentTrend ||
+      (b.highestLevelRank || 0) - (a.highestLevelRank || 0) ||
+      a.ministryMonthlyCount - b.ministryMonthlyCount ||
+      a.overallMonthlyCount - b.overallMonthlyCount ||
+      a.lastName.localeCompare(b.lastName) ||
+      a.firstName.localeCompare(b.firstName),
+    )
   }
 
   const levelResult = manageableMinistryIds.length
@@ -3191,11 +3503,11 @@ const declineAllMemberExpectation = async (
       WHERE assignment.id = $1
         AND assignment.event_id = $2
         AND assignment.user_id = $3
-        AND responsibility.assignment_mode = 'all_available_members'
+        AND responsibility.assignment_mode = ANY($4)
       LIMIT 1
       FOR UPDATE
     `,
-    [assignmentId, event.id, context.user.id],
+    [assignmentId, event.id, context.user.id, EXPECTED_ATTENDANCE_MODES],
   )
   const assignment = assignmentResult.rows[0]
   if (!assignment) {
@@ -3267,17 +3579,16 @@ export const createEvents = async (
     body.inlineResponsibilities,
     structure.template.ministry_id,
   )
-  const allMemberResponsibilityCount = [
-    ...structure.responsibilities,
-    ...inlineResponsibilities,
-  ].filter(
-    (responsibility: any) =>
-      responsibility.assignment_mode === "all_available_members",
-  ).length
-  if (allMemberResponsibilityCount > 1) {
+  if (
+    inlineResponsibilities.some(
+      (responsibility: any) =>
+        responsibility.assignment_mode === "all_active_members",
+    ) &&
+    !["owner", "super_admin"].includes(context.user.global_role)
+  ) {
     throw Object.assign(
-      new Error("An event can include Open to all members only once"),
-      { status: 400 },
+      new Error("Only a Super Admin can call all active members"),
+      { status: 403 },
     )
   }
   structure.responsibilities = [
@@ -3808,8 +4119,8 @@ const cloneEvent = async (
 
   const structure = {
     template: {
-      id: source.template_id,
-      version: source.template_version,
+      id: null,
+      version: null,
       ministry_id: source.ministry_id,
       participation_type: source.participation_type,
     },
@@ -3820,7 +4131,14 @@ const cloneEvent = async (
       instructions: block.instructions,
       group_ids: block.group_ids || [],
     })),
-    responsibilities: responsibilities.rows.map((responsibility) => ({
+    responsibilities: responsibilities.rows
+      .filter(
+        (responsibility) =>
+          !EXPECTED_ATTENDANCE_MODES.includes(
+            responsibility.assignment_mode || "standard",
+          ),
+      )
+      .map((responsibility) => ({
       id: responsibility.template_responsibility_id,
       ministry_id: responsibility.ministry_id,
       name: responsibility.name,
@@ -3840,6 +4158,26 @@ const cloneEvent = async (
       instructions: responsibility.instructions,
       sort_order: responsibility.sort_order,
     })),
+  }
+  if (body.copySourceRoster !== false) {
+    structure.responsibilities.push({
+      id: null,
+      ministry_id: source.ministry_id,
+      name: "Expected source event roster",
+      description: `Members assigned to ${source.title} are expected to attend unless unavailable.`,
+      responsibility_type: "position",
+      quantity_needed: 1,
+      approval_required: false,
+      is_required: false,
+      required_ministry_level_id: null,
+      required_group_id: null,
+      required_qualification: null,
+      assignment_mode: "source_event_assignees",
+      preferred_assignee_user_id: null,
+      relative_start_minutes: 0,
+      instructions: null,
+      sort_order: -90,
+    })
   }
   let ministryIds = Array.from(
     new Set([
@@ -3864,11 +4202,9 @@ const cloneEvent = async (
       { status: 409, conflicts },
     )
   }
-  return createEventFromStructure(client, context, {
+  const clonedEventId = await createEventFromStructure(client, context, {
     structure,
-    title: source.template_id
-      ? source.title
-      : cleanText(body.title, 250) || `${source.title} Copy`,
+    title: cleanText(body.title, 250) || `${source.title} Copy`,
     description:
       body.description === undefined
         ? source.description
@@ -3888,6 +4224,8 @@ const cloneEvent = async (
       : null,
     roomIds,
   })
+  await syncAllAvailableMemberAssignments(client, context, clonedEventId)
+  return clonedEventId
 }
 
 const previewTemplateReplacement = async (
@@ -4163,7 +4501,7 @@ const assignMemberToResponsibility = async (
       status: 404,
     })
   }
-  if (responsibility.assignment_mode === "all_available_members") {
+  if (EXPECTED_ATTENDANCE_MODES.includes(responsibility.assignment_mode)) {
     throw Object.assign(
       new Error("Expected-member registrations are managed automatically"),
       { status: 409 },
@@ -5012,21 +5350,14 @@ const mutateEventResponsibility = async (
     }
 
     const input = normalizeEventResponsibility(body)
-    if (input.assignmentMode === "all_available_members") {
-      const existingAllMembers = await client.query(
-        `SELECT 1 FROM event_responsibilities
-         WHERE event_id = $1
-           AND assignment_mode = 'all_available_members'
-           AND status <> 'cancelled'
-         LIMIT 1`,
-        [event.id],
+    if (
+      input.assignmentMode === "all_active_members" &&
+      !["owner", "super_admin"].includes(context.user.global_role)
+    ) {
+      throw Object.assign(
+        new Error("Only a Super Admin can call all active members"),
+        { status: 403 },
       )
-      if (existingAllMembers.rowCount) {
-        throw Object.assign(
-          new Error("This event already includes Open to all members"),
-          { status: 409 },
-        )
-      }
     }
     await validateRequiredMinistryLevel(
       client,
@@ -5152,24 +5483,13 @@ const mutateEventResponsibility = async (
   if (body.action === "update_responsibility") {
     const input = normalizeEventResponsibility(body)
     if (
-      input.assignmentMode === "all_available_members" &&
-      responsibility.assignment_mode !== "all_available_members"
+      input.assignmentMode === "all_active_members" &&
+      !["owner", "super_admin"].includes(context.user.global_role)
     ) {
-      const existingAllMembers = await client.query(
-        `SELECT 1 FROM event_responsibilities
-         WHERE event_id = $1
-           AND id <> $2
-           AND assignment_mode = 'all_available_members'
-           AND status <> 'cancelled'
-         LIMIT 1`,
-        [event.id, responsibilityId],
+      throw Object.assign(
+        new Error("Only a Super Admin can call all active members"),
+        { status: 403 },
       )
-      if (existingAllMembers.rowCount) {
-        throw Object.assign(
-          new Error("This event already includes Open to all members"),
-          { status: 409 },
-        )
-      }
     }
     await validateRequiredMinistryLevel(
       client,

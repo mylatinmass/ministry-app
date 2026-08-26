@@ -6,6 +6,7 @@ import {
   ChevronUpDownIcon,
   ChevronUpIcon,
   EnvelopeIcon,
+  ExclamationTriangleIcon,
   HandRaisedIcon,
   HeartIcon,
   MusicalNoteIcon,
@@ -55,6 +56,25 @@ const LevelBadge = ({ iconKey, label, className = "" }) => {
       className={`inline-flex size-8 items-center justify-center rounded-full bg-[#f4ede6] text-[#896542] ${className}`}
     >
       {Icon ? <Icon className="size-4" /> : <span className="text-xs font-semibold">{label}</span>}
+    </span>
+  )
+}
+
+const ReliabilityBadge = ({ reliability, compact = false }) => {
+  if (!reliability) return null
+  const needsFollowUp = reliability.needsFollowUp
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
+        needsFollowUp
+          ? "bg-amber-100 text-amber-900"
+          : "bg-emerald-50 text-emerald-700"
+      }`}
+      title={needsFollowUp ? "This member has reliability points to recover. Please follow up." : "Reliability is current."}
+    >
+      {needsFollowUp && <ExclamationTriangleIcon className="size-4" />}
+      Reliability {reliability.score}
+      {!compact && needsFollowUp ? " · Follow up" : ""}
     </span>
   )
 }
@@ -758,6 +778,9 @@ const MinistryMembers = ({ data, activeAction }) => {
                         <ShieldCheckIcon className="ml-1.5 inline size-5 text-orange-500" aria-label="Background check verified" />
                       )}
                     </p>
+                    {member.reliability?.needsFollowUp && (
+                      <div className="mt-2"><ReliabilityBadge reliability={member.reliability} /></div>
+                    )}
                   </div>
                   <span className="inline-flex items-center gap-2 rounded-full bg-[#f4ede6] px-3 py-2 text-sm font-semibold text-[#896542]">
                     {member.highestLevelName && <LevelBadge iconKey={member.highestLevelIconKey} label={member.highestLevelRank || ""} className="bg-white" />}
@@ -793,6 +816,23 @@ const MinistryMembers = ({ data, activeAction }) => {
                     <button type="button" onClick={() => setSelectedMemberId("")} className="text-sm font-semibold text-[#6f4f34] hover:underline">Close</button>
                   </div>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                    <div className={`rounded-xl border p-4 sm:col-span-2 ${
+                      member.reliability?.needsFollowUp
+                        ? "border-amber-200 bg-amber-50"
+                        : "border-emerald-100 bg-emerald-50"
+                    }`}>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-gray-900">Reliability score</p>
+                          <p className="mt-1 text-xs text-gray-600">
+                            {member.reliability?.needsFollowUp
+                              ? "This member has lost points. Reach out to understand the situation and help correct the pattern."
+                              : "No reliability follow-up is currently needed."}
+                          </p>
+                        </div>
+                        <ReliabilityBadge reliability={member.reliability} />
+                      </div>
+                    </div>
                     <fieldset className="rounded-xl border border-blue-100 bg-blue-50 p-4 sm:col-span-2">
                       <legend className="px-1 text-sm font-semibold text-blue-900">Groups</legend>
                       <div className="mt-2 flex flex-wrap gap-4">
@@ -910,6 +950,9 @@ const MinistryMembers = ({ data, activeAction }) => {
                       <p className="mt-1 text-xs font-semibold text-[#896542]">
                         {member.highestLevelName || "No ministry level assigned"}
                       </p>
+                      {member.reliability?.needsFollowUp && (
+                        <div className="mt-2"><ReliabilityBadge reliability={member.reliability} compact /></div>
+                      )}
                     </div>
                     <span className="rounded-full bg-[#f4ede6] px-2 py-1 text-xs font-semibold text-[#896542]">{roleLabels[member.level]}</span>
                   </div>

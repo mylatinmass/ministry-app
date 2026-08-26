@@ -1,165 +1,186 @@
 import * as React from "react"
 import {
   CalendarDaysIcon,
+  CheckCircleIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   ClockIcon,
   NoSymbolIcon,
+  PlusIcon,
   TrashIcon,
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
-import useAccessibleDialog from "../../hooks/useAccessibleDialog"
 
-const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"]
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+const OCCURRENCES = [
+  ["every", "Every"],
+  ["first", "First"],
+  ["second", "Second"],
+  ["third", "Third"],
+  ["fourth", "Fourth"],
+  ["last", "Last"],
+]
+const QUARTER_MINUTES = [0, 15, 30, 45]
 
-const toDateKey = (value) => {
-  if (typeof value === "string") {
-    const dateKey = value.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
-    if (dateKey) return dateKey
-  }
-  const date = value instanceof Date ? value : new Date(value)
-  if (Number.isNaN(date.getTime())) return ""
-  const month = `${date.getMonth() + 1}`.padStart(2, "0")
-  const day = `${date.getDate()}`.padStart(2, "0")
-  return `${date.getFullYear()}-${month}-${day}`
-}
+const toDateKey = (date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
 
-const toDate = (key) => {
-  const dateKey = toDateKey(key)
-  return dateKey ? new Date(`${dateKey}T12:00:00`) : null
-}
+const toMonthKey = (date) => toDateKey(date).slice(0, 7)
 
 const getMonthCells = (month) => {
-  const firstDay = new Date(month.getFullYear(), month.getMonth(), 1)
-  const gridStart = new Date(firstDay)
-  gridStart.setDate(firstDay.getDate() - firstDay.getDay())
-
+  const first = new Date(month.getFullYear(), month.getMonth(), 1)
+  const start = new Date(first)
+  start.setDate(first.getDate() - first.getDay())
   return Array.from({ length: 42 }, (_, index) => {
-    const date = new Date(gridStart)
-    date.setDate(gridStart.getDate() + index)
+    const date = new Date(start)
+    date.setDate(start.getDate() + index)
     return date
   })
 }
 
-const formatDate = (key, options = {}) => {
-  const date = toDate(key)
-  if (!date || Number.isNaN(date.getTime())) return "Date unavailable"
-  return new Intl.DateTimeFormat("en-US", {
+const formatDate = (key) =>
+  new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
-    ...options,
-  }).format(date)
+    timeZone: "UTC",
+  }).format(new Date(`${key}T12:00:00Z`))
+
+const formatRuleTime = (value) => {
+  const [hours, minutes] = String(value || "00:00").split(":").map(Number)
+  return `${hours % 12 || 12}${minutes ? `:${String(minutes).padStart(2, "0")}` : ""} ${hours >= 12 ? "PM" : "AM"}`
 }
 
-const formatDutyTime = (value) => {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "Time unavailable"
-  return new Intl.DateTimeFormat("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date)
+const formatExclusion = (window) =>
+  window?.allDay
+    ? "Unavailable all day"
+    : `Unavailable ${formatRuleTime(`${String(Math.floor(window.start / 60)).padStart(2, "0")}:${String(window.start % 60).padStart(2, "0")}`)}–${formatRuleTime(`${String(Math.floor(window.end / 60)).padStart(2, "0")}:${String(window.end % 60).padStart(2, "0")}`)}`
+
+const formatAvailabilityWindow = (window) =>
+  `Available ${formatRuleTime(`${String(Math.floor(window.start / 60)).padStart(2, "0")}:${String(window.start % 60).padStart(2, "0")}`)}–${formatRuleTime(`${String(Math.floor(window.end / 60)).padStart(2, "0")}:${String(window.end % 60).padStart(2, "0")}`)}`
+
+const minutesToTimeValue = (minutes) =>
+  `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`
+
+const TimeSelect = ({ label, value, onChange, disabled }) => {
+  const [rawHours, rawMinutes] = String(value || "00:00").split(":").map(Number)
+  const minute = QUARTER_MINUTES.reduce((closest, option) =>
+    Math.abs(option - rawMinutes) < Math.abs(closest - rawMinutes) ? option : closest,
+  )
+  const parts = {
+    hour: rawHours % 12 || 12,
+    minute,
+    period: rawHours >= 12 ? "PM" : "AM",
+  }
+  const update = (field, nextValue) => {
+    const next = { ...parts, [field]: field === "period" ? nextValue : Number(nextValue) }
+    const hours = next.hour % 12 + (next.period === "PM" ? 12 : 0)
+    onChange(`${String(hours).padStart(2, "0")}:${String(next.minute).padStart(2, "0")}`)
+  }
+  return (
+    <fieldset disabled={disabled} className="min-w-0">
+      <legend className="text-sm font-medium text-gray-700">{label}</legend>
+      <div className="mt-1 grid grid-cols-[1fr_1fr_1.1fr] gap-1">
+        <select aria-label={`${label} hour`} value={parts.hour} onChange={(event) => update("hour", event.target.value)} className="min-w-0 rounded-xl border border-gray-300 px-2 py-2 disabled:bg-gray-100">
+          {Array.from({ length: 12 }, (_, index) => index + 1).map((hour) => <option key={hour} value={hour}>{hour}</option>)}
+        </select>
+        <select aria-label={`${label} minute`} value={parts.minute} onChange={(event) => update("minute", event.target.value)} className="min-w-0 rounded-xl border border-gray-300 px-2 py-2 disabled:bg-gray-100">
+          {QUARTER_MINUTES.map((minute) => <option key={minute} value={minute}>{String(minute).padStart(2, "0")}</option>)}
+        </select>
+        <select aria-label={`${label} AM or PM`} value={parts.period} onChange={(event) => update("period", event.target.value)} className="min-w-0 rounded-xl border border-gray-300 px-2 py-2 disabled:bg-gray-100">
+          <option value="AM">AM</option>
+          <option value="PM">PM</option>
+        </select>
+      </div>
+    </fieldset>
+  )
 }
 
-const normalizeAvailability = (result) => ({
-  ...result,
-  blocks: (result.blocks || [])
-    .map((block) => ({
-      ...block,
-      startDate: toDateKey(block.startDate),
-      endDate: toDateKey(block.endDate),
-    }))
-    .filter((block) => block.startDate && block.endDate),
-  assignments: (result.assignments || [])
-    .map((assignment) => ({
-      ...assignment,
-      date: toDateKey(assignment.date || assignment.startTime),
-    }))
-    .filter((assignment) => assignment.date),
-})
-
-const sortedRange = (first, second) =>
-  first <= second
-    ? { startDate: first, endDate: second }
-    : { startDate: second, endDate: first }
-
-const MinistryAvailability = ({ ministryId = "", canManageMembers = false }) => {
-  const [availability, setAvailability] = React.useState({
-    user: null,
-    blocks: [],
-    assignments: [],
-  })
+const MinistryAvailability = ({ ministryId = "" }) => {
+  const [data, setData] = React.useState(null)
+  const [activeMinistryId, setActiveMinistryId] = React.useState(ministryId)
+  const [activeView, setActiveView] = React.useState("calendar")
   const [visibleMonth, setVisibleMonth] = React.useState(
     () => new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   )
   const [showsTwoMonths, setShowsTwoMonths] = React.useState(false)
-  const [selectionStart, setSelectionStart] = React.useState("")
-  const [selectionEnd, setSelectionEnd] = React.useState("")
-  const [label, setLabel] = React.useState("")
-  const [scopeMinistryId, setScopeMinistryId] = React.useState("")
-  const [selectedMemberIds, setSelectedMemberIds] = React.useState([])
-  const [isLoading, setIsLoading] = React.useState(true)
-  const [isSaving, setIsSaving] = React.useState(false)
+  const [selectedDate, setSelectedDate] = React.useState("")
+  const [showPartialAvailability, setShowPartialAvailability] = React.useState(false)
+  const [partialAvailability, setPartialAvailability] = React.useState({
+    startTime: "10:00",
+    endTime: "13:00",
+  })
+  const [ruleMinistryIds, setRuleMinistryIds] = React.useState([])
+  const [creatingRule, setCreatingRule] = React.useState(false)
+  const [newRule, setNewRule] = React.useState({
+    occurrence: "every",
+    dayOfWeek: 6,
+    startTime: "16:00",
+    endTime: "17:00",
+    allDay: false,
+  })
+  const [range, setRange] = React.useState({ startDate: "", endDate: "", label: "" })
+  const [loading, setLoading] = React.useState(true)
+  const [saving, setSaving] = React.useState(false)
   const [message, setMessage] = React.useState("")
-  const [errorMessage, setErrorMessage] = React.useState("")
-  const [pendingConflictRequest, setPendingConflictRequest] =
-    React.useState(null)
-  const closeConflictDialog = React.useCallback(
-    () => setPendingConflictRequest(null),
-    [],
-  )
-  const conflictDialogRef = useAccessibleDialog(
-    Boolean(pendingConflictRequest),
-    closeConflictDialog,
-  )
-  const dragStart = React.useRef("")
-  const dragMoved = React.useRef(false)
-  const dragging = React.useRef(false)
+  const [error, setError] = React.useState("")
 
-  const requestHeaders = React.useCallback(
-    () => ({
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${window.sessionStorage.getItem(
-        MINISTRY_SESSION_KEY,
-      )}`,
-    }),
-    [],
-  )
+  const headers = React.useCallback(() => ({
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${window.sessionStorage.getItem(MINISTRY_SESSION_KEY)}`,
+  }), [])
 
-  const loadAvailability = React.useCallback(async () => {
-    setIsLoading(true)
-    setErrorMessage("")
+  const load = React.useCallback(async () => {
+    setLoading(true)
+    setError("")
     try {
-      const response = await fetch(
-        (() => {
-          const url = new URL(
-            getFunctionEndpoint("scheduling/availability"),
-            window.location.origin,
-          )
-          if (ministryId) url.searchParams.set("ministryId", ministryId)
-          if (selectedMemberIds[0]) {
-            url.searchParams.set("subjectUserId", selectedMemberIds[0])
-          }
-          return url
-        })(),
-        { headers: requestHeaders() },
-      )
-      const result = await response.json()
-      if (!response.ok) {
-        throw new Error(result.message || "Unable to load availability")
+      const requestedMonths = [visibleMonth]
+      if (showsTwoMonths) {
+        requestedMonths.push(
+          new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 1),
+        )
       }
-      setAvailability(normalizeAvailability(result))
-    } catch (error) {
-      setErrorMessage(error.message)
+      const results = await Promise.all(requestedMonths.map(async (month) => {
+        const url = new URL(
+          getFunctionEndpoint("scheduling/availability"),
+          window.location.origin,
+        )
+        if (ministryId) url.searchParams.set("ministryId", ministryId)
+        if (activeMinistryId) {
+          url.searchParams.set("availabilityMinistryId", activeMinistryId)
+        }
+        url.searchParams.set("month", toMonthKey(month))
+        const response = await fetch(url, { headers: headers() })
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.message || "Unable to load availability")
+        return result
+      }))
+      const result = {
+        ...results[0],
+        effectiveDays: results.flatMap((item) => item.effectiveDays || []),
+      }
+      setData(result)
+      if (!activeMinistryId && result.availabilityMinistryId) {
+        setActiveMinistryId(result.availabilityMinistryId)
+      }
+      setRuleMinistryIds((current) => {
+        const availableIds = new Set((result.ministries || []).map((item) => item.id))
+        const validIds = current.filter((id) => availableIds.has(id))
+        return validIds.length
+          ? validIds
+          : result.availabilityMinistryId
+            ? [result.availabilityMinistryId]
+            : []
+      })
+    } catch (requestError) {
+      setError(requestError.message)
     } finally {
-      setIsLoading(false)
+      setLoading(false)
     }
-  }, [requestHeaders, ministryId, selectedMemberIds])
+  }, [activeMinistryId, headers, ministryId, showsTwoMonths, visibleMonth])
 
-  React.useEffect(() => {
-    loadAvailability()
-  }, [loadAvailability])
+  React.useEffect(() => { load() }, [load])
 
   React.useEffect(() => {
     const media = window.matchMedia("(min-width: 1024px)")
@@ -169,675 +190,405 @@ const MinistryAvailability = ({ ministryId = "", canManageMembers = false }) => 
     return () => media.removeEventListener("change", updateMonthCount)
   }, [])
 
-  React.useEffect(() => {
-    const stopDragging = () => {
-      dragging.current = false
-    }
-    window.addEventListener("pointerup", stopDragging)
-    window.addEventListener("pointercancel", stopDragging)
-    return () => {
-      window.removeEventListener("pointerup", stopDragging)
-      window.removeEventListener("pointercancel", stopDragging)
-    }
-  }, [])
-
-  const postAction = async (body) => {
-    setIsSaving(true)
+  const post = async (body, successMessage) => {
+    setSaving(true)
+    setError("")
     setMessage("")
-    setErrorMessage("")
     try {
-      const response = await fetch(
-        getFunctionEndpoint("scheduling/availability"),
-        {
-          method: "POST",
-          headers: requestHeaders(),
-          body: JSON.stringify(body),
-        },
-      )
+      const response = await fetch(getFunctionEndpoint("scheduling/availability"), {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify(body),
+      })
       const result = await response.json()
-      if (!response.ok) {
-        throw new Error(result.message || "Unable to update availability")
-      }
-      setMessage(result.message)
-      await loadAvailability()
+      if (!response.ok) throw new Error(result.message || "Unable to update availability")
+      setMessage(successMessage || result.message)
+      await load()
       window.dispatchEvent(new Event("ministry-conflicts-updated"))
-      return result
-    } catch (error) {
-      setErrorMessage(error.message)
-      return null
+      return true
+    } catch (requestError) {
+      setError(requestError.message)
+      return false
     } finally {
-      setIsSaving(false)
+      setSaving(false)
     }
   }
 
-  const selection =
-    selectionStart && selectionEnd
-      ? sortedRange(selectionStart, selectionEnd)
-      : null
-  const selectedAssignments = selection
-    ? availability.assignments.filter(
-        (assignment) =>
-      assignment.date >= selection.startDate &&
-          assignment.date <= selection.endDate &&
-          (!(canManageMembers && selectedMemberIds.length
-            ? ministryId
-            : scopeMinistryId) ||
-            assignment.ministryId ===
-              (canManageMembers && selectedMemberIds.length
-                ? ministryId
-                : scopeMinistryId)),
-      )
-    : []
-  const todayKey = toDateKey(new Date())
-  const visibleMonths = React.useMemo(
-    () => [
-      visibleMonth,
-      new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 1),
-    ],
-    [visibleMonth],
-  )
-  const displayedMonths = showsTwoMonths ? visibleMonths : [visibleMonth]
-
-  const blocksForDate = (key) =>
-    availability.blocks.filter(
-      (block) => key >= block.startDate && key <= block.endDate,
-    )
-  const assignmentsForDate = (key) =>
-    availability.assignments.filter(
-      (assignment) => assignment.date === key,
-    )
-  const isSelected = (key) =>
-    selection && key >= selection.startDate && key <= selection.endDate
-
-  const selectByTap = (key) => {
-    if (key < todayKey) return
-    if (
-      selectionStart &&
-      selectionEnd === selectionStart &&
-      selectionStart !== key
-    ) {
-      setSelectionEnd(key)
-    } else {
-      setSelectionStart(key)
-      setSelectionEnd(key)
-    }
-    setMessage("")
-    setErrorMessage("")
-  }
-
-  const beginDrag = (key) => {
-    if (key < todayKey) return
-    dragStart.current = key
-    dragMoved.current = false
-    dragging.current = true
-  }
-
-  const extendDrag = (key) => {
-    if (!dragging.current || !dragStart.current || key < todayKey) return
-    if (key !== dragStart.current) dragMoved.current = true
-    setSelectionStart(dragStart.current)
-    setSelectionEnd(key)
-    setMessage("")
-    setErrorMessage("")
-  }
-
-  const finishPointer = (key) => {
-    const wasDrag = dragMoved.current
-    dragging.current = false
-    if (!wasDrag) selectByTap(key)
-  }
-
-  const blockSelection = async () => {
-    if (!selection) return
-    if (canManageMembers && selectedMemberIds.length) {
-      const preview = await postAction({
-        action: "preview_blocks",
-        subjectUserIds: selectedMemberIds,
-        ministryId,
-        startDate: selection.startDate,
-        endDate: selection.endDate,
-        label,
-      })
-      if (preview?.conflicts?.length) {
-        setMessage("")
-        setPendingConflictRequest({
-          selection,
-          label,
-          ministryId,
-          subjectUserIds: selectedMemberIds,
-          conflicts: preview.conflicts,
-        })
-        return
-      }
-      const result = await postAction({
-        action: "create_blocks",
-        subjectUserIds: selectedMemberIds,
-        ministryId,
-        startDate: selection.startDate,
-        endDate: selection.endDate,
-        label,
-      })
-      if (result?.updated) {
-        setSelectionStart("")
-        setSelectionEnd("")
-        setLabel("")
-      }
-      return
-    }
-    const result = await postAction({
-      action: "create_block",
-      startDate: selection.startDate,
-      endDate: selection.endDate,
-      label,
-      ministryId: scopeMinistryId,
-      requireConflictFree: true,
-    })
-    if (result?.conflicts?.length) {
+  const createRule = async (event) => {
+    event.preventDefault()
+    if (!ruleMinistryIds.length) {
       setMessage("")
-      setErrorMessage("")
-      setPendingConflictRequest({
-        selection,
-        label,
-        ministryId: scopeMinistryId,
-        conflicts: result.conflicts,
-      })
-      return
+      setError("Choose at least one ministry")
+      return false
     }
-    if (result?.updated) {
-      setSelectionStart("")
-      setSelectionEnd("")
-      setLabel("")
-    }
-  }
-
-  const continueBlockSelection = async () => {
-    if (!pendingConflictRequest) return
-    if (pendingConflictRequest.subjectUserIds?.length) {
-      const result = await postAction({
-        action: "create_blocks",
-        subjectUserIds: pendingConflictRequest.subjectUserIds,
-        ministryId: pendingConflictRequest.ministryId,
-        startDate: pendingConflictRequest.selection.startDate,
-        endDate: pendingConflictRequest.selection.endDate,
-        label: pendingConflictRequest.label,
-        requestChanges: true,
-      })
-      if (result?.updated) {
-        setSelectionStart("")
-        setSelectionEnd("")
-        setLabel("")
-        setPendingConflictRequest(null)
-      }
-      return
-    }
-    const result = await postAction({
-      action: "create_block",
-      startDate: pendingConflictRequest.selection.startDate,
-      endDate: pendingConflictRequest.selection.endDate,
-      label: pendingConflictRequest.label,
-      ministryId: pendingConflictRequest.ministryId,
-      requireConflictFree: false,
-      requestChanges: true,
-    })
-    if (result?.updated) {
-      setSelectionStart("")
-      setSelectionEnd("")
-      setLabel("")
-      setPendingConflictRequest(null)
-    }
-  }
-
-  const removeBlock = async (block) => {
-    await postAction({
-      action: "cancel_block",
-      blockId: block.id,
-      subjectUserId: selectedMemberIds[0] || undefined,
-      managedMinistryId:
-        selectedMemberIds.length && canManageMembers ? ministryId : undefined,
-    })
-  }
-
-  const requestChange = async (assignment) => {
-    await postAction({
-      action: "request_change",
-      assignmentId: assignment.id,
-    })
-  }
-
-  const moveMonth = (amount) =>
-    setVisibleMonth(
-      (current) =>
-        new Date(current.getFullYear(), current.getMonth() + amount, 1),
+    const saved = await post(
+      {
+        action: "create_availability_rule",
+        ministryIds: ruleMinistryIds,
+        ...newRule,
+      },
+      "Exclusion rule created",
     )
+    if (saved) {
+      setCreatingRule(false)
+      setNewRule({
+        occurrence: "every",
+        dayOfWeek: 6,
+        startTime: "16:00",
+        endTime: "17:00",
+        allDay: false,
+      })
+      if (ruleMinistryIds[0] !== activeMinistryId) {
+        setActiveMinistryId(ruleMinistryIds[0])
+        setSelectedDate("")
+      }
+    }
+    return saved
+  }
+
+  const removeRule = (rule) => post(
+    { action: "delete_availability_rule", ruleIds: rule.ruleIds },
+    "Exclusion rule removed",
+  )
+
+  const setOverride = async (preference, times = null) => {
+    const saved = await post(
+      {
+        action: "set_date_override",
+        ministryIds: (data?.ministries || []).map((ministry) => ministry.id),
+        date: selectedDate,
+        preference,
+        partial: Boolean(times),
+        ...(times || {}),
+      },
+      times
+        ? "Date marked partially available"
+        : preference === "available"
+          ? "Date marked available all day"
+          : "Date marked unavailable",
+    )
+    if (saved) setShowPartialAvailability(false)
+    return saved
+  }
+
+  const addRange = async (event) => {
+    event.preventDefault()
+    const saved = await post(
+      {
+        action: "create_block",
+        ministryId: "",
+        startDate: range.startDate,
+        endDate: range.endDate,
+        label: range.label,
+        requestChanges: true,
+      },
+      "Unavailable range saved",
+    )
+    if (saved) setRange({ startDate: "", endDate: "", label: "" })
+  }
+
+  const removeRange = (block) => post(
+    { action: "cancel_block", blockId: block.id },
+    "Unavailable range removed",
+  )
+
+  const dayMap = React.useMemo(
+    () => new Map((data?.effectiveDays || []).map((day) => [day.date, day])),
+    [data?.effectiveDays],
+  )
+  const groupedRules = React.useMemo(() => {
+    const groups = new Map()
+    for (const rule of data?.availabilityRules || []) {
+      const key = [
+        rule.dayOfWeek,
+        rule.occurrence || "every",
+        rule.allDay ? "all-day" : rule.startTime,
+        rule.allDay ? "all-day" : rule.endTime,
+      ].join("|")
+      const current = groups.get(key) || {
+        dayOfWeek: rule.dayOfWeek,
+        occurrence: rule.occurrence || "every",
+        startTime: rule.startTime,
+        endTime: rule.endTime,
+        allDay: rule.allDay,
+        ruleIds: [],
+        ministries: [],
+      }
+      current.ruleIds.push(rule.id)
+      current.ministries.push(rule.ministryName)
+      groups.set(key, current)
+    }
+    return [...groups.values()]
+  }, [data?.availabilityRules])
+  const displayedMonths = React.useMemo(
+    () => showsTwoMonths
+      ? [
+          visibleMonth,
+          new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 1),
+        ]
+      : [visibleMonth],
+    [showsTwoMonths, visibleMonth],
+  )
+  const selectedDay = selectedDate ? dayMap.get(selectedDate) : null
+  const ranges = data?.blocks || []
 
   return (
-    <div className="mx-auto max-w-5xl pb-10">
-      <section className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm sm:p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#896542]">
-              {selectedMemberIds.length ? "Ministry availability" : "My availability"}
-            </p>
-            <h2 className="mt-2 century-font text-2xl text-gray-950">
-              {selectedMemberIds.length
-                ? "Block dates ministry members cannot serve"
-                : "Block dates you cannot serve"}
-            </h2>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-gray-500">
-              Tap the first and last date, or drag across the calendar. Dates
-              with an assigned duty will ask you to continue before the date is
-              blocked and a change request is sent. Use the previous and next
-              buttons to move between months.
-            </p>
-          </div>
-          {availability.user && (
-            <span className="rounded-full bg-[#f4ede6] px-3 py-1 text-xs font-semibold text-[#896542]">
-              {availability.user.firstName} {availability.user.lastName}
-            </span>
-          )}
-        </div>
-
-        {(message || errorMessage) && (
-          <p
-            role={errorMessage ? "alert" : "status"}
-            className={`mt-5 rounded-xl border px-4 py-3 text-sm ${
-              errorMessage
-                ? "border-red-200 bg-red-50 text-red-700"
-                : "border-green-200 bg-green-50 text-green-800"
-            }`}
-          >
-            {errorMessage || message}
-          </p>
-        )}
-
-        {canManageMembers && availability.managedMembers?.length > 0 && (
-          <label className="mt-5 block text-sm font-semibold text-gray-700">
-            Manage ministry member availability
-            <select
-              multiple
-              value={selectedMemberIds}
-              onChange={(event) => {
-                setSelectedMemberIds(
-                  Array.from(event.target.selectedOptions, (option) => option.value),
-                )
-                setSelectionStart("")
-                setSelectionEnd("")
-                setPendingConflictRequest(null)
-              }}
-              className="mt-2 min-h-32 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 font-normal outline-none focus:border-[#896542]"
-            >
-              {availability.managedMembers.map((member) => (
-                <option key={member.id} value={member.id}>
-                  {member.firstName} {member.lastName}
-                </option>
-              ))}
-            </select>
-            <span className="mt-2 block text-xs font-normal text-gray-500">
-              Select one or several members. Changes apply only to this ministry.
-              Leave everyone unselected to manage your own account.
-            </span>
-          </label>
-        )}
-
-        <div className="relative mt-6 xl:mx-12">
-          <button
-            type="button"
-            aria-label="Previous month"
-            onClick={() => moveMonth(-1)}
-            className="absolute left-2 top-1 z-10 rounded-xl p-2 text-gray-400 transition hover:bg-gray-100 lg:top-1/2 lg:-translate-y-1/2 xl:-left-12"
-          >
-            <ChevronLeftIcon className="size-5" />
-          </button>
-          <button
-            type="button"
-            aria-label="Next month"
-            onClick={() => moveMonth(1)}
-            className="absolute right-2 top-1 z-10 rounded-xl p-2 text-gray-400 transition hover:bg-gray-100 lg:top-1/2 lg:-translate-y-1/2 xl:-right-12"
-          >
-            <ChevronRightIcon className="size-5" />
-          </button>
-
-          {isLoading ? (
-            <p className="py-14 text-center text-sm text-gray-500">
-              Loading availability...
-            </p>
-          ) : (
-            <div className="grid gap-6 lg:grid-cols-2">
-              {displayedMonths.map((month) => {
-              const monthKey = `${month.getFullYear()}-${month.getMonth()}`
-              const monthCells = getMonthCells(month)
-              return (
-                <section
-                  key={monthKey}
-                  className="w-full rounded-xl border border-gray-100 p-3"
-                >
-                  <h4 className="text-center font-semibold text-gray-900">
-                    {new Intl.DateTimeFormat("en-US", {
-                      month: "long",
-                      year: "numeric",
-                    }).format(month)}
-                  </h4>
-                  <div className="mt-2 grid grid-cols-7 text-center text-xs font-semibold uppercase tracking-[0.14em] text-gray-700 sm:text-sm">
-                    {WEEKDAYS.map((day, index) => (
-                      <div key={`${day}-${index}`} className="py-2">
-                        {day}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="grid grid-cols-7 gap-y-2 text-center sm:gap-y-3">
-                    {monthCells.map((date) => {
-                      const key = toDateKey(date)
-                      const inMonth =
-                        date.getMonth() === month.getMonth() &&
-                        date.getFullYear() === month.getFullYear()
-                      if (!inMonth) {
-                        return (
-                          <span
-                            key={`${monthKey}-${key}`}
-                            aria-hidden="true"
-                            className="mx-auto size-8 sm:size-12"
-                          />
-                        )
-                      }
-                      const blocked = blocksForDate(key).length > 0
-                      const duties = assignmentsForDate(key)
-                      const assigned = duties.length > 0
-                      const selected = isSelected(key)
-                      const past = key < todayKey
-                      const changeRequested = duties.some(
-                        (duty) =>
-                          duty.changeRequestStatus === "pending",
-                      )
-
-                      return (
-                        <button
-                          key={`${monthKey}-${key}`}
-                          type="button"
-                          disabled={past}
-                          onPointerDown={() => beginDrag(key)}
-                          onPointerEnter={() => extendDrag(key)}
-                          onPointerUp={() => finishPointer(key)}
-                          className={`relative mx-auto flex size-8 items-center justify-center rounded-full text-sm font-semibold text-gray-900 transition sm:size-12 md:text-base ${
-                            selected
-                              ? "bg-[#eee2d5] text-[#6f4f34] ring-2 ring-[#6f4f34]"
-                              : key === todayKey
-                                ? "bg-orange-500 text-white ring-2 ring-orange-500"
-                              : assigned
-                                ? "ring-2 ring-orange-500"
-                                : blocked
-                                  ? "bg-[#f4ede6] text-[#6f4f34]"
-                                  : ""
-                          } ${
-                            past
-                              ? "cursor-not-allowed opacity-40"
-                              : "hover:bg-gray-50"
-                          }`}
-                          aria-label={`${formatDate(key, {
-                            month: "long",
-                          })}${assigned ? ", assigned duty" : blocked ? ", unavailable" : ""}`}
-                        >
-                          {date.getDate()}
-                          {changeRequested && (
-                            <span className="absolute right-1 top-1 size-1.5 rounded-full bg-orange-500" />
-                          )}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </section>
-              )
-              })}
-            </div>
-          )}
-        </div>
-
-        <div className="mt-6 flex flex-wrap gap-x-5 gap-y-2 border-t border-gray-100 pt-4 text-xs text-gray-500">
-          <span className="inline-flex items-center gap-2">
-            <span className="size-3 rounded bg-[#f4ede6]" /> Unavailable
-          </span>
-          <span className="inline-flex items-center gap-2">
-            <span className="size-3 rounded-full ring-2 ring-orange-500" />{" "}
-            Assigned duty
-          </span>
-          <span className="inline-flex items-center gap-2">
-            <span className="size-3 rounded bg-[#eee2d5] ring-1 ring-[#C1A387]" />{" "}
-            Selected
-          </span>
-        </div>
-      </section>
-
-      {selection && (
-        <section className="mt-5 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm sm:p-6">
-          <div className="flex items-start gap-3">
-            <span className="rounded-xl bg-[#f4ede6] p-2.5 text-[#896542]">
-              <CalendarDaysIcon className="size-6" />
-            </span>
-            <div>
-              <h3 className="font-semibold text-gray-900">
-                {selection.startDate === selection.endDate
-                  ? formatDate(selection.startDate)
-                  : `${formatDate(selection.startDate)} – ${formatDate(
-                      selection.endDate,
-                    )}`}
-              </h3>
-              <p className="mt-1 text-sm text-gray-500">
-                Nothing is saved until you select UPDATE. Assigned dates
-                will show a warning before change requests are sent.
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <label className="text-sm font-semibold text-gray-700">
-              Applies to
-              <select
-                value={
-                  canManageMembers && selectedMemberIds.length
-                    ? ministryId
-                    : scopeMinistryId
-                }
-                onChange={(event) => setScopeMinistryId(event.target.value)}
-                disabled={canManageMembers && selectedMemberIds.length > 0}
-                className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 font-normal outline-none focus:border-[#896542]"
+    <div className="w-full space-y-5 pb-10">
+      <nav aria-label="Availability views" className="flex shrink-0 justify-center">
+        <div className="grid grid-cols-2 gap-1 rounded-2xl bg-gray-50 p-1.5 shadow-sm ring-1 ring-gray-100" role="tablist">
+          {[
+            { id: "calendar", label: "Calendar", icon: CalendarDaysIcon },
+            { id: "weekly", label: "Exclusion Rules", icon: ClockIcon },
+          ].map((view) => {
+            const Icon = view.icon
+            return (
+              <button
+                key={view.id}
+                type="button"
+                role="tab"
+                aria-selected={activeView === view.id}
+                onClick={() => setActiveView(view.id)}
+                className={`flex min-w-32 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition ${activeView === view.id ? "bg-white text-[#6f4f34] shadow-sm" : "text-gray-500 hover:bg-white/70 hover:text-gray-800"}`}
               >
-                {canManageMembers && selectedMemberIds.length > 0 ? (
-                  <option value={ministryId}>This ministry only</option>
-                ) : (
-                  <>
-                <option value="">All ministries</option>
-                {(availability.ministries || []).map((ministry) => (
-                  <option key={ministry.id} value={ministry.id}>
-                    {ministry.name} only
-                  </option>
-                ))}
-                  </>
-                )}
-              </select>
-            </label>
-            <label className="text-sm font-semibold text-gray-700">
-              Label
-            <input
-              type="text"
-              maxLength="250"
-              value={label}
-              onChange={(event) => setLabel(event.target.value)}
-              placeholder="Label, such as Winter trip (optional)"
-              className="mt-2 h-11 w-full rounded-xl border border-gray-200 px-3 text-sm font-normal outline-none focus:border-[#896542]"
-            />
-            </label>
-            <button
-              type="button"
-              disabled={isSaving}
-              onClick={blockSelection}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50 sm:col-span-2"
-            >
-              <NoSymbolIcon className="size-5" />
-              {isSaving ? "UPDATING..." : "UPDATE"}
-            </button>
-          </div>
+                <Icon className="size-5" /> {view.label}
+              </button>
+            )
+          })}
+        </div>
+      </nav>
 
-          {selectedAssignments.length > 0 && (
-            <div className="mt-6 border-t border-gray-100 pt-5">
-              <h4 className="font-semibold text-gray-900">
-                Assigned duties in this range
-              </h4>
-              <div className="mt-3 space-y-3">
-                {selectedAssignments.map((assignment) => (
-                  <article
-                    key={assignment.id}
-                    className="flex flex-col gap-3 rounded-xl border border-orange-200 p-4 sm:flex-row sm:items-center"
-                  >
-                    <ClockIcon className="size-5 shrink-0 text-orange-500" />
-                    <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-gray-900">
-                        {assignment.responsibilityName}
-                      </p>
-                      <p className="mt-1 text-sm text-gray-500">
-                        {formatDate(assignment.date)} at{" "}
-                        {formatDutyTime(assignment.startTime)} ·{" "}
-                        {assignment.eventTitle} · {assignment.ministryName}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {!selectedMemberIds.length && (
-                        <button
-                          type="button"
-                          disabled={
-                            isSaving ||
-                            assignment.changeRequestStatus === "pending"
-                          }
-                          onClick={() => requestChange(assignment)}
-                          className="rounded-lg border border-orange-200 px-3 py-2 text-sm font-semibold text-orange-700 disabled:bg-orange-50 disabled:opacity-70"
-                        >
-                          {assignment.changeRequestStatus === "pending"
-                            ? "Change requested"
-                            : "Request change"}
-                        </button>
-                      )}
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </div>
-          )}
-        </section>
+      {(message || error) && (
+        <p role={error ? "alert" : "status"} className={`rounded-xl border px-4 py-3 text-sm ${error ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>
+          {error || message}
+        </p>
       )}
 
-      <section className="mt-5 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm sm:p-6">
-        <h3 className="century-font text-xl text-gray-900">
-          Unavailable date blocks
-        </h3>
-        {availability.blocks.length ? (
-          <div className="mt-4 space-y-3">
-            {availability.blocks.map((block) => (
-              <article
-                key={block.id}
-                className="flex items-center gap-3 rounded-xl border border-gray-100 p-4"
-              >
-                <NoSymbolIcon className="size-5 shrink-0 text-[#896542]" />
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-gray-900">
-                    {block.startDate === block.endDate
-                      ? formatDate(block.startDate)
-                      : `${formatDate(block.startDate)} – ${formatDate(
-                          block.endDate,
-                        )}`}
-                  </p>
-                  {block.label && (
-                    <p className="mt-1 text-sm text-gray-500">{block.label}</p>
-                  )}
-                  <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-[#896542]">
-                    {block.ministryName || "All ministries"}
-                  </p>
-                </div>
-                {(!selectedMemberIds.length || block.ministryId === ministryId) && <button
-                  type="button"
-                  disabled={isSaving}
-                  onClick={() => removeBlock(block)}
-                  aria-label="Remove availability block"
-                  className="rounded-lg p-2 text-gray-400 hover:bg-gray-50 hover:text-red-600 disabled:opacity-50"
-                >
-                  <TrashIcon className="size-5" />
-                </button>
-                }
-              </article>
-            ))}
-          </div>
-        ) : (
-          <p className="mt-4 rounded-xl border border-dashed border-[#d8c7b8] p-6 text-center text-sm text-gray-500">
-            No unavailable dates have been added.
-          </p>
-        )}
-      </section>
-
-      {pendingConflictRequest && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 px-4">
-          <section
-            ref={conflictDialogRef}
-            tabIndex={-1}
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="availability-conflict-title"
-            className="ministry-dialog-surface w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"
-          >
-            <h3
-              id="availability-conflict-title"
-              className="century-font text-2xl text-gray-950"
-            >
-              Assigned duties need a change request
-            </h3>
-            <p className="mt-3 text-sm leading-relaxed text-gray-600">
-              This unavailable range contains the following assigned duties. If
-              you continue, the dates will be marked unavailable and the
-              ministry administrators will be alerted automatically.
-            </p>
-            <div className="mt-4 max-h-56 space-y-2 overflow-y-auto">
-              {pendingConflictRequest.conflicts.map((assignment) => (
-                <div
-                  key={assignment.id}
-                  className="rounded-xl border border-orange-200 bg-orange-50/40 p-3"
-                >
-                  <p className="font-semibold text-gray-900">
-                    {assignment.responsibilityName}
-                  </p>
-                  {assignment.subjectUserId && (
-                    <p className="mt-1 text-xs font-semibold text-orange-800">
-                      {(() => {
-                        const member = availability.managedMembers?.find(
-                          (item) => item.id === assignment.subjectUserId,
-                        )
-                        return member
-                          ? `${member.firstName} ${member.lastName}`
-                          : "Ministry member"
-                      })()}
+      {loading ? (
+        <section className="rounded-2xl border border-gray-100 bg-white py-16 text-center text-sm text-gray-500 shadow-sm">Loading availability…</section>
+      ) : !activeMinistryId ? (
+        <section className="rounded-2xl border border-dashed border-gray-300 bg-white py-16 text-center text-sm text-gray-500">Join a ministry to set availability.</section>
+      ) : activeView === "weekly" ? (
+        <div className="space-y-5">
+          <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm sm:p-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h3 className="century-font text-xl text-gray-900">Existing Exclusion Rules</h3>
+              <button type="button" onClick={() => setCreatingRule(true)} className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white">
+                <PlusIcon className="size-5" /> Create New Exclusion Rule
+              </button>
+            </div>
+            <div className="mt-5 space-y-3">
+              {!groupedRules.length && (
+                <p className="rounded-xl border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">No exclusion rules have been created.</p>
+              )}
+              {groupedRules.map((rule) => (
+                <article key={`${rule.occurrence}-${rule.dayOfWeek}-${rule.startTime}-${rule.endTime}`} className="flex flex-wrap items-center gap-4 rounded-xl border border-gray-200 p-4">
+                  <span className="rounded-xl bg-[#f4ede6] p-2.5 text-[#896542]"><ClockIcon className="size-5" /></span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-gray-900">{OCCURRENCES.find(([value]) => value === rule.occurrence)?.[1] || "Every"} {WEEKDAYS[rule.dayOfWeek]}</p>
+                    <p className="mt-1 text-sm text-gray-600">
+                      {rule.allDay
+                        ? "Unavailable all day"
+                        : `Unavailable ${formatRuleTime(rule.startTime)}–${formatRuleTime(rule.endTime)}`}
                     </p>
-                  )}
-                  <p className="mt-1 text-xs text-gray-600">
-                    {formatDate(assignment.date)} · {assignment.eventTitle}
-                  </p>
-                </div>
+                    <p className="mt-1 text-xs text-gray-500">{rule.ministries.join(", ")}</p>
+                  </div>
+                  <button type="button" disabled={saving} onClick={() => removeRule(rule)} aria-label={`Remove ${WEEKDAYS[rule.dayOfWeek]} exclusion rule`} className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-700 disabled:opacity-50"><TrashIcon className="size-5" /></button>
+                </article>
               ))}
             </div>
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                type="button"
-                disabled={isSaving}
-                onClick={closeConflictDialog}
-                className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-600 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={isSaving}
-                onClick={continueBlockSelection}
-                className="rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
-              >
-                {isSaving ? "Updating..." : "Continue"}
-              </button>
+          </section>
+
+          {creatingRule && (
+            <form onSubmit={createRule} className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm sm:p-6">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="century-font text-xl text-gray-900">Create Exclusion Rule</h3>
+                  <p className="mt-1 text-sm text-gray-500">You are available by default. An exclusion rule marks only the selected occurrence and time as unavailable.</p>
+                </div>
+                <button type="button" onClick={() => setCreatingRule(false)} className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-600">Cancel</button>
+              </div>
+              <fieldset className="mt-5">
+                <legend className="text-sm font-semibold text-gray-700">Ministries</legend>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  {(data.ministries || []).map((ministry) => {
+                    const checked = ruleMinistryIds.includes(ministry.id)
+                    return (
+                      <label key={ministry.id} className={`flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 text-sm font-medium ${checked ? "border-[#C1A387] bg-[#faf7f4] text-[#6f4f34]" : "border-gray-200 text-gray-700"}`}>
+                        <input type="checkbox" checked={checked} onChange={(event) => setRuleMinistryIds((current) => event.target.checked ? [...current, ministry.id] : current.filter((id) => id !== ministry.id))} className="size-4 rounded border-gray-300 text-[#896542] focus:ring-[#C1A387]" />
+                        {ministry.name}
+                      </label>
+                    )
+                  })}
+                </div>
+              </fieldset>
+              <div className="mt-5 grid items-end gap-3 sm:grid-cols-2 xl:grid-cols-[1fr_1.2fr_1.6fr_1.6fr_auto]">
+                  <label className="text-sm font-medium text-gray-700">Occurs
+                    <select value={newRule.occurrence} onChange={(event) => setNewRule((current) => ({ ...current, occurrence: event.target.value }))} className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2">
+                      {OCCURRENCES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
+                  </label>
+                  <label className="text-sm font-medium text-gray-700">Day
+                    <select value={newRule.dayOfWeek} onChange={(event) => setNewRule((current) => ({ ...current, dayOfWeek: Number(event.target.value) }))} className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2">
+                      {WEEKDAYS.map((day, dayIndex) => <option key={day} value={dayIndex}>{day}</option>)}
+                    </select>
+                  </label>
+                  <TimeSelect label="Unavailable from" value={newRule.startTime} disabled={newRule.allDay} onChange={(startTime) => setNewRule((current) => ({ ...current, startTime }))} />
+                  <TimeSelect label="Unavailable until" value={newRule.endTime} disabled={newRule.allDay} onChange={(endTime) => setNewRule((current) => ({ ...current, endTime }))} />
+                  <label className="flex items-center gap-2 pb-2 text-sm text-gray-600"><input type="checkbox" checked={newRule.allDay} onChange={(event) => setNewRule((current) => ({ ...current, allDay: event.target.checked }))} /> All day</label>
+              </div>
+              <button disabled={saving} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#896542] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"><PlusIcon className="size-5" />{saving ? "Creating…" : "Create Exclusion Rule"}</button>
+            </form>
+          )}
+        </div>
+      ) : (
+        <>
+          <section className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm sm:p-6">
+            <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-gray-500">
+              <span className="inline-flex items-center gap-2"><span className="size-3 rounded-full ring-1 ring-[#C1A387]" style={{ backgroundImage: "linear-gradient(to bottom, #fff 0%, #fff 50%, #f4ede6 50%, #f4ede6 100%)" }} /> Partially available</span>
+              <span className="inline-flex items-center gap-2"><span className="size-3 rounded-full bg-[#f4ede6] ring-1 ring-[#d8c7b8]" /> Unavailable by exclusion rule</span>
+              <span className="inline-flex items-center gap-2"><span className="size-3 rounded-full bg-emerald-600" /> Explicitly available</span>
+              <span className="inline-flex items-center gap-2"><span className="size-3 rounded-full bg-[#f4ede6]" /> Unavailable override or range</span>
+              <span className="inline-flex items-center gap-2"><span className="size-3 rounded bg-[#eee2d5] ring-1 ring-[#C1A387]" /> Selected</span>
+            </div>
+
+            <div className="relative mt-6 xl:mx-12">
+              <button type="button" aria-label="Previous month" onClick={() => setVisibleMonth((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))} className="absolute left-2 top-1 z-10 rounded-xl p-2 text-gray-400 transition hover:bg-gray-100 lg:top-1/2 lg:-translate-y-1/2 xl:-left-12"><ChevronLeftIcon className="size-5" /></button>
+              <button type="button" aria-label="Next month" onClick={() => setVisibleMonth((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))} className="absolute right-2 top-1 z-10 rounded-xl p-2 text-gray-400 transition hover:bg-gray-100 lg:top-1/2 lg:-translate-y-1/2 xl:-right-12"><ChevronRightIcon className="size-5" /></button>
+
+              <div className="grid gap-6 lg:grid-cols-2">
+                {displayedMonths.map((month) => {
+                  const monthKey = `${month.getFullYear()}-${month.getMonth()}`
+                  return (
+                    <section key={monthKey} aria-label={new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(month)} className="w-full rounded-xl border border-gray-100 p-3">
+                      <h4 className="text-center font-semibold text-gray-900">{new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(month)}</h4>
+                      <div className="mt-2 grid grid-cols-7 text-center text-xs font-semibold uppercase tracking-[0.14em] text-gray-700 sm:text-sm">
+                        {WEEKDAYS.map((day) => <div key={day} className="py-2"><abbr title={day} className="no-underline" aria-label={day}>{day.slice(0, 1)}</abbr></div>)}
+                      </div>
+                      <div className="grid grid-cols-7 gap-y-2 text-center sm:gap-y-3">
+                        {getMonthCells(month).map((date) => {
+                          const key = toDateKey(date)
+                          const inMonth = date.getMonth() === month.getMonth() && date.getFullYear() === month.getFullYear()
+                          if (!inMonth) return <span key={`${monthKey}-${key}`} aria-hidden="true" className="mx-auto min-h-14 w-full sm:min-h-16" />
+                          const day = dayMap.get(key)
+                          const past = key < data.today
+                          const selected = selectedDate === key
+                          const isToday = key === data.today
+                          const explicitAvailable = day?.explicit && day.status === "available"
+                          const explicitPartial = explicitAvailable && !(day.windows || []).some((window) => window.allDay)
+                          const unavailable = day?.status === "unavailable"
+                          const blocked = unavailable && (day?.explicit || day?.source === "range")
+                          const exclusionRule = day?.source === "exclusion_rule"
+                          const partiallyUnavailable = exclusionRule && day.status === "available"
+                          const unavailableByRule = exclusionRule && unavailable
+                          const dateSpecificLabel = day?.explicit
+                            ? explicitPartial
+                              ? `${(day.windows || []).map(formatAvailabilityWindow).join(", ")} explicitly`
+                              : `explicitly ${day.status}`
+                            : day?.source === "range"
+                              ? "unavailable through a date range"
+                              : partiallyUnavailable
+                                ? `${(day.exclusions || []).map(formatExclusion).join(", ")} through an exclusion rule`
+                                : unavailableByRule
+                                    ? "unavailable through exclusion rules"
+                                    : "generally available"
+                          const stateClass = selected
+                            ? "bg-[#eee2d5] text-[#6f4f34] ring-2 ring-[#6f4f34]"
+                            : isToday
+                              ? "bg-orange-500 text-white ring-2 ring-orange-500"
+                              : explicitPartial
+                                ? "text-[#6f4f34] ring-2 ring-emerald-600"
+                              : explicitAvailable
+                                ? "bg-emerald-600 text-white ring-2 ring-emerald-600"
+                                : blocked
+                                  ? "bg-[#f4ede6] text-[#6f4f34]"
+                                  : partiallyUnavailable
+                                    ? "text-[#6f4f34] ring-1 ring-[#C1A387]"
+                                    : unavailableByRule
+                                        ? "bg-[#f4ede6] text-[#6f4f34] ring-1 ring-[#d8c7b8]"
+                                  : ""
+                          const stateStyle = !selected && !isToday && (partiallyUnavailable || explicitPartial)
+                            ? { backgroundImage: "linear-gradient(to bottom, #fff 0%, #fff 50%, #f4ede6 50%, #f4ede6 100%)" }
+                            : undefined
+                          return (
+                            <button key={`${monthKey}-${key}`} type="button" disabled={past} onClick={() => { setSelectedDate(key); setShowPartialAvailability(false) }} aria-pressed={selected} aria-current={isToday ? "date" : undefined} aria-label={`${formatDate(key)}: ${dateSpecificLabel}`} className={`group mx-auto flex min-h-14 w-full flex-col items-center text-gray-900 sm:min-h-16 ${past ? "cursor-not-allowed opacity-40" : ""}`}>
+                              <span style={stateStyle} className={`relative flex size-8 items-center justify-center rounded-full text-sm font-semibold transition sm:size-12 md:text-base ${stateClass} ${past ? "" : stateClass ? "group-hover:brightness-95" : "group-hover:bg-gray-50"}`}>
+                                {date.getDate()}
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </section>
+                  )
+                })}
+              </div>
             </div>
           </section>
-        </div>
+
+          {selectedDate && (
+            <section className="rounded-2xl border border-[#dfd1c4] bg-[#faf7f4] p-5">
+              <h3 className="century-font text-xl text-gray-900">{formatDate(selectedDate)}</h3>
+              <p className="mt-1 text-sm text-gray-600">
+                {selectedDay?.explicit
+                  ? selectedDay.status === "available" && !(selectedDay.windows || []).some((window) => window.allDay)
+                    ? `${(selectedDay.windows || []).map(formatAvailabilityWindow).join(", ")} explicitly.`
+                    : `Explicitly ${selectedDay.status}.`
+                  : selectedDay?.source === "range"
+                    ? "Unavailable through a date range."
+                    : selectedDay?.source === "exclusion_rule"
+                      ? `${(selectedDay.exclusions || []).map(formatExclusion).join(", ")} through an exclusion rule.`
+                        : "Generally available."}
+              </p>
+              {selectedDate >= data.today && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button type="button" disabled={saving} onClick={() => setOverride("available")} className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><CheckCircleIcon className="size-5" />Available all day</button>
+                  <button type="button" disabled={saving} onClick={() => {
+                    const currentWindow = selectedDay?.explicit && selectedDay.status === "available"
+                      ? (selectedDay.windows || []).find((window) => !window.allDay)
+                      : null
+                    if (currentWindow) {
+                      setPartialAvailability({
+                        startTime: minutesToTimeValue(currentWindow.start),
+                        endTime: minutesToTimeValue(currentWindow.end),
+                      })
+                    }
+                    setShowPartialAvailability((current) => !current)
+                  }} className="inline-flex items-center gap-2 rounded-xl border border-[#b68b65] bg-white px-4 py-2 text-sm font-semibold text-[#6f4f34] disabled:opacity-50"><ClockIcon className="size-5" />Partially available</button>
+                  <button type="button" disabled={saving} onClick={() => setOverride("unavailable")} className="inline-flex items-center gap-2 rounded-xl bg-rose-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><NoSymbolIcon className="size-5" />Unavailable</button>
+                </div>
+              )}
+              {showPartialAvailability && selectedDate >= data.today && (
+                <form onSubmit={(event) => { event.preventDefault(); setOverride("available", partialAvailability) }} className="mt-4 rounded-xl border border-[#dfd1c4] bg-white p-4">
+                  <p className="text-sm font-semibold text-gray-800">When are you available on this date?</p>
+                  <div className="mt-3 grid items-end gap-3 sm:grid-cols-2 lg:max-w-3xl lg:grid-cols-[1fr_1fr_auto]">
+                    <TimeSelect label="Available from" value={partialAvailability.startTime} disabled={saving} onChange={(startTime) => setPartialAvailability((current) => ({ ...current, startTime }))} />
+                    <TimeSelect label="Available until" value={partialAvailability.endTime} disabled={saving} onChange={(endTime) => setPartialAvailability((current) => ({ ...current, endTime }))} />
+                    <button disabled={saving} className="rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Save partial availability"}</button>
+                  </div>
+                </form>
+              )}
+            </section>
+          )}
+
+          <section className="grid gap-5 lg:grid-cols-2">
+            <form onSubmit={addRange} className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+              <h3 className="century-font text-xl text-gray-900">Add an unavailable range</h3>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <label className="text-sm font-semibold text-gray-700">Start date<input required type="date" min={data.today} value={range.startDate} onChange={(event) => setRange((current) => ({ ...current, startDate: event.target.value }))} className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 font-normal" /></label>
+                <label className="text-sm font-semibold text-gray-700">End date<input required type="date" min={range.startDate || data.today} value={range.endDate} onChange={(event) => setRange((current) => ({ ...current, endDate: event.target.value }))} className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 font-normal" /></label>
+                <label className="text-sm font-semibold text-gray-700 sm:col-span-2">Label (optional)<input value={range.label} onChange={(event) => setRange((current) => ({ ...current, label: event.target.value }))} placeholder="Vacation, school break…" className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 font-normal" /></label>
+              </div>
+              <button disabled={saving} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#896542] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><PlusIcon className="size-5" />Save range</button>
+            </form>
+            <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+              <h3 className="century-font text-xl text-gray-900">Unavailable ranges</h3>
+              <div className="mt-4 space-y-2">
+                {!ranges.length && <p className="text-sm text-gray-500">No unavailable ranges.</p>}
+                {ranges.map((block) => <div key={block.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 p-3"><div><p className="text-sm font-semibold text-gray-800">{block.startDate === block.endDate ? formatDate(block.startDate) : `${formatDate(block.startDate)}–${formatDate(block.endDate)}`}</p>{block.label && <p className="mt-0.5 text-xs text-gray-500">{block.label}</p>}</div><button type="button" disabled={saving} onClick={() => removeRange(block)} aria-label="Remove unavailable range" className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-700"><TrashIcon className="size-5" /></button></div>)}
+              </div>
+            </div>
+          </section>
+        </>
       )}
     </div>
   )

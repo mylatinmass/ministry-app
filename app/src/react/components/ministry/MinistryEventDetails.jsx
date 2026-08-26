@@ -6,9 +6,12 @@ import {
   ExclamationTriangleIcon,
   MapPinIcon,
   ClipboardDocumentIcon,
+  DocumentDuplicateIcon,
+  EnvelopeIcon,
   LinkIcon,
   PencilSquareIcon,
   PlusIcon,
+  PaperAirplaneIcon,
   TrashIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline"
@@ -42,6 +45,13 @@ const servingPreferenceLabels = {
   not_specified: "Not specified",
 }
 
+const isExpectedAttendanceMode = (assignmentMode) =>
+  [
+    "all_available_members",
+    "all_active_members",
+    "source_event_assignees",
+  ].includes(assignmentMode)
+
 const formatDutyTime = (eventStart, offsetMinutes = 0) =>
   new Intl.DateTimeFormat("en-US", {
     weekday: "short",
@@ -55,7 +65,7 @@ const formatDutyTime = (eventStart, offsetMinutes = 0) =>
     ),
   )
 
-const MinistryEventDetails = ({ event, ministryName, onClose }) => {
+const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
   const [details, setDetails] = React.useState(null)
   const [isLoading, setIsLoading] = React.useState(false)
   const [isSavingResponsibility, setIsSavingResponsibility] =
@@ -81,6 +91,13 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
   const [privateDetails, setPrivateDetails] = React.useState(null)
   const [canManagePrivateDetails, setCanManagePrivateDetails] = React.useState(false)
   const [isSavingPrivateDetails, setIsSavingPrivateDetails] = React.useState(false)
+  const [showParticipantMessage, setShowParticipantMessage] = React.useState(false)
+  const [isSendingParticipantMessage, setIsSendingParticipantMessage] = React.useState(false)
+  const [participantMessage, setParticipantMessage] = React.useState({
+    messageType: "email",
+    subject: "",
+    body: "",
+  })
   const closeTimer = React.useRef(null)
 
   const loadDetails = React.useCallback(async () => {
@@ -246,6 +263,42 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
           (responsibility) => responsibility.canManage,
         ),
       ))
+  const canMessageParticipants = Boolean(details) && (
+    Boolean(details?.canManageEvent) ||
+    manageableMinistries.length > 0 ||
+    Boolean(details?.responsibilities?.some((responsibility) => responsibility.canManage))
+  )
+
+  const sendParticipantMessage = async (submitEvent) => {
+    submitEvent.preventDefault()
+    setIsSendingParticipantMessage(true)
+    setErrorMessage("")
+    setMessage("")
+    try {
+      const response = await fetch(getFunctionEndpoint("messages"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${window.sessionStorage.getItem(MINISTRY_SESSION_KEY)}`,
+        },
+        body: JSON.stringify({
+          audience: "event_participants",
+          eventId: displayedEvent.id,
+          ...participantMessage,
+        }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.message || "Unable to message participants")
+      setMessage(`Message sent to ${result.recipientCount} event participant${result.recipientCount === 1 ? "" : "s"}.`)
+      setParticipantMessage({ messageType: "email", subject: "", body: "" })
+      setShowParticipantMessage(false)
+    } catch (error) {
+      setErrorMessage(error.message)
+    } finally {
+      setIsSendingParticipantMessage(false)
+    }
+  }
+
   const startAddingResponsibility = () => {
     setMessage("")
     setErrorMessage("")
@@ -838,6 +891,82 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
             "No event description has been added yet."}
         </p>
 
+        {details?.canManageEvent && onClone && (
+          <button
+            type="button"
+            onClick={() => onClone(displayedEvent)}
+            className="mt-5 inline-flex items-center gap-2 rounded-xl border border-[#d8c7b8] bg-white px-4 py-2.5 text-sm font-semibold text-[#6f4f34] hover:bg-[#fbf8f4]"
+          >
+            <DocumentDuplicateIcon className="size-5" />
+            Clone and modify
+          </button>
+        )}
+
+        {canMessageParticipants && (
+          <div className="mt-5">
+            <button
+              type="button"
+              onClick={() => setShowParticipantMessage((open) => !open)}
+              className="inline-flex items-center gap-2 rounded-xl border border-[#d8c7b8] bg-white px-4 py-2.5 text-sm font-semibold text-[#6f4f34] hover:bg-[#fbf8f4]"
+            >
+              {showParticipantMessage ? <XMarkIcon className="size-5" /> : <EnvelopeIcon className="size-5" />}
+              {showParticipantMessage ? "Cancel message" : "Message participants"}
+            </button>
+            {showParticipantMessage && (
+              <form onSubmit={sendParticipantMessage} className="mt-3 space-y-3 rounded-2xl border border-gray-200 bg-[#fbf8f4] p-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="text-sm font-semibold text-gray-700">
+                    Type
+                    <select
+                      value={participantMessage.messageType}
+                      onChange={(changeEvent) => setParticipantMessage((current) => ({
+                        ...current,
+                        messageType: changeEvent.target.value,
+                        subject: changeEvent.target.value === "alert" ? "" : current.subject,
+                      }))}
+                      className="mt-1 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal"
+                    >
+                      <option value="email">Email</option>
+                      <option value="alert">Alert</option>
+                    </select>
+                  </label>
+                  {participantMessage.messageType === "email" && (
+                    <label className="text-sm font-semibold text-gray-700">
+                      Subject
+                      <input
+                        value={participantMessage.subject}
+                        onChange={(changeEvent) => setParticipantMessage((current) => ({ ...current, subject: changeEvent.target.value }))}
+                        required
+                        maxLength={250}
+                        className="mt-1 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal"
+                      />
+                    </label>
+                  )}
+                </div>
+                <label className="block text-sm font-semibold text-gray-700">
+                  Message
+                  <textarea
+                    value={participantMessage.body}
+                    onChange={(changeEvent) => setParticipantMessage((current) => ({ ...current, body: changeEvent.target.value }))}
+                    required
+                    maxLength={participantMessage.messageType === "alert" ? 200 : undefined}
+                    rows={4}
+                    className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 font-normal"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={isSendingParticipantMessage}
+                  className="inline-flex items-center gap-2 rounded-lg bg-[#896542] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  <PaperAirplaneIcon className="size-4" />
+                  {isSendingParticipantMessage ? "Sending…" : "Send to participants"}
+                </button>
+              </form>
+            )}
+          </div>
+        )}
+
         {prioryConflictCount > 0 && (
           <section role="alert" className="mt-6 rounded-2xl bg-orange-500 p-5 text-white">
             <div className="flex items-start gap-3">
@@ -1372,19 +1501,23 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                         ...current,
                         assignmentMode,
                         name:
-                          assignmentMode === "all_available_members"
-                            ? "Open to all members"
+                          isExpectedAttendanceMode(assignmentMode)
+                            ? assignmentMode === "source_event_assignees"
+                              ? "Expected source event roster"
+                              : assignmentMode === "all_active_members"
+                                ? "Expected all-member attendance"
+                                : "Expected ministry attendance"
                             : current.name,
                         quantityNeeded:
-                          assignmentMode === "all_available_members"
+                          isExpectedAttendanceMode(assignmentMode)
                             ? 1
                             : current.quantityNeeded,
                         substitutionAllowed:
-                          assignmentMode === "all_available_members"
+                          isExpectedAttendanceMode(assignmentMode)
                             ? false
                             : current.substitutionAllowed,
                         isRequired:
-                          assignmentMode === "all_available_members"
+                          isExpectedAttendanceMode(assignmentMode)
                             ? false
                             : current.isRequired,
                       }))
@@ -1392,7 +1525,11 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                     className="mt-2 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal"
                   >
                     <option value="standard">Standard position</option>
-                    <option value="all_available_members">Open to all members</option>
+                    <option value="all_available_members">Expected ministry attendance</option>
+                    <option value="all_active_members">Expected all active members (Super Admin)</option>
+                    {displayedEvent.source_event_id && (
+                      <option value="source_event_assignees">Expected source event roster</option>
+                    )}
                   </select>
                 </label>
                 <label className="text-sm font-semibold text-gray-700">
@@ -1409,7 +1546,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                       )
                     }
                     required
-                    disabled={responsibilityForm.assignmentMode === "all_available_members"}
+                    disabled={isExpectedAttendanceMode(responsibilityForm.assignmentMode)}
                     className="mt-2 h-10 w-full rounded-lg border border-gray-200 px-3 font-normal"
                   />
                 </label>
@@ -1599,7 +1736,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                                   Event only
                                 </span>
                               )}
-                              {responsibility.assignmentMode === "all_available_members" && (
+                              {isExpectedAttendanceMode(responsibility.assignmentMode) && (
                                 <span className="rounded-full bg-green-100 px-2 py-1 text-[10px] font-semibold uppercase text-green-800">
                                   Expected members
                                 </span>
@@ -1607,7 +1744,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                             </div>
                             {!responsibility.summaryOnly && (
                             <p className="mt-1 text-sm text-gray-500">
-                              {responsibility.assignmentMode === "all_available_members"
+                              {isExpectedAttendanceMode(responsibility.assignmentMode)
                                 ? `${responsibility.assignedQuantity} available serving member${responsibility.assignedQuantity === 1 ? "" : "s"} expected`
                                 : `${responsibility.responsibilityType.replaceAll("_", " ")} · ${responsibility.assignedQuantity}/${responsibility.unlimitedCapacity ? "Unlimited" : responsibility.quantityNeeded} assigned`}
                               {responsibility.requiredLevelName
@@ -1825,11 +1962,9 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                                                 {member.servingPreference && member.servingPreference !== "not_specified"
                                                   ? ` · ${servingPreferenceLabels[member.servingPreference] || member.servingPreference.replaceAll("_", " ")}`
                                                   : ""}
-                                                {member.sameTimeReliability?.recorded >= 2
-                                                  ? ` · ${member.sameTimeReliability.percent}% at ${member.sameTimeReliability.time}`
-                                                  : member.reliability?.recorded >= 3
-                                                    ? ` · ${member.reliability.percent}% reliable`
-                                                    : ""}
+                                                {member.reliability
+                                                  ? ` · Reliability ${member.reliability.score}${member.reliability.needsFollowUp ? " · FOLLOW UP" : ""}`
+                                                  : ""}
                                               </option>
                                             ))}
                                           </select>

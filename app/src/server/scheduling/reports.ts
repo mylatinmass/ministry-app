@@ -2,6 +2,10 @@ import type { PoolClient } from "pg"
 import { getPool } from "../database"
 import { json } from "../request"
 import { getIdentityContext, requireMinistryAccess } from "./authorization"
+import {
+  emptyReliabilitySummary,
+  loadReliabilitySummaries,
+} from "./reliability"
 
 const cleanId = (value: string | null) =>
   typeof value === "string" ? value.trim().slice(0, 100) : ""
@@ -195,16 +199,22 @@ export const loadReports = async (
     })
   }
 
+  const reliability = await loadReliabilitySummaries(
+    client,
+    Array.from(members.keys()),
+    [ministryId],
+  )
   const participation = Array.from(members.values()).map((member) => {
-    const recorded = member.served + member.noShows
+    const reliabilitySummary =
+      reliability.get(`${ministryId}:${member.userId}`) ||
+      emptyReliabilitySummary()
     return {
       ...member,
       timePatterns: Object.values(member.timePatterns).sort((a: any, b: any) =>
         a.time.localeCompare(b.time),
       ),
-      reliabilityPercent: recorded
-        ? Math.round((member.served / recorded) * 100)
-        : null,
+      reliabilityPercent: reliabilitySummary.score,
+      reliability: reliabilitySummary,
     }
   })
 

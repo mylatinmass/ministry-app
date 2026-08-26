@@ -20,7 +20,10 @@ const isStandalone = () =>
   window.matchMedia("(display-mode: standalone)").matches ||
   window.navigator.standalone === true
 
-const PushNotifications = () => {
+const PushNotifications = React.forwardRef(function PushNotifications(
+  { controllerOnly = false, onConnectionChange, onMessageChange },
+  ref,
+) {
   const [status, setStatus] = React.useState("checking")
   const [message, setMessage] = React.useState("")
 
@@ -33,9 +36,15 @@ const PushNotifications = () => {
     navigator.serviceWorker
       .getRegistration("/")
       .then((registration) => registration?.pushManager.getSubscription())
-      .then((subscription) => setStatus(subscription ? "enabled" : "disabled"))
-      .catch(() => setStatus("disabled"))
-  }, [])
+      .then((subscription) => {
+        const connected = Boolean(subscription)
+        setStatus(connected ? "enabled" : "disabled")
+        if (connected) onConnectionChange?.(true)
+      })
+      .catch(() => {
+        setStatus("disabled")
+      })
+  }, [onConnectionChange])
 
   const saveSubscription = async (subscription) => {
     const token = window.sessionStorage.getItem(MINISTRY_SESSION_KEY)
@@ -94,6 +103,7 @@ const PushNotifications = () => {
 
       await saveSubscription(subscription)
       setStatus("enabled")
+      onConnectionChange?.(true)
       setMessage("Notifications are enabled on this device.")
     } catch (error) {
       setStatus("disabled")
@@ -162,6 +172,17 @@ const PushNotifications = () => {
     }
   }
 
+  React.useImperativeHandle(ref, () => ({
+    connect: enable,
+    sendTest,
+  }))
+
+  React.useEffect(() => {
+    if (message) onMessageChange?.(message)
+  }, [message, onMessageChange])
+
+  if (controllerOnly) return null
+
   if (status === "checking") {
     return <p className="mt-4 text-sm text-gray-500">Checking this device...</p>
   }
@@ -175,7 +196,7 @@ const PushNotifications = () => {
   }
 
   return (
-    <div className="mt-5 border-t border-gray-100 pt-5">
+    <div className="mt-4 border-t border-gray-100 pt-4">
       <p className="text-sm font-semibold text-gray-700">
         Notifications on this device
       </p>
@@ -184,7 +205,7 @@ const PushNotifications = () => {
           type="button"
           onClick={status === "enabled" ? disable : enable}
           disabled={["working", "testing"].includes(status)}
-          className={`inline-flex min-w-44 items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-wait disabled:opacity-60 ${
+          className={`inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-semibold transition disabled:cursor-wait disabled:opacity-60 ${
             status === "enabled" || status === "testing"
               ? "border border-[#d8c7b8] bg-white text-[#6f4f34] hover:bg-[#f7f3ef]"
               : "bg-[#896542] text-white hover:bg-[#6f4f34]"
@@ -201,7 +222,7 @@ const PushNotifications = () => {
             type="button"
             onClick={sendTest}
             disabled={status === "testing"}
-            className="inline-flex min-w-44 items-center justify-center rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#6f4f34] disabled:cursor-wait disabled:opacity-60"
+            className="inline-flex items-center justify-center rounded-lg bg-[#896542] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[#6f4f34] disabled:cursor-wait disabled:opacity-60"
           >
             {status === "testing" ? "SENDING..." : "Send test notification"}
           </button>
@@ -214,6 +235,6 @@ const PushNotifications = () => {
       )}
     </div>
   )
-}
+})
 
 export default PushNotifications

@@ -472,6 +472,7 @@ const MinistryHomeWorkspace = ({ data }) => {
     unreadCount: 0,
   })
   const [showCreateEvent, setShowCreateEvent] = React.useState(false)
+  const [cloneEventDraft, setCloneEventDraft] = React.useState(null)
   const [eventView, setEventView] = React.useState("all")
   const [pinnedEventIds, setPinnedEventIds] = React.useState(() =>
     data.calendarEvents.filter((event) => event.is_pinned).map((event) => event.id),
@@ -671,6 +672,16 @@ const MinistryHomeWorkspace = ({ data }) => {
     setMobileMenuOpen(false)
     setProfileMenuOpen(false)
     window.history.replaceState({}, "", id === "home" ? "/" : `/?section=${id}`)
+  }
+
+  const cloneEventFromDetails = (event) => {
+    const ministryId = event.ministry_id || event.coordinator_ministry_id
+    if (ministryId) setCreateMinistryId(ministryId)
+    setCloneEventDraft(event)
+    setSelectedEvent(null)
+    setSectionId("events")
+    setShowCreateEvent(true)
+    window.history.replaceState({}, "", "/?section=events")
   }
 
   const openAlerts = () => {
@@ -1068,7 +1079,10 @@ const MinistryHomeWorkspace = ({ data }) => {
           </label>
           <button
             type="button"
-            onClick={() => setShowCreateEvent(false)}
+            onClick={() => {
+              setShowCreateEvent(false)
+              setCloneEventDraft(null)
+            }}
             className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-600"
           >
             Back to events
@@ -1077,7 +1091,11 @@ const MinistryHomeWorkspace = ({ data }) => {
         <MinistryEvents
           key={createMinistry.id}
           data={{ ministry: createMinistry, user: currentUser }}
-          activeAction={{ id: "add-event", label: "Create event" }}
+          activeAction={
+            cloneEventDraft
+              ? { id: "clone-event", label: "Clone event", event: cloneEventDraft }
+              : { id: "add-event", label: "Create event" }
+          }
           onEventSelect={setSelectedEvent}
         />
       </div>
@@ -1119,7 +1137,10 @@ const MinistryHomeWorkspace = ({ data }) => {
           {(hasGlobalAccess || manageableMinistries.length > 0) && (
             <button
               type="button"
-              onClick={() => setShowCreateEvent(true)}
+              onClick={() => {
+                setCloneEventDraft(null)
+                setShowCreateEvent(true)
+              }}
               className="hidden items-center gap-2 rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#6f4f34] lg:absolute lg:right-0 lg:inline-flex"
             >
               <PlusIcon className="size-5" />
@@ -1182,7 +1203,10 @@ const MinistryHomeWorkspace = ({ data }) => {
             })}
             <button
               type="button"
-              onClick={() => setShowCreateEvent(true)}
+              onClick={() => {
+                setCloneEventDraft(null)
+                setShowCreateEvent(true)
+              }}
               disabled={!(hasGlobalAccess || manageableMinistries.length > 0)}
               className="flex flex-col items-center gap-1 rounded-xl px-2 py-2 text-[11px] font-medium text-gray-500 transition hover:bg-[#f7f3ef] hover:text-[#6f4f34] disabled:cursor-not-allowed disabled:opacity-40"
             >
@@ -1415,6 +1439,7 @@ const MinistryHomeWorkspace = ({ data }) => {
         event={selectedEvent}
         ministryName={selectedEvent?.coordinator_ministry_name || "Ministry"}
         onClose={() => setSelectedEvent(null)}
+        onClone={cloneEventFromDetails}
       />
     </div>
   )

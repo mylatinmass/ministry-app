@@ -34,13 +34,13 @@ const accountSections = [
     id: "availability",
     label: "Availability",
     icon: ClockIcon,
-    description: "Block dates when this profile cannot be scheduled.",
+    description: "Set specific dates, date ranges, and automatic scheduling rules.",
   },
   {
     id: "messages",
     label: "Messages",
     icon: ChatBubbleLeftRightIcon,
-    description: "Read announcements sent by ministry leaders.",
+    description: "Read messages sent to this profile.",
   },
   {
     id: "ministries",

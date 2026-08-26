@@ -854,6 +854,9 @@ const OverviewContent = ({
                                               {member.highestLevelName
                                                 ? ` · ${member.highestLevelName}`
                                                 : ""}
+                                              {member.reliability
+                                                ? ` · Reliability ${member.reliability.score}${member.reliability.needsFollowUp ? " · FOLLOW UP" : ""}`
+                                                : ""}
                                             </option>
                                           ))}
                                         </select>

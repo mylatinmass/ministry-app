@@ -17,7 +17,15 @@ const request = async (path, options = {}) => {
   return result
 }
 
-const TelegramNotifications = ({ globalRole, onConnectionChange }) => {
+const TelegramNotifications = React.forwardRef(function TelegramNotifications(
+  {
+    controllerOnly = false,
+    globalRole,
+    onConnectionChange,
+    onMessageChange,
+  },
+  ref,
+) {
   const [data, setData] = React.useState(null)
   const [setup, setSetup] = React.useState(null)
   const [status, setStatus] = React.useState("loading")
@@ -114,6 +122,15 @@ const TelegramNotifications = ({ globalRole, onConnectionChange }) => {
     }
   }
 
+  React.useImperativeHandle(ref, () => ({
+    connect,
+    sendTest,
+  }))
+
+  React.useEffect(() => {
+    if (message) onMessageChange?.(message)
+  }, [message, onMessageChange])
+
   const configureWebhook = async () => {
     const replacing = Boolean(setup?.webhook?.url && !setup?.webhook?.active)
     if (
@@ -139,6 +156,8 @@ const TelegramNotifications = ({ globalRole, onConnectionChange }) => {
     }
   }
 
+  if (controllerOnly) return null
+
   if (status === "loading") {
     return <p className="mt-4 text-sm text-gray-500">Checking Telegram...</p>
   }
@@ -149,7 +168,7 @@ const TelegramNotifications = ({ globalRole, onConnectionChange }) => {
   const connected = data.connection?.status === "active"
 
   return (
-    <div className="mt-5 border-t border-gray-100 pt-5">
+    <div className="mt-4 border-t border-gray-100 pt-4">
       <p className="text-sm font-semibold text-gray-700">Telegram</p>
       <p className="mt-1 text-sm text-gray-500">
         {connected
@@ -161,7 +180,7 @@ const TelegramNotifications = ({ globalRole, onConnectionChange }) => {
           type="button"
           onClick={connected ? disconnect : connect}
           disabled={status === "working" || awaitingConnection}
-          className={`inline-flex min-w-44 items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-wait disabled:opacity-60 ${
+          className={`inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-semibold transition disabled:cursor-wait disabled:opacity-60 ${
             connected
               ? "border border-[#d8c7b8] bg-white text-[#6f4f34] hover:bg-[#f7f3ef]"
               : "bg-[#896542] text-white hover:bg-[#6f4f34]"
@@ -180,7 +199,7 @@ const TelegramNotifications = ({ globalRole, onConnectionChange }) => {
             type="button"
             onClick={sendTest}
             disabled={status === "working"}
-            className="inline-flex min-w-44 items-center justify-center rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#6f4f34] disabled:cursor-wait disabled:opacity-60"
+            className="inline-flex items-center justify-center rounded-lg bg-[#896542] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[#6f4f34] disabled:cursor-wait disabled:opacity-60"
           >
             Send test DM
           </button>
@@ -188,7 +207,7 @@ const TelegramNotifications = ({ globalRole, onConnectionChange }) => {
       </div>
 
       {isGlobalAdmin && setup && !setup.error && (
-        <div className="mt-4 rounded-xl border border-gray-100 p-4">
+        <div className="mt-3 rounded-lg bg-gray-50 p-3">
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-400">
             Telegram integration
           </p>
@@ -226,6 +245,6 @@ const TelegramNotifications = ({ globalRole, onConnectionChange }) => {
       )}
     </div>
   )
-}
+})
 
 export default TelegramNotifications

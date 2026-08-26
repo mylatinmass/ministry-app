@@ -64,6 +64,118 @@ const canManageMinistry = (managedMinistries, ministryId) =>
 const cleanText = (value, maximum = 1000) =>
   typeof value === "string" ? value.trim().slice(0, maximum) : ""
 
+const summarizeReliabilityEvents = (sourceEvents) => {
+  const events = [...sourceEvents].sort(
+    (a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime()
+  )
+  let score = 100
+  for (const item of events) {
+    score = Math.max(0, Math.min(100, score + item.delta))
+  }
+  const recentTrend = [...events]
+    .reverse()
+    .slice(0, 15)
+    .reduce(
+      (total, item, index) => total + item.delta * (index < 5 ? 3 : 2),
+      0
+    )
+  const lastIssue = [...events].reverse().find((item) => item.delta < 0)
+  return {
+    score,
+    recentTrend,
+    recordedEvents: events.length,
+    needsFollowUp: score < 100,
+    lastIssue: lastIssue
+      ? {
+          kind: lastIssue.kind,
+          occurredAt: new Date(lastIssue.occurredAt).toISOString(),
+          delta: lastIssue.delta,
+          noticeHours: lastIssue.noticeHours ?? null,
+        }
+      : null,
+  }
+}
+
+const loadReliabilitySummaries = async (client, userIds, ministryId) => {
+  const result = new Map()
+  if (!userIds.length) return result
+  const [outcomes, cancellations] = await Promise.all([
+    client.query(
+      `
+        SELECT assignment.user_id, assignment.id AS assignment_id,
+          assignment.service_outcome,
+          COALESCE(assignment.outcome_recorded_at, event.end_time) AS occurred_at
+        FROM responsibility_assignments assignment
+        JOIN events event ON event.id = assignment.event_id
+        JOIN event_responsibilities responsibility
+          ON responsibility.id = assignment.responsibility_id
+        WHERE assignment.user_id = ANY($1::UUID[])
+          AND COALESCE(responsibility.ministry_id, event.ministry_id) = $2
+          AND assignment.service_outcome IN ('served', 'no_show')
+        ORDER BY occurred_at
+      `,
+      [userIds, ministryId]
+    ),
+    client.query(
+      `
+        SELECT DISTINCT ON (request.assignment_id)
+          request.subject_user_id AS user_id,
+          request.assignment_id,
+          request.created_at AS occurred_at,
+          EXTRACT(EPOCH FROM (event.start_time - request.created_at)) / 3600
+            AS notice_hours
+        FROM assignment_change_requests request
+        JOIN responsibility_assignments assignment
+          ON assignment.id = request.assignment_id
+        JOIN events event ON event.id = assignment.event_id
+        JOIN event_responsibilities responsibility
+          ON responsibility.id = assignment.responsibility_id
+        WHERE request.subject_user_id = ANY($1::UUID[])
+          AND COALESCE(responsibility.ministry_id, event.ministry_id) = $2
+          AND request.status NOT IN ('accepted', 'cancelled', 'declined')
+          AND assignment.service_outcome IS NULL
+          AND (
+            request.requested_by_user_id = request.subject_user_id
+            OR EXISTS (
+              SELECT 1 FROM managed_profiles guardian_link
+              WHERE guardian_link.child_user_id = request.subject_user_id
+                AND guardian_link.guardian_user_id = request.requested_by_user_id
+                AND guardian_link.status = 'active'
+            )
+          )
+        ORDER BY request.assignment_id, request.created_at DESC
+      `,
+      [userIds, ministryId]
+    ),
+  ])
+  const byUser = new Map()
+  const append = (userId, item) => {
+    const items = byUser.get(userId) || []
+    items.push(item)
+    byUser.set(userId, items)
+  }
+  for (const row of outcomes.rows) {
+    append(row.user_id, {
+      occurredAt: row.occurred_at,
+      delta: row.service_outcome === "served" ? 1 : -10,
+      kind: row.service_outcome,
+    })
+  }
+  for (const row of cancellations.rows) {
+    const noticeHours = Math.max(0, Number(row.notice_hours || 0))
+    append(row.user_id, {
+      occurredAt: row.occurred_at,
+      delta: noticeHours < 24 ? -5 : noticeHours < 48 ? -3 : -1,
+      kind: "cancellation",
+      noticeHours,
+    })
+  }
+  for (const userId of userIds) {
+    result.set(userId, summarizeReliabilityEvents(byUser.get(userId) || []))
+  }
+  return result
+}
+
 const cleanIconKey = (value) => {
   const iconKey = cleanText(value, 64)
   return /^[a-z0-9-]+$/.test(iconKey) ? iconKey : null
@@ -400,6 +512,12 @@ const listMembers = async (client, user, ministryId) => {
       : Promise.resolve({ rows: [] }),
   ])
 
+  const reliabilityByUser = await loadReliabilitySummaries(
+    client,
+    membersResult.rows.map((member) => member.user_id),
+    ministryId
+  )
+
   return jsonResponse(200, {
     canManage: true,
     canManageAll: isGlobalManager(user),
@@ -429,6 +547,8 @@ const listMembers = async (client, user, ministryId) => {
       highestLevelIconKey: member.highest_level_icon_key,
       highestLevelRank: Number(member.highest_level_rank) || null,
       joinedAt: member.joined_at,
+      reliability: reliabilityByUser.get(member.user_id) ||
+        summarizeReliabilityEvents([]),
       groupIds: groupMembersResult.rows
         .filter((row) => row.ministry_member_id === member.id)
         .map((row) => row.group_id),

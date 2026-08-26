@@ -70,10 +70,7 @@ const channelReadiness = (channel, settings) => {
   return {
     ready: true,
     label: "Ready to receive",
-    detail:
-      channel === "push" && settings.activeDevices > 0
-        ? `${settings.activeDevices} active ${settings.activeDevices === 1 ? "device" : "devices"}.`
-        : "Connected and enabled by the member.",
+    detail: "Connected and enabled by the member.",
   }
 }
 

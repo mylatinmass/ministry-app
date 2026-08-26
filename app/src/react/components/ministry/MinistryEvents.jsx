@@ -51,6 +51,22 @@ const initialForm = () => ({
   participationType: "members",
   visibility: "public",
   inlineResponsibilities: [],
+  copySourceRoster: true,
+})
+
+const cloneFormForEvent = (event) => ({
+  ...initialForm(),
+  sourceEventId: event.id,
+  templateId: "",
+  title: `${event.title} Practice`,
+  description: event.description || "",
+  location: event.location || "",
+  roomIds: event.room_ids || event.rooms?.map((room) => room.id) || [],
+  startTime: "",
+  endTime: "",
+  participationType: event.participation_type || "members",
+  visibility: event.visibility || "public",
+  copySourceRoster: true,
 })
 
 const formatEventDate = (value) =>
@@ -129,12 +145,16 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
   const [templates, setTemplates] = React.useState([])
   const [events, setEvents] = React.useState([])
   const [rooms, setRooms] = React.useState([])
-  const [form, setForm] = React.useState(initialForm)
+  const [levels, setLevels] = React.useState([])
+  const [form, setForm] = React.useState(() =>
+    activeAction?.event ? cloneFormForEvent(activeAction.event) : initialForm(),
+  )
   const [isLoading, setIsLoading] = React.useState(true)
   const [isSaving, setIsSaving] = React.useState(false)
   const [templatePreview, setTemplatePreview] = React.useState(null)
   const [assignmentCandidates, setAssignmentCandidates] = React.useState({})
   const [availableMinistryMembers, setAvailableMinistryMembers] = React.useState([])
+  const [memberPreview, setMemberPreview] = React.useState(null)
   const [assignmentSelections, setAssignmentSelections] = React.useState({})
   const [isLoadingCandidates, setIsLoadingCandidates] = React.useState(false)
   const [recurrencePreview, setRecurrencePreview] = React.useState(null)
@@ -205,6 +225,11 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       )
       setEvents(eventResult.events)
       setRooms(eventResult.rooms || [])
+      setLevels(
+        (templateResult.levels || []).filter(
+          (level) => level.ministryId === data.ministry.id,
+        ),
+      )
     } catch (error) {
       setErrorMessage(error.message)
     } finally {
@@ -217,10 +242,14 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
   }, [loadData])
 
   React.useEffect(() => {
-    setForm(initialForm())
+    setForm(
+      activeAction?.event
+        ? cloneFormForEvent(activeAction.event)
+        : initialForm(),
+    )
     setMessage("")
     setErrorMessage("")
-  }, [activeAction.id])
+  }, [activeAction.id, activeAction.event])
 
   React.useEffect(() => {
     if (
@@ -297,6 +326,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       form.participationType === "volunteers"
     ) {
       setAvailableMinistryMembers([])
+      setMemberPreview(null)
       return undefined
     }
     const start = new Date(form.startTime)
@@ -306,6 +336,9 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       return undefined
     }
     const controller = new AbortController()
+    const expectedAttendance = form.inlineResponsibilities.find(
+      (item) => item.assignmentMode === "all_available_members",
+    )
     const timer = window.setTimeout(async () => {
       try {
         const response = await fetch(getFunctionEndpoint("scheduling/events"), {
@@ -317,11 +350,14 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
             ministryId: data.ministry.id,
             startTime: start.toISOString(),
             endTime: end.toISOString(),
+            audienceScope: expectedAttendance?.audienceScope || "ministry",
+            requiredLevelId: expectedAttendance?.requiredLevelId || "",
           }),
         })
         const result = await response.json()
         if (!response.ok) throw new Error(result.message || "Unable to load members")
         setAvailableMinistryMembers(result.members || [])
+        setMemberPreview(result.preview || null)
       } catch (error) {
         if (error.name !== "AbortError") setErrorMessage(error.message)
       }
@@ -337,6 +373,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
     form.participationType,
     form.sourceEventId,
     form.startTime,
+    form.inlineResponsibilities,
   ])
 
   React.useEffect(() => {
@@ -462,9 +499,11 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
           key,
           name:
             assignmentMode === "all_available_members"
-              ? "Open to all members"
+              ? "Expected ministry attendance"
               : "",
           assignmentMode,
+          audienceScope: "ministry",
+          requiredLevelId: "",
           preferredAssigneeUserId: "",
           quantityNeeded: 1,
           responsibilityType: "position",
@@ -543,20 +582,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
     })
   }
 
-  const prepareClone = (event) =>
-    setForm({
-      ...initialForm(),
-      sourceEventId: event.id,
-      templateId: event.template_id || "",
-      title: event.template_id ? event.title : `${event.title} Copy`,
-      description: event.description || "",
-      location: event.location || "",
-      roomIds: event.room_ids || [],
-      startTime: "",
-      endTime: "",
-      participationType: event.participation_type || "members",
-      visibility: event.visibility || "public",
-    })
+  const prepareClone = (event) => setForm(cloneFormForEvent(event))
 
   const persistEvent = async (body, { editing, cloning }) => {
     const response = await fetch(
@@ -818,6 +844,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
 
   const showForm =
     activeAction.id === "add-event" ||
+    activeAction.id === "clone-event" ||
     (activeAction.id === "modify" &&
       Boolean(form.eventId || form.sourceEventId))
   const selectedAssignmentUserIds = new Set(
@@ -1319,6 +1346,25 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
             </div>
           )}
 
+          {form.sourceEventId && (
+            <section className="mt-5 rounded-xl border border-[#d8c7b8] bg-[#fbf8f4] p-4">
+              <label className="flex items-start gap-3 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={form.copySourceRoster}
+                  onChange={(event) => updateField("copySourceRoster", event.target.checked)}
+                  className="mt-0.5 size-4 accent-[#896542]"
+                />
+                <span>
+                  <span className="block font-semibold">Call the source event roster to attend</span>
+                  <span className="mt-1 block text-xs text-gray-500">
+                    Everyone assigned to the original event will be expected at this copy unless unavailable. They can choose Can’t attend.
+                  </span>
+                </span>
+              </label>
+            </section>
+          )}
+
           {!form.eventId &&
             !form.sourceEventId &&
             form.participationType !== "volunteers" && (
@@ -1326,10 +1372,10 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h3 className="font-semibold text-gray-900">
-                      Event positions
+                      Staffing and expected attendance
                     </h3>
                     <p className="mt-1 text-sm text-gray-500">
-                      Add event-only positions or register every available serving member. Positions are optional.
+                      Add staffed positions separately from the group of members expected to attend.
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -1348,7 +1394,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                       onClick={() => addInlineResponsibility("all_available_members")}
                       className="rounded-lg bg-[#896542] px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"
                     >
-                      Open to all members
+                      Add attendance call
                     </button>
                   </div>
                 </div>
@@ -1356,7 +1402,9 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                   {form.inlineResponsibilities.map((responsibility) => (
                     <div key={responsibility.key} className="grid gap-3 rounded-xl bg-[#f7f3ef] p-4 sm:grid-cols-[1fr_1fr_auto]">
                       <label className="text-xs font-semibold text-gray-600">
-                        Position
+                        {responsibility.assignmentMode === "all_available_members"
+                          ? "Attendance call"
+                          : "Position"}
                         <input
                           value={responsibility.name}
                           onChange={(event) =>
@@ -1373,12 +1421,34 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                       </label>
                       <label className="text-xs font-semibold text-gray-600">
                         {responsibility.assignmentMode === "all_available_members"
-                          ? "Registration"
+                          ? "Expected audience"
                           : "Assigned member"}
                         {responsibility.assignmentMode === "all_available_members" ? (
-                          <span className="mt-1 flex min-h-11 items-center rounded-lg border border-gray-200 bg-white px-3 text-sm font-normal">
-                            All available serving members
-                          </span>
+                          <select
+                            value={responsibility.audienceScope || "ministry"}
+                            onChange={(event) => {
+                              const audienceScope = event.target.value
+                              updateInlineResponsibility(
+                                responsibility.key,
+                                "audienceScope",
+                                audienceScope,
+                              )
+                              if (audienceScope !== "level") {
+                                updateInlineResponsibility(
+                                  responsibility.key,
+                                  "requiredLevelId",
+                                  "",
+                                )
+                              }
+                            }}
+                            className="mt-1 h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm font-normal"
+                          >
+                            <option value="ministry">All available ministry members</option>
+                            {["owner", "super_admin"].includes(data.user?.globalRole) && (
+                              <option value="all">All active members</option>
+                            )}
+                            <option value="level">Ministry level or higher</option>
+                          </select>
                         ) : (
                           <select
                             value={responsibility.preferredAssigneeUserId}
@@ -1401,6 +1471,31 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                           </select>
                         )}
                       </label>
+                      {responsibility.assignmentMode === "all_available_members" &&
+                        responsibility.audienceScope === "level" && (
+                          <label className="text-xs font-semibold text-gray-600 sm:col-span-2">
+                            Minimum ministry level
+                            <select
+                              value={responsibility.requiredLevelId || ""}
+                              onChange={(event) =>
+                                updateInlineResponsibility(
+                                  responsibility.key,
+                                  "requiredLevelId",
+                                  event.target.value,
+                                )
+                              }
+                              required
+                              className="mt-1 h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm font-normal"
+                            >
+                              <option value="">Choose a minimum level</option>
+                              {levels.map((level) => (
+                                <option key={level.id} value={level.id}>
+                                  Level {level.rankOrder} · {level.name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
                       <button
                         type="button"
                         aria-label={`Remove ${responsibility.name || "position"}`}
@@ -1413,6 +1508,13 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                   ))}
                   {!form.inlineResponsibilities.length && (
                     <p className="text-sm text-gray-500">No event-only positions added.</p>
+                  )}
+                  {form.inlineResponsibilities.some(
+                    (item) => item.assignmentMode === "all_available_members",
+                  ) && memberPreview && (
+                    <p className="rounded-lg bg-white px-3 py-2 text-sm text-gray-600">
+                      {memberPreview.expectedCount} expected · {memberPreview.unavailableCount} unavailable · {memberPreview.conflictCount} schedule conflict{memberPreview.conflictCount === 1 ? "" : "s"}
+                    </p>
                   )}
                 </div>
               </section>

@@ -176,7 +176,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
             ? {
                 ...responsibility,
                 assignmentMode: value,
-                name: "Open to all members",
+                name: "Expected ministry attendance",
                 quantityNeeded: 1,
                 substitutionAllowed: false,
                 isRequired: false,
@@ -738,7 +738,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
                               className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm"
                             >
                               <option value="standard">Specific position</option>
-                              <option value="all_available_members">Open to all members</option>
+                              <option value="all_available_members">Expected ministry attendance</option>
                             </select>
                             <input
                               type="number"

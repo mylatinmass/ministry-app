@@ -11,6 +11,15 @@ const {
 
 const REMINDER_OPTIONS = new Set([15, 30, 45, 60, 120, 180, 240])
 
+const normalizeEmailConnection = (value) =>
+  String(value || "").trim().toLowerCase()
+
+const normalizePhoneConnection = (value) => {
+  let digits = String(value || "").replace(/\D/g, "")
+  if (digits.length === 11 && digits.startsWith("1")) digits = digits.slice(1)
+  return digits
+}
+
 const jsonResponse = (statusCode, body) => ({
   statusCode,
   headers: {
@@ -65,12 +74,22 @@ const loadProfile = async (client, context) => {
           contact.notification_announcements_enabled,
           contact.notification_volunteer_opportunities_enabled,
           contact.sms_transactional_consent_at,
+          contact.notification_email_connected_value,
+          contact.notification_email_connected_at,
+          contact.notification_sms_connected_value,
+          contact.notification_sms_connected_at,
           EXISTS (
             SELECT 1
             FROM telegram_connections telegram_connection
             WHERE telegram_connection.account_user_id = contact.id
               AND telegram_connection.status = 'active'
-          ) AS telegram_connected
+          ) AS telegram_connected,
+          (
+            SELECT count(*)::INT
+            FROM push_subscriptions push_subscription
+            WHERE push_subscription.account_user_id = contact.id
+              AND push_subscription.status = 'active'
+          ) AS active_push_devices
         FROM ministry_accounts profile
         JOIN ministry_accounts contact ON contact.id = $2
         WHERE profile.id = $1
@@ -127,6 +146,23 @@ const loadProfile = async (client, context) => {
       ),
       sms: Boolean(profile.notification_sms_enabled),
       push: Boolean(profile.notification_push_enabled),
+    },
+    notificationConnections: {
+      email: Boolean(
+        profile.email &&
+          profile.notification_email_connected_value &&
+          normalizeEmailConnection(profile.email) ===
+            normalizeEmailConnection(profile.notification_email_connected_value)
+      ),
+      telegram: Boolean(profile.telegram_connected),
+      sms: Boolean(
+        profile.phone &&
+          profile.sms_transactional_consent_at &&
+          profile.notification_sms_connected_value &&
+          normalizePhoneConnection(profile.phone) ===
+            normalizePhoneConnection(profile.notification_sms_connected_value)
+      ),
+      push: Number(profile.active_push_devices) > 0,
     },
     notificationCategories: {
       reminders: Boolean(profile.notification_reminders_enabled),
@@ -328,6 +364,10 @@ const handler = async (event) => {
             notification_announcements_enabled,
             notification_volunteer_opportunities_enabled,
             sms_transactional_consent_at,
+            email,
+            COALESCE(NULLIF(phone, ''), telephone) AS phone,
+            notification_email_connected_value,
+            notification_sms_connected_value,
             appearance_theme
           FROM ministry_accounts
           WHERE id = $1
@@ -335,6 +375,18 @@ const handler = async (event) => {
         `,
         [context.user.id]
       )
+
+      const before = beforeResult.rows[0]
+      const emailConnectionValue =
+        normalizeEmailConnection(before?.notification_email_connected_value) ===
+        normalizeEmailConnection(fields.email)
+          ? before?.notification_email_connected_value
+          : null
+      const smsConnectionValue =
+        normalizePhoneConnection(before?.notification_sms_connected_value) ===
+        normalizePhoneConnection(fields.phone)
+          ? before?.notification_sms_connected_value
+          : null
 
       await client.query(
         `
@@ -367,9 +419,19 @@ const handler = async (event) => {
               WHEN $9 AND $15 THEN '2026-08-11'
               ELSE sms_transactional_consent_text_version
             END,
-            appearance_theme = $16,
+            notification_email_connected_value = $16,
+            notification_email_connected_at = CASE
+              WHEN $16 IS NULL THEN NULL
+              ELSE notification_email_connected_at
+            END,
+            notification_sms_connected_value = $17,
+            notification_sms_connected_at = CASE
+              WHEN $17 IS NULL THEN NULL
+              ELSE notification_sms_connected_at
+            END,
+            appearance_theme = $18,
             updated_at = now()
-          WHERE id = $17
+          WHERE id = $19
         `,
         [
           fields.firstName,
@@ -387,13 +449,14 @@ const handler = async (event) => {
           fields.notificationCategories.announcements,
           fields.notificationCategories.volunteerOpportunities,
           fields.smsTransactionalConsentAccepted,
+          emailConnectionValue,
+          smsConnectionValue,
           fields.appearanceTheme,
           context.user.id,
         ]
       )
       await queueKlaviyoProfileSync(client, context.user.id)
 
-      const before = beforeResult.rows[0]
       await client.query(
         `
           INSERT INTO ministry_audit_log (

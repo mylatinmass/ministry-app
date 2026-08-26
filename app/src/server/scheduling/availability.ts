@@ -8,6 +8,11 @@ import {
   writeSchedulingAudit,
 } from "./authorization"
 import { syncFutureAllMemberAssignmentsForMinistry } from "./events"
+import {
+  eventFits,
+  loadAvailabilityConfiguration,
+  monthAvailabilityDays,
+} from "./availability-rules"
 
 const ASSIGNED_DUTY_STATUSES = [
   "assigned",
@@ -25,6 +30,21 @@ const chapelDateFormatter = new Intl.DateTimeFormat("en-CA", {
 
 const toDateKey = (value: string | Date) => {
   const parts = chapelDateFormatter.formatToParts(new Date(value))
+  const values = Object.fromEntries(
+    parts
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  )
+  return `${values.year}-${values.month}-${values.day}`
+}
+
+const toDateKeyInTimezone = (value: string | Date, timezone: string) => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(value))
   const values = Object.fromEntries(
     parts
       .filter((part) => part.type !== "literal")
@@ -658,6 +678,41 @@ export const handleAvailability = async (request: Request) => {
           [context.user.id],
         ),
       ])
+      const availabilityMinistryId = cleanText(
+        url.searchParams.get("availabilityMinistryId"),
+        100,
+      ) || managedMinistryId || ministriesResult.rows[0]?.id || ""
+      const configuration = availabilityMinistryId
+        ? await loadAvailabilityConfiguration(
+            client,
+            subjectUserId,
+            availabilityMinistryId,
+          )
+        : null
+      const availabilityRulesResult = ministriesResult.rows.length
+        ? await client.query(
+            `SELECT rule.id, rule.ministry_id, ministry.name AS ministry_name,
+                    rule.day_of_week, rule.week_of_month,
+                    rule.start_time, rule.end_time
+             FROM availability_weekly_rules rule
+             JOIN ministries ministry ON ministry.id = rule.ministry_id
+             WHERE rule.user_id = $1
+               AND rule.ministry_id = ANY($2::UUID[])
+               AND rule.status = 'active'
+             ORDER BY rule.day_of_week, rule.start_time, lower(ministry.name)`,
+            [subjectUserId, ministriesResult.rows.map((ministry) => ministry.id)],
+          )
+        : { rows: [] }
+      const requestedMonth =
+        cleanText(url.searchParams.get("month"), 7) || toDateKey(new Date()).slice(0, 7)
+      let effectiveDays: any[] = []
+      if (configuration) {
+        try {
+          effectiveDays = monthAvailabilityDays(requestedMonth, configuration)
+        } catch (error) {
+          throw Object.assign(new Error("Month is invalid"), { status: 400 })
+        }
+      }
       return json({
         user: {
           id: subject.id,
@@ -669,6 +724,40 @@ export const handleAvailability = async (request: Request) => {
         ministries: ministriesResult.rows,
         managedMembers,
         managedMinistryId,
+        availabilityMinistryId,
+        policy: configuration?.policy || "generally_available",
+        timezone: configuration?.timezone || "America/New_York",
+        weeklyRules: (configuration?.rules || []).map((rule: any) => ({
+          id: rule.id,
+          dayOfWeek: Number(rule.day_of_week),
+          occurrence: rule.week_of_month || "every",
+          startTime: rule.start_time ? String(rule.start_time).slice(0, 5) : "",
+          endTime: rule.end_time ? String(rule.end_time).slice(0, 5) : "",
+          allDay: !rule.start_time,
+        })),
+        availabilityRules: availabilityRulesResult.rows.map((rule: any) => ({
+          id: rule.id,
+          ministryId: rule.ministry_id,
+          ministryName: rule.ministry_name,
+          dayOfWeek: Number(rule.day_of_week),
+          occurrence: rule.week_of_month || "every",
+          startTime: rule.start_time ? String(rule.start_time).slice(0, 5) : "",
+          endTime: rule.end_time ? String(rule.end_time).slice(0, 5) : "",
+          allDay: !rule.start_time,
+        })),
+        dateOverrides: (configuration?.overrides || []).map((override: any) => ({
+          id: override.id,
+          date: toStoredDateKey(override.override_date),
+          preference: override.preference,
+          startTime: override.start_time ? String(override.start_time).slice(0, 5) : "",
+          endTime: override.end_time ? String(override.end_time).slice(0, 5) : "",
+          partial: override.preference === "available" && Boolean(override.start_time),
+        })),
+        effectiveDays,
+        today: toDateKeyInTimezone(
+          new Date(),
+          configuration?.timezone || "America/New_York",
+        ),
       })
     }
     if (request.method !== "POST") {
@@ -679,7 +768,447 @@ export const handleAvailability = async (request: Request) => {
     await client.query("BEGIN")
     try {
       let result: any
-      if (["preview_blocks", "create_blocks"].includes(body.action)) {
+      if (body.action === "create_availability_rule") {
+        const ministryIds: string[] = Array.from(new Set<string>(
+          (Array.isArray(body.ministryIds) ? body.ministryIds : [])
+            .map((value: unknown) => cleanText(value, 100))
+            .filter(Boolean),
+        ))
+        if (!ministryIds.length) {
+          throw Object.assign(new Error("Choose at least one ministry"), {
+            status: 400,
+          })
+        }
+        const dayOfWeek = Number(body.dayOfWeek)
+        const occurrence = ["every", "first", "second", "third", "fourth", "last"]
+          .includes(body.occurrence)
+          ? body.occurrence
+          : "every"
+        const allDay = body.allDay === true
+        const startTime = allDay ? "" : cleanText(body.startTime, 5)
+        const endTime = allDay ? "" : cleanText(body.endTime, 5)
+        if (
+          !Number.isInteger(dayOfWeek) ||
+          dayOfWeek < 0 ||
+          dayOfWeek > 6 ||
+          (!allDay && (
+            !/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime) ||
+            !/^([01]\d|2[0-3]):[0-5]\d$/.test(endTime) ||
+            Number(startTime.slice(3, 5)) % 15 !== 0 ||
+            Number(endTime.slice(3, 5)) % 15 !== 0 ||
+            endTime <= startTime
+          ))
+        ) {
+          throw Object.assign(new Error("Choose a valid day and time"), {
+            status: 400,
+          })
+        }
+        let created = 0
+        for (const ministryId of ministryIds) {
+          await requireMinistryAccess(client, context.user, ministryId, false)
+          const membership = await client.query(
+            `SELECT id FROM ministry_members
+             WHERE user_id = $1 AND ministry_id = $2 AND status = 'active'
+             LIMIT 1 FOR UPDATE`,
+            [context.user.id, ministryId],
+          )
+          if (!membership.rowCount) {
+            throw Object.assign(new Error("Rules can only be created for ministries you belong to"), {
+              status: 403,
+            })
+          }
+          await client.query(
+            `UPDATE ministry_members
+             SET availability_policy = 'generally_available', updated_at = now()
+             WHERE id = $1`,
+            [membership.rows[0].id],
+          )
+          const existing = await client.query(
+            `SELECT id FROM availability_weekly_rules
+             WHERE user_id = $1 AND ministry_id = $2 AND day_of_week = $3
+               AND week_of_month = $4
+               AND start_time IS NOT DISTINCT FROM $5::TIME
+               AND end_time IS NOT DISTINCT FROM $6::TIME
+               AND status = 'active'
+             LIMIT 1`,
+            [context.user.id, ministryId, dayOfWeek, occurrence, allDay ? null : startTime, allDay ? null : endTime],
+          )
+          if (!existing.rowCount) {
+            const inserted = await client.query(
+              `INSERT INTO availability_weekly_rules (
+                 user_id, ministry_id, day_of_week, week_of_month,
+                 start_time, end_time
+               ) VALUES ($1, $2, $3, $4, $5::TIME, $6::TIME)
+               RETURNING id`,
+              [context.user.id, ministryId, dayOfWeek, occurrence, allDay ? null : startTime, allDay ? null : endTime],
+            )
+            await writeSchedulingAudit(client, context, {
+              action: "availability.rule_created",
+              entityType: "availability_weekly_rule",
+              entityId: inserted.rows[0].id,
+              ministryId,
+              afterData: {
+                dayOfWeek,
+                occurrence,
+                startTime: allDay ? null : startTime,
+                endTime: allDay ? null : endTime,
+              },
+            })
+            created += 1
+          }
+          await syncFutureAllMemberAssignmentsForMinistry(client, context, ministryId)
+        }
+        result = {
+          message: created
+            ? "Exclusion rule created"
+            : "That exclusion rule already exists",
+        }
+      } else if (body.action === "delete_availability_rule") {
+        const ruleIds: string[] = Array.from(new Set<string>(
+          (Array.isArray(body.ruleIds) ? body.ruleIds : [body.ruleId])
+            .map((value: unknown) => cleanText(value, 100))
+            .filter(Boolean),
+        ))
+        if (!ruleIds.length) {
+          throw Object.assign(new Error("Choose an exclusion rule"), {
+            status: 400,
+          })
+        }
+        const existing = await client.query(
+          `SELECT id, ministry_id
+           FROM availability_weekly_rules
+           WHERE id = ANY($1::UUID[]) AND user_id = $2 AND status = 'active'
+           FOR UPDATE`,
+          [ruleIds, context.user.id],
+        )
+        if (existing.rowCount !== ruleIds.length) {
+          throw Object.assign(new Error("Availability rule was not found"), {
+            status: 404,
+          })
+        }
+        const affectedMinistryIds = Array.from(new Set<string>(
+          existing.rows.map((rule) => rule.ministry_id),
+        ))
+        for (const ministryId of affectedMinistryIds) {
+          await requireMinistryAccess(client, context.user, ministryId, false)
+        }
+        await client.query(
+          `UPDATE availability_weekly_rules
+           SET status = 'cancelled', updated_at = now()
+           WHERE id = ANY($1::UUID[])`,
+          [ruleIds],
+        )
+        for (const rule of existing.rows) {
+          await writeSchedulingAudit(client, context, {
+            action: "availability.rule_deleted",
+            entityType: "availability_weekly_rule",
+            entityId: rule.id,
+            ministryId: rule.ministry_id,
+          })
+        }
+        for (const ministryId of affectedMinistryIds) {
+          await syncFutureAllMemberAssignmentsForMinistry(client, context, ministryId)
+        }
+        result = { message: "Exclusion rule removed" }
+      } else if (body.action === "save_weekly_rules") {
+        const ministryIds: string[] = Array.from(new Set<string>(
+          (Array.isArray(body.ministryIds) ? body.ministryIds : [body.ministryId])
+            .map((value: unknown) => cleanText(value, 100))
+            .filter(Boolean),
+        ))
+        if (!ministryIds.length) {
+          throw Object.assign(new Error("Choose at least one ministry"), {
+            status: 400,
+          })
+        }
+        const policy = "generally_available"
+        const rules = Array.isArray(body.rules) ? body.rules : []
+        if (rules.length > 50) {
+          throw Object.assign(new Error("Use no more than 50 exclusion rules"), {
+            status: 400,
+          })
+        }
+        const normalizedRules = rules.map((rule: any) => {
+          const dayOfWeek = Number(rule.dayOfWeek)
+          const occurrence = ["every", "first", "second", "third", "fourth", "last"]
+            .includes(rule.occurrence)
+            ? rule.occurrence
+            : "every"
+          const allDay = rule.allDay === true
+          const startTime = allDay ? "" : cleanText(rule.startTime, 5)
+          const endTime = allDay ? "" : cleanText(rule.endTime, 5)
+          if (
+            !Number.isInteger(dayOfWeek) ||
+            dayOfWeek < 0 ||
+            dayOfWeek > 6 ||
+            (!allDay && (
+              !/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime) ||
+              !/^([01]\d|2[0-3]):[0-5]\d$/.test(endTime) ||
+              Number(startTime.slice(3, 5)) % 15 !== 0 ||
+              Number(endTime.slice(3, 5)) % 15 !== 0 ||
+              endTime <= startTime
+            ))
+          ) {
+            throw Object.assign(new Error("Every exclusion rule needs a valid day and time"), {
+              status: 400,
+            })
+          }
+          return {
+            dayOfWeek,
+            occurrence,
+            startTime: allDay ? null : startTime,
+            endTime: allDay ? null : endTime,
+          }
+        })
+        for (const ministryId of ministryIds) {
+          await requireMinistryAccess(client, context.user, ministryId, false)
+          const membership = await client.query(
+            `SELECT id FROM ministry_members
+             WHERE user_id = $1 AND ministry_id = $2 AND status = 'active'
+             LIMIT 1 FOR UPDATE`,
+            [context.user.id, ministryId],
+          )
+          if (!membership.rowCount) {
+            throw Object.assign(new Error("Rules can only be saved for ministries you belong to"), {
+              status: 403,
+            })
+          }
+          await client.query(
+            `UPDATE ministry_members SET availability_policy = $1, updated_at = now()
+             WHERE id = $2`,
+            [policy, membership.rows[0].id],
+          )
+          await client.query(
+            `UPDATE availability_weekly_rules SET status = 'cancelled', updated_at = now()
+             WHERE user_id = $1 AND ministry_id = $2 AND status = 'active'`,
+            [context.user.id, ministryId],
+          )
+          for (const rule of normalizedRules) {
+            await client.query(
+              `INSERT INTO availability_weekly_rules (
+                 user_id, ministry_id, day_of_week, week_of_month,
+                 start_time, end_time
+               ) VALUES ($1, $2, $3, $4, $5::TIME, $6::TIME)`,
+              [context.user.id, ministryId, rule.dayOfWeek, rule.occurrence, rule.startTime, rule.endTime],
+            )
+          }
+          await writeSchedulingAudit(client, context, {
+            action: "availability.weekly_rules_updated",
+            entityType: "ministry_member",
+            entityId: membership.rows[0].id,
+            ministryId,
+            afterData: { policy, weeklyWindows: normalizedRules.length },
+          })
+          await syncFutureAllMemberAssignmentsForMinistry(client, context, ministryId)
+        }
+        result = {
+          message: `Availability rules saved for ${ministryIds.length} ${ministryIds.length === 1 ? "ministry" : "ministries"}`,
+        }
+      } else if (body.action === "set_date_override") {
+        const ministryIds: string[] = Array.from(new Set<string>(
+          (Array.isArray(body.ministryIds) ? body.ministryIds : [body.ministryId])
+            .map((value: unknown) => cleanText(value, 100))
+            .filter(Boolean),
+        ))
+        if (!ministryIds.length) {
+          throw Object.assign(new Error("Join a ministry before setting availability"), {
+            status: 403,
+          })
+        }
+        const { dateKey } = parseDateKey(body.date, "Date")
+        for (const ministryId of ministryIds) {
+          await requireMinistryAccess(client, context.user, ministryId, false)
+          const membership = await client.query(
+            `SELECT ministry.timezone
+             FROM ministry_members membership
+             JOIN ministries ministry ON ministry.id = membership.ministry_id
+             WHERE membership.user_id = $1 AND membership.ministry_id = $2
+               AND membership.status = 'active' LIMIT 1`,
+            [context.user.id, ministryId],
+          )
+          if (!membership.rowCount) {
+            throw Object.assign(new Error("Dates can only be set for ministries you belong to"), {
+              status: 403,
+            })
+          }
+          if (dateKey < toDateKeyInTimezone(
+            new Date(),
+            membership.rows[0].timezone || "America/New_York",
+          )) {
+            throw Object.assign(new Error("Past availability cannot be changed"), {
+              status: 400,
+            })
+          }
+        }
+        const preference = body.preference === "available"
+          ? "available"
+          : body.preference === "unavailable"
+            ? "unavailable"
+            : ""
+        if (!preference) {
+          throw Object.assign(new Error("Choose available or unavailable"), {
+            status: 400,
+          })
+        }
+        const requestedStartTime = cleanText(body.startTime, 5)
+        const requestedEndTime = cleanText(body.endTime, 5)
+        const partial = preference === "available" && (
+          body.partial === true || requestedStartTime || requestedEndTime
+        )
+        const startTime = partial ? requestedStartTime : ""
+        const endTime = partial ? requestedEndTime : ""
+        if (partial && (
+          !/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime) ||
+          !/^([01]\d|2[0-3]):[0-5]\d$/.test(endTime) ||
+          Number(startTime.slice(3, 5)) % 15 !== 0 ||
+          Number(endTime.slice(3, 5)) % 15 !== 0 ||
+          endTime <= startTime
+        )) {
+          throw Object.assign(new Error("Choose a valid available time window"), {
+            status: 400,
+          })
+        }
+        const changeRequestedAssignmentIds: string[] = []
+        if (preference === "unavailable" || partial) {
+          const assignmentsById = new Map<string, any>()
+          for (const ministryId of ministryIds) {
+            const configuration = await loadAvailabilityConfiguration(
+              client,
+              context.user.id,
+              ministryId,
+            )
+            const timezone = configuration?.timezone || "America/New_York"
+            const assignments = (await loadAssignments(
+              client,
+              context.user.id,
+              ministryId,
+            )).filter(
+              (assignment) =>
+                toDateKeyInTimezone(assignment.startTime, timezone) === dateKey,
+            )
+            for (const assignment of assignments) {
+              const conflicts = preference === "unavailable" || !eventFits({
+                start: assignment.startTime,
+                end: assignment.endTime,
+                timezone,
+                policy: "generally_available",
+                rules: [],
+                overrides: [{
+                  override_date: dateKey,
+                  preference: "available",
+                  start_time: startTime,
+                  end_time: endTime,
+                }],
+                blocks: [],
+              })
+              if (conflicts) assignmentsById.set(assignment.id, assignment)
+            }
+          }
+          const assignments = [...assignmentsById.values()]
+          for (const assignment of assignments) {
+            if (assignment.assignmentMode === "all_available_members") {
+              await client.query(
+                `UPDATE responsibility_assignments
+                 SET status = 'cancelled', updated_at = now()
+                 WHERE id = $1`,
+                [assignment.id],
+              )
+            } else {
+              const change = await requestAssignmentChange(
+                client,
+                context,
+                {
+                  assignmentId: assignment.id,
+                  reason: `Availability marked unavailable for ${dateKey}.`,
+                },
+              )
+              if (change.created) changeRequestedAssignmentIds.push(assignment.id)
+            }
+          }
+        }
+        for (const ministryId of ministryIds) {
+          const override = await client.query(
+            `INSERT INTO availability_date_overrides (
+               user_id, ministry_id, override_date, preference, start_time, end_time
+             ) VALUES ($1, $2, $3::DATE, $4, $5::TIME, $6::TIME)
+             ON CONFLICT (user_id, ministry_id, override_date)
+             DO UPDATE SET preference = excluded.preference,
+                           start_time = excluded.start_time,
+                           end_time = excluded.end_time,
+                           updated_at = now()
+             RETURNING id`,
+            [context.user.id, ministryId, dateKey, preference, partial ? startTime : null, partial ? endTime : null],
+          )
+          await writeSchedulingAudit(client, context, {
+            action: "availability.date_overridden",
+            entityType: "availability_date_override",
+            entityId: override.rows[0].id,
+            ministryId,
+            afterData: {
+              date: dateKey,
+              preference,
+              startTime: partial ? startTime : null,
+              endTime: partial ? endTime : null,
+            },
+          })
+          await syncFutureAllMemberAssignmentsForMinistry(client, context, ministryId)
+        }
+        result = {
+          message: partial
+            ? "Date marked partially available"
+            : `Date marked ${preference}`,
+          changeRequestedAssignmentIds,
+        }
+      } else if (body.action === "reset_date_override") {
+        const ministryIds: string[] = Array.from(new Set<string>(
+          (Array.isArray(body.ministryIds) ? body.ministryIds : [body.ministryId])
+            .map((value: unknown) => cleanText(value, 100))
+            .filter(Boolean),
+        ))
+        if (!ministryIds.length) {
+          throw Object.assign(new Error("Join a ministry before setting availability"), {
+            status: 403,
+          })
+        }
+        const { dateKey } = parseDateKey(body.date, "Date")
+        for (const ministryId of ministryIds) {
+          await requireMinistryAccess(client, context.user, ministryId, false)
+          const membership = await client.query(
+            `SELECT ministry.timezone
+             FROM ministry_members membership
+             JOIN ministries ministry ON ministry.id = membership.ministry_id
+             WHERE membership.user_id = $1 AND membership.ministry_id = $2
+               AND membership.status = 'active' LIMIT 1`,
+            [context.user.id, ministryId],
+          )
+          if (!membership.rowCount) {
+            throw Object.assign(new Error("Dates can only be changed for ministries you belong to"), {
+              status: 403,
+            })
+          }
+          if (dateKey < toDateKeyInTimezone(
+            new Date(),
+            membership.rows[0].timezone || "America/New_York",
+          )) {
+            throw Object.assign(new Error("Past availability cannot be changed"), {
+              status: 400,
+            })
+          }
+          await client.query(
+            `DELETE FROM availability_date_overrides
+             WHERE user_id = $1 AND ministry_id = $2 AND override_date = $3::DATE`,
+            [context.user.id, ministryId, dateKey],
+          )
+          await writeSchedulingAudit(client, context, {
+            action: "availability.date_override_reset",
+            entityType: "availability_date_override",
+            ministryId,
+            afterData: { date: dateKey },
+          })
+          await syncFutureAllMemberAssignmentsForMinistry(client, context, ministryId)
+        }
+        result = { message: "Date-specific availability removed" }
+      } else if (["preview_blocks", "create_blocks"].includes(body.action)) {
         const ministryId = cleanText(body.ministryId, 100)
         if (!ministryId) {
           throw Object.assign(new Error("Choose the ministry being managed"), {

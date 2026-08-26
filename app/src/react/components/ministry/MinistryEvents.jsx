@@ -50,6 +50,7 @@ const initialForm = () => ({
   updateScope: "this_event",
   participationType: "members",
   visibility: "public",
+  inlineResponsibilities: [],
 })
 
 const formatEventDate = (value) =>
@@ -133,6 +134,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
   const [isSaving, setIsSaving] = React.useState(false)
   const [templatePreview, setTemplatePreview] = React.useState(null)
   const [assignmentCandidates, setAssignmentCandidates] = React.useState({})
+  const [availableMinistryMembers, setAvailableMinistryMembers] = React.useState([])
   const [assignmentSelections, setAssignmentSelections] = React.useState({})
   const [isLoadingCandidates, setIsLoadingCandidates] = React.useState(false)
   const [recurrencePreview, setRecurrencePreview] = React.useState(null)
@@ -226,8 +228,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       form.sourceEventId ||
       !form.templateId ||
       !form.startTime ||
-      !form.endTime ||
-      creatingRepeatingEvent
+      !form.endTime
     ) {
       setAssignmentCandidates({})
       return undefined
@@ -280,12 +281,62 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       controller.abort()
     }
   }, [
-    creatingRepeatingEvent,
     form.endTime,
     form.eventId,
     form.sourceEventId,
     form.startTime,
     form.templateId,
+  ])
+
+  React.useEffect(() => {
+    if (
+      form.eventId ||
+      form.sourceEventId ||
+      !form.startTime ||
+      !form.endTime ||
+      form.participationType === "volunteers"
+    ) {
+      setAvailableMinistryMembers([])
+      return undefined
+    }
+    const start = new Date(form.startTime)
+    const end = new Date(form.endTime)
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+      setAvailableMinistryMembers([])
+      return undefined
+    }
+    const controller = new AbortController()
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(getFunctionEndpoint("scheduling/events"), {
+          method: "POST",
+          headers: requestHeaders(),
+          signal: controller.signal,
+          body: JSON.stringify({
+            action: "preview_ministry_members",
+            ministryId: data.ministry.id,
+            startTime: start.toISOString(),
+            endTime: end.toISOString(),
+          }),
+        })
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.message || "Unable to load members")
+        setAvailableMinistryMembers(result.members || [])
+      } catch (error) {
+        if (error.name !== "AbortError") setErrorMessage(error.message)
+      }
+    }, 250)
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
+  }, [
+    data.ministry.id,
+    form.endTime,
+    form.eventId,
+    form.participationType,
+    form.sourceEventId,
+    form.startTime,
   ])
 
   React.useEffect(() => {
@@ -399,6 +450,48 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
 
   const updateAssignmentSelection = (slotKey, userId) => {
     setAssignmentSelections((current) => ({ ...current, [slotKey]: userId }))
+  }
+
+  const addInlineResponsibility = (assignmentMode = "standard") => {
+    const key = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+    setForm((current) => ({
+      ...current,
+      inlineResponsibilities: [
+        ...current.inlineResponsibilities,
+        {
+          key,
+          name:
+            assignmentMode === "all_available_members"
+              ? "Open to all members"
+              : "",
+          assignmentMode,
+          preferredAssigneeUserId: "",
+          quantityNeeded: 1,
+          responsibilityType: "position",
+          relativeStartMinutes: 0,
+          substitutionAllowed: assignmentMode === "standard",
+          isRequired: assignmentMode === "standard",
+        },
+      ],
+    }))
+  }
+
+  const updateInlineResponsibility = (key, field, value) => {
+    setForm((current) => ({
+      ...current,
+      inlineResponsibilities: current.inlineResponsibilities.map((item) =>
+        item.key === key ? { ...item, [field]: value } : item,
+      ),
+    }))
+  }
+
+  const removeInlineResponsibility = (key) => {
+    setForm((current) => ({
+      ...current,
+      inlineResponsibilities: current.inlineResponsibilities.filter(
+        (item) => item.key !== key,
+      ),
+    }))
   }
 
   const autoAssign = () => {
@@ -521,7 +614,6 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
         assignments:
           !editing &&
           !cloning &&
-          !creatingRepeatingEvent &&
           form.participationType !== "volunteers"
             ? Object.entries(assignmentSelections)
                 .filter(([, userId]) => Boolean(userId))
@@ -1229,6 +1321,105 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
 
           {!form.eventId &&
             !form.sourceEventId &&
+            form.participationType !== "volunteers" && (
+              <section className="mt-5 rounded-xl border border-gray-100 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold text-gray-900">
+                      Event positions
+                    </h3>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Add event-only positions or register every available serving member. Positions are optional.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => addInlineResponsibility("standard")}
+                      className="rounded-lg border border-[#C1A387] bg-white px-3 py-2 text-sm font-semibold text-[#6f4f34]"
+                    >
+                      Add position
+                    </button>
+                    <button
+                      type="button"
+                      disabled={form.inlineResponsibilities.some(
+                        (item) => item.assignmentMode === "all_available_members",
+                      )}
+                      onClick={() => addInlineResponsibility("all_available_members")}
+                      className="rounded-lg bg-[#896542] px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"
+                    >
+                      Open to all members
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-4 space-y-3">
+                  {form.inlineResponsibilities.map((responsibility) => (
+                    <div key={responsibility.key} className="grid gap-3 rounded-xl bg-[#f7f3ef] p-4 sm:grid-cols-[1fr_1fr_auto]">
+                      <label className="text-xs font-semibold text-gray-600">
+                        Position
+                        <input
+                          value={responsibility.name}
+                          onChange={(event) =>
+                            updateInlineResponsibility(
+                              responsibility.key,
+                              "name",
+                              event.target.value,
+                            )
+                          }
+                          disabled={responsibility.assignmentMode === "all_available_members"}
+                          required
+                          className="mt-1 h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm font-normal disabled:bg-gray-100"
+                        />
+                      </label>
+                      <label className="text-xs font-semibold text-gray-600">
+                        {responsibility.assignmentMode === "all_available_members"
+                          ? "Registration"
+                          : "Assigned member"}
+                        {responsibility.assignmentMode === "all_available_members" ? (
+                          <span className="mt-1 flex min-h-11 items-center rounded-lg border border-gray-200 bg-white px-3 text-sm font-normal">
+                            All available serving members
+                          </span>
+                        ) : (
+                          <select
+                            value={responsibility.preferredAssigneeUserId}
+                            onChange={(event) =>
+                              updateInlineResponsibility(
+                                responsibility.key,
+                                "preferredAssigneeUserId",
+                                event.target.value,
+                              )
+                            }
+                            disabled={!form.startTime || !form.endTime}
+                            className="mt-1 h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm font-normal"
+                          >
+                            <option value="">LEAVE BLANK</option>
+                            {availableMinistryMembers.map((member) => (
+                              <option key={member.userId} value={member.userId}>
+                                {member.firstName} {member.lastName}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </label>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${responsibility.name || "position"}`}
+                        onClick={() => removeInlineResponsibility(responsibility.key)}
+                        className="self-end rounded-lg border border-red-200 bg-white px-3 py-3 text-sm font-semibold text-red-700"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  {!form.inlineResponsibilities.length && (
+                    <p className="text-sm text-gray-500">No event-only positions added.</p>
+                  )}
+                </div>
+              </section>
+            )}
+
+          {!form.eventId &&
+            !form.sourceEventId &&
             selectedTemplate?.responsibilities?.length > 0 && (
               <section className="mt-5 rounded-xl border border-gray-100 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1240,8 +1431,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                       Choose every position now. Nothing is saved until you publish the event.
                     </p>
                   </div>
-                  {form.participationType !== "volunteers" &&
-                    !creatingRepeatingEvent && (
+                  {form.participationType !== "volunteers" && (
                       <button
                         type="button"
                         onClick={autoAssign}
@@ -1252,16 +1442,17 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                       </button>
                     )}
                 </div>
-                {creatingRepeatingEvent ? (
-                  <p className="mt-4 rounded-lg bg-[#f7f3ef] p-3 text-sm text-gray-600">
-                    The app will fill each occurrence using eligible, available members. Any unfilled positions can be assigned after the events are published.
-                  </p>
-                ) : form.participationType === "volunteers" ? (
+                {form.participationType === "volunteers" ? (
                   <p className="mt-4 rounded-lg bg-[#f7f3ef] p-3 text-sm text-gray-600">
                     Volunteer positions remain blank for public signup and cannot be auto-assigned.
                   </p>
                 ) : (
                   <div className="mt-4 space-y-4">
+                    {creatingRepeatingEvent && (
+                      <p className="rounded-lg bg-[#f7f3ef] p-3 text-sm text-gray-600">
+                        A selected member stays assigned across the series when available. Unavailable dates remain open for leader review.
+                      </p>
+                    )}
                     {selectedTemplate.responsibilities.map((responsibility) => (
                       <div key={responsibility.id} className="rounded-xl border border-gray-100 p-4">
                         <p className="font-semibold text-gray-900">

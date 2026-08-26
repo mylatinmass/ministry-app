@@ -22,6 +22,8 @@ const blankResponsibility = {
   ministryId: "",
   name: "",
   responsibilityType: "position",
+  assignmentMode: "standard",
+  preferredAssigneeUserId: "",
   quantityNeeded: 1,
   approvalRequired: false,
   substitutionAllowed: true,
@@ -261,6 +263,8 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
       ministryId: responsibility.ministryId,
       name: responsibility.name,
       responsibilityType: responsibility.responsibilityType,
+      assignmentMode: responsibility.assignmentMode || "standard",
+      preferredAssigneeUserId: responsibility.preferredAssigneeUserId || "",
       quantityNeeded: responsibility.quantityNeeded,
       approvalRequired: responsibility.approvalRequired,
       substitutionAllowed: responsibility.substitutionAllowed !== false,
@@ -346,6 +350,34 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
       if (!response.ok) {
         throw new Error(result.message || "Unable to accept this substitution")
       }
+      setMessage(result.message)
+      await loadDetails()
+    } catch (error) {
+      setErrorMessage(error.message)
+    } finally {
+      setSavingSubstitutionId("")
+    }
+  }
+
+  const declineExpectedAttendance = async (assignmentId) => {
+    setSavingSubstitutionId(assignmentId)
+    setMessage("")
+    setErrorMessage("")
+    try {
+      const response = await fetch(getFunctionEndpoint("scheduling/events"), {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${window.sessionStorage.getItem(MINISTRY_SESSION_KEY)}`,
+        },
+        body: JSON.stringify({
+          action: "decline_all_member_expectation",
+          eventId: displayedEvent.id,
+          assignmentId,
+        }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.message || "Unable to update attendance")
       setMessage(result.message)
       await loadDetails()
     } catch (error) {
@@ -1331,6 +1363,39 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                   </select>
                 </label>
                 <label className="text-sm font-semibold text-gray-700">
+                  Assignment mode
+                  <select
+                    value={responsibilityForm.assignmentMode || "standard"}
+                    onChange={(event) => {
+                      const assignmentMode = event.target.value
+                      setResponsibilityForm((current) => ({
+                        ...current,
+                        assignmentMode,
+                        name:
+                          assignmentMode === "all_available_members"
+                            ? "Open to all members"
+                            : current.name,
+                        quantityNeeded:
+                          assignmentMode === "all_available_members"
+                            ? 1
+                            : current.quantityNeeded,
+                        substitutionAllowed:
+                          assignmentMode === "all_available_members"
+                            ? false
+                            : current.substitutionAllowed,
+                        isRequired:
+                          assignmentMode === "all_available_members"
+                            ? false
+                            : current.isRequired,
+                      }))
+                    }}
+                    className="mt-2 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal"
+                  >
+                    <option value="standard">Standard position</option>
+                    <option value="all_available_members">Open to all members</option>
+                  </select>
+                </label>
+                <label className="text-sm font-semibold text-gray-700">
                   Quantity
                   <input
                     type="number"
@@ -1344,6 +1409,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                       )
                     }
                     required
+                    disabled={responsibilityForm.assignmentMode === "all_available_members"}
                     className="mt-2 h-10 w-full rounded-lg border border-gray-200 px-3 font-normal"
                   />
                 </label>
@@ -1533,17 +1599,17 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                                   Event only
                                 </span>
                               )}
+                              {responsibility.assignmentMode === "all_available_members" && (
+                                <span className="rounded-full bg-green-100 px-2 py-1 text-[10px] font-semibold uppercase text-green-800">
+                                  Expected members
+                                </span>
+                              )}
                             </div>
                             {!responsibility.summaryOnly && (
                             <p className="mt-1 text-sm text-gray-500">
-                              {responsibility.responsibilityType.replaceAll(
-                                "_",
-                                " ",
-                              )}{" "}
-                              · {responsibility.assignedQuantity}/
-                              {responsibility.unlimitedCapacity
-                                ? "Unlimited"
-                                : responsibility.quantityNeeded} assigned
+                              {responsibility.assignmentMode === "all_available_members"
+                                ? `${responsibility.assignedQuantity} available serving member${responsibility.assignedQuantity === 1 ? "" : "s"} expected`
+                                : `${responsibility.responsibilityType.replaceAll("_", " ")} · ${responsibility.assignedQuantity}/${responsibility.unlimitedCapacity ? "Unlimited" : responsibility.quantityNeeded} assigned`}
                               {responsibility.requiredLevelName
                                 ? ` · Requires ${responsibility.requiredLevelName} or higher`
                                 : ""}
@@ -1603,6 +1669,18 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
                                               : "Request change"}
                                           </button>
                                         )}
+                                      {assignment.canDeclineExpectation && (
+                                        <button
+                                          type="button"
+                                          disabled={savingSubstitutionId === assignment.id}
+                                          onClick={() => declineExpectedAttendance(assignment.id)}
+                                          className="ml-auto rounded-lg border border-gray-200 bg-white px-3 py-2 font-semibold text-gray-700 disabled:opacity-50"
+                                        >
+                                          {savingSubstitutionId === assignment.id
+                                            ? "Updating…"
+                                            : "Can’t attend"}
+                                        </button>
+                                      )}
                                       {assignment.substitutionRequest?.status === "pending" && (
                                         <span className="rounded-full bg-orange-100 px-2 py-1 font-semibold text-orange-700">
                                           {responsibility.substitutionAllowed

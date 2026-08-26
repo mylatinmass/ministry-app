@@ -7,6 +7,7 @@ import {
   requireMinistryAccess,
   writeSchedulingAudit,
 } from "./authorization"
+import { syncFutureAllMemberAssignmentsForMinistry } from "./events"
 
 const ASSIGNED_DUTY_STATUSES = [
   "assigned",
@@ -72,6 +73,7 @@ const loadAssignments = async (
         event.start_time,
         event.end_time,
         responsibility.name AS responsibility_name,
+        responsibility.assignment_mode,
         ministry.id AS ministry_id,
         ministry.name AS ministry_name,
         change_request.id AS change_request_id,
@@ -103,6 +105,7 @@ const loadAssignments = async (
     endTime: row.end_time,
     date: toDateKey(row.start_time),
     responsibilityName: row.responsibility_name,
+    assignmentMode: row.assignment_mode || "standard",
     ministryId: row.ministry_id,
     ministryName: row.ministry_name,
     changeRequestId: row.change_request_id,
@@ -263,12 +266,20 @@ const createBlock = async (
   }
   const changeRequestedAssignmentIds = []
   for (const assignment of conflicts) {
+    if (assignment.assignmentMode === "all_available_members") {
+      await client.query(
+        `UPDATE responsibility_assignments SET status = 'cancelled', updated_at = now() WHERE id = $1`,
+        [assignment.id],
+      )
+      continue
+    }
     const change = await requestAssignmentChange(client, context, {
       assignmentId: assignment.id,
       reason: `Availability marked unavailable from ${mergedStart} through ${mergedEnd}.`,
     }, subjectUserId)
     if (change.created) changeRequestedAssignmentIds.push(assignment.id)
   }
+
   const segments = [{ startDate: mergedStart, endDate: mergedEnd }]
   const label = cleanText(body.label) || null
   const createdBlocks = []
@@ -333,6 +344,22 @@ const createBlock = async (
     })
   }
 
+  const ministriesToSync = ministryId
+    ? [ministryId]
+    : (
+        await client.query(
+          `SELECT ministry_id FROM ministry_members WHERE user_id = $1 AND status = 'active'`,
+          [subjectUserId],
+        )
+      ).rows.map((membership) => membership.ministry_id)
+  for (const affectedMinistryId of new Set(ministriesToSync)) {
+    await syncFutureAllMemberAssignmentsForMinistry(
+      client,
+      context,
+      affectedMinistryId,
+    )
+  }
+
   return {
     message: changeRequestedAssignmentIds.length
       ? `Availability blocked and ${changeRequestedAssignmentIds.length} ${changeRequestedAssignmentIds.length === 1 ? "change request was" : "change requests were"} sent`
@@ -394,6 +421,21 @@ const cancelBlock = async (
       ministryId: block.ministry_id,
     },
   })
+  const ministriesToSync = block.ministry_id
+    ? [block.ministry_id]
+    : (
+        await client.query(
+          `SELECT ministry_id FROM ministry_members WHERE user_id = $1 AND status = 'active'`,
+          [subjectUserId],
+        )
+      ).rows.map((membership) => membership.ministry_id)
+  for (const affectedMinistryId of new Set(ministriesToSync)) {
+    await syncFutureAllMemberAssignmentsForMinistry(
+      client,
+      context,
+      affectedMinistryId,
+    )
+  }
   return { message: "Availability block removed" }
 }
 

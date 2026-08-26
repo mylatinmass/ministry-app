@@ -57,6 +57,10 @@ const SERVICE_OUTCOMES = new Set([
 ])
 const PARTICIPATION_TYPES = new Set(["members", "volunteers", "both"])
 const EVENT_VISIBILITIES = new Set(["public", "ministry", "private"])
+const RESPONSIBILITY_ASSIGNMENT_MODES = new Set([
+  "standard",
+  "all_available_members",
+])
 const SIGNUP_CODE_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const RESERVED_SIGNUP_CODES = new Set([
   "api",
@@ -101,6 +105,11 @@ const normalizeEventResponsibility = (body: any) => {
     body.relativeStartMinutes,
     10,
   )
+  const assignmentMode = RESPONSIBILITY_ASSIGNMENT_MODES.has(
+    body.assignmentMode,
+  )
+    ? body.assignmentMode
+    : "standard"
 
   if (!name) {
     throw Object.assign(new Error("Responsibility name is required"), {
@@ -127,16 +136,61 @@ const normalizeEventResponsibility = (body: any) => {
   return {
     name,
     responsibilityType,
-    quantityNeeded,
+    quantityNeeded: assignmentMode === "all_available_members" ? 1 : quantityNeeded,
     approvalRequired: Boolean(body.approvalRequired),
-    substitutionAllowed: body.substitutionAllowed !== false,
-    isRequired: body.isRequired !== false,
+    substitutionAllowed:
+      assignmentMode === "all_available_members"
+        ? false
+        : body.substitutionAllowed !== false,
+    isRequired:
+      assignmentMode === "all_available_members"
+        ? false
+        : body.isRequired !== false,
     requiredLevelId: cleanText(body.requiredLevelId, 100) || null,
     requiredGroupId: cleanText(body.requiredGroupId, 100) || null,
     relativeStartMinutes,
     instructions: cleanText(body.instructions) || null,
+    assignmentMode,
+    preferredAssigneeUserId:
+      assignmentMode === "standard"
+        ? cleanText(body.preferredAssigneeUserId, 100) || null
+        : null,
   }
 }
+
+const normalizeInlineResponsibilities = (value: unknown, ministryId: string) =>
+  (Array.isArray(value) ? value : []).map((item, index) => {
+    const normalized = normalizeEventResponsibility({
+      quantityNeeded: 1,
+      relativeStartMinutes: 0,
+      ...item,
+    })
+    return {
+      id: null,
+      ministry_id: ministryId,
+      name:
+        normalized.assignmentMode === "all_available_members"
+          ? "Open to all members"
+          : normalized.name,
+      description:
+        normalized.assignmentMode === "all_available_members"
+          ? "All available serving members are expected to attend."
+          : cleanText(item?.description) || null,
+      responsibility_type: normalized.responsibilityType,
+      quantity_needed: normalized.quantityNeeded,
+      approval_required: normalized.approvalRequired,
+      substitution_allowed: normalized.substitutionAllowed,
+      is_required: normalized.isRequired,
+      required_ministry_level_id: normalized.requiredLevelId,
+      required_group_id: normalized.requiredGroupId,
+      required_qualification: null,
+      relative_start_minutes: normalized.relativeStartMinutes,
+      instructions: normalized.instructions,
+      sort_order: 1000 + index,
+      assignment_mode: normalized.assignmentMode,
+      preferred_assignee_user_id: normalized.preferredAssigneeUserId,
+    }
+  })
 
 const parseDate = (value: unknown, fieldName: string) => {
   const date = new Date(typeof value === "string" ? value : "")
@@ -585,6 +639,7 @@ const loadTemplateStructure = async (
           responsibility.quantity_needed,
           responsibility.approval_required,
           responsibility.substitution_allowed,
+          responsibility.assignment_mode,
           responsibility.is_required,
           responsibility.required_ministry_level_id,
           responsibility.required_group_id,
@@ -638,6 +693,9 @@ const loadTemplateStructure = async (
               responsibility?.quantity_needed || responsibility?.quantity,
             ) || 1,
           approval_required: Boolean(responsibility?.approval_required),
+          substitution_allowed: responsibility?.substitution_allowed !== false,
+          assignment_mode: "standard",
+          preferred_assignee_user_id: null,
           is_required: responsibility?.is_required !== false,
           required_ministry_level_id: null,
           required_qualification:
@@ -850,6 +908,72 @@ const previewTemplateAssignments = async (
   }
 }
 
+const previewMinistryMembers = async (
+  client: PoolClient,
+  context: any,
+  body: any,
+) => {
+  const ministryId = cleanText(body.ministryId, 100)
+  await requireMinistryAccess(client, context.user, ministryId, true)
+  const start = parseDate(body.startTime, "Start time")
+  const end = parseDate(body.endTime, "End time")
+  if (end <= start) {
+    throw Object.assign(new Error("End time must be after start time"), {
+      status: 400,
+    })
+  }
+  const members = await client.query(
+    `
+      SELECT account.id AS user_id, account.first_name, account.last_name
+      FROM ministry_members membership
+      JOIN ministry_accounts account ON account.id = membership.user_id
+      WHERE membership.ministry_id = $1
+        AND membership.status = 'active'
+        AND membership.can_serve = true
+        AND membership.serving_preference <> 'cannot_serve'
+        AND account.status = 'active'
+        AND COALESCE(account.is_volunteer_profile, false) = false
+        AND NOT EXISTS (
+          SELECT 1 FROM availability_blocks block
+          WHERE block.user_id = account.id
+            AND block.status = 'active'
+            AND (block.ministry_id IS NULL OR block.ministry_id = $1)
+            AND block.start_date <= $2::DATE
+            AND block.end_date >= $2::DATE
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM responsibility_assignments assignment
+          JOIN events event ON event.id = assignment.event_id
+          JOIN event_responsibilities responsibility
+            ON responsibility.id = assignment.responsibility_id
+          WHERE assignment.user_id = account.id
+            AND assignment.status = ANY($3)
+            AND event.status NOT IN ('cancelled', 'archived')
+            AND event.start_time
+              + COALESCE(responsibility.relative_start_minutes, 0)
+                * INTERVAL '1 minute' < $5
+            AND event.end_time > $4::TIMESTAMPTZ
+        )
+      ORDER BY lower(account.last_name), lower(account.first_name), account.id
+    `,
+    [
+      ministryId,
+      toChapelDateKey(start),
+      ACTIVE_ASSIGNMENT_STATUSES,
+      start,
+      end,
+    ],
+  )
+  return {
+    members: members.rows.map((member) => ({
+      userId: member.user_id,
+      firstName: member.first_name,
+      lastName: member.last_name || "",
+    })),
+  }
+}
+
 type AutomaticScheduleResult = {
   eventId: string
   published: boolean
@@ -901,6 +1025,8 @@ const fillAndReviewAutomaticSchedule = async (
       SELECT
         responsibility.id,
         responsibility.template_responsibility_id,
+        responsibility.assignment_mode,
+        responsibility.preferred_assignee_user_id,
         responsibility.name,
         responsibility.quantity_needed,
         responsibility.is_required,
@@ -942,7 +1068,10 @@ const fillAndReviewAutomaticSchedule = async (
   for (const responsibility of responsibilities.rows) {
     if (
       responsibility.is_public_assignment ||
-      event.participation_type === "volunteers"
+      event.participation_type === "volunteers" ||
+      responsibility.assignment_mode === "all_available_members" ||
+      responsibility.preferred_assignee_user_id ||
+      !responsibility.template_responsibility_id
     ) {
       continue
     }
@@ -1038,9 +1167,12 @@ const fillAndReviewAutomaticSchedule = async (
             AND NOT EXISTS (
               SELECT 1
               FROM responsibility_assignments event_assignment
+              JOIN event_responsibilities event_assignment_responsibility
+                ON event_assignment_responsibility.id = event_assignment.responsibility_id
               WHERE event_assignment.user_id = member.id
                 AND event_assignment.event_id = $4
                 AND event_assignment.status = ANY($3)
+                AND event_assignment_responsibility.assignment_mode = 'standard'
             )
             AND NOT EXISTS (
               SELECT 1
@@ -1195,6 +1327,7 @@ const fillAndReviewAutomaticSchedule = async (
         AND responsibility.status <> 'cancelled'
         AND responsibility.is_required = true
         AND responsibility.is_public_assignment = false
+        AND responsibility.assignment_mode = 'standard'
         AND event.participation_type <> 'volunteers'
       GROUP BY responsibility.id, responsibility.name, responsibility.ministry_id,
         event.ministry_id, responsibility.quantity_needed
@@ -1380,6 +1513,307 @@ const ensureDefaultGeneralVolunteer = async (
   )
 }
 
+export const syncAllAvailableMemberAssignments = async (
+  client: PoolClient,
+  context: any,
+  eventId: string,
+) => {
+  const eventResult = await client.query(
+    `SELECT event.id, event.ministry_id, event.title, event.start_time,
+      event.end_time, event.status, event.recurrence_group_id, ministry.slug AS ministry_slug
+     FROM events event
+     JOIN ministries ministry ON ministry.id = event.ministry_id
+     WHERE event.id = $1 LIMIT 1`,
+    [eventId],
+  )
+  const event = eventResult.rows[0]
+  if (!event || ["cancelled", "archived", "completed"].includes(event.status)) {
+    return { added: 0, removed: 0 }
+  }
+  const responsibilities = await client.query(
+    `
+      SELECT id, COALESCE(ministry_id, $2) AS ministry_id
+      FROM event_responsibilities
+      WHERE event_id = $1
+        AND assignment_mode = 'all_available_members'
+        AND status <> 'cancelled'
+    `,
+    [event.id, event.ministry_id],
+  )
+  let added = 0
+  let removed = 0
+  const newlyRegisteredUserIds = new Set<string>()
+  for (const responsibility of responsibilities.rows) {
+    const eligible = await client.query(
+      `
+        SELECT account.id
+        FROM ministry_members membership
+        JOIN ministry_accounts account ON account.id = membership.user_id
+        WHERE membership.ministry_id = $1
+          AND membership.status = 'active'
+          AND membership.can_serve = true
+          AND membership.serving_preference <> 'cannot_serve'
+          AND account.status = 'active'
+          AND COALESCE(account.is_volunteer_profile, false) = false
+          AND NOT EXISTS (
+            SELECT 1 FROM availability_blocks block
+            WHERE block.user_id = account.id
+              AND block.status = 'active'
+              AND (block.ministry_id IS NULL OR block.ministry_id = $1)
+              AND block.start_date <= $2::DATE
+              AND block.end_date >= $2::DATE
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM responsibility_assignments other_assignment
+            JOIN events other_event ON other_event.id = other_assignment.event_id
+            JOIN event_responsibilities other_responsibility
+              ON other_responsibility.id = other_assignment.responsibility_id
+            WHERE other_assignment.user_id = account.id
+              AND other_assignment.status = ANY($3)
+              AND other_event.id <> $4
+              AND other_event.status NOT IN ('cancelled', 'archived')
+              AND other_event.start_time
+                + COALESCE(other_responsibility.relative_start_minutes, 0)
+                  * INTERVAL '1 minute' < $6
+              AND other_event.end_time > $5::TIMESTAMPTZ
+          )
+        ORDER BY lower(account.last_name), lower(account.first_name), account.id
+      `,
+      [
+        responsibility.ministry_id,
+        toChapelDateKey(event.start_time),
+        ACTIVE_ASSIGNMENT_STATUSES,
+        event.id,
+        event.start_time,
+        event.end_time,
+      ],
+    )
+    const eligibleIds = eligible.rows.map((row) => row.id)
+    const existing = await client.query(
+      `
+        SELECT id, user_id, status
+        FROM responsibility_assignments
+        WHERE responsibility_id = $1
+          AND user_id IS NOT NULL
+        FOR UPDATE
+      `,
+      [responsibility.id],
+    )
+    const existingByUser = new Map(existing.rows.map((row) => [row.user_id, row]))
+    for (const userId of eligibleIds) {
+      const current = existingByUser.get(userId)
+      if (current?.status === "declined") continue
+      if (current) {
+        if (["cancelled", "replaced"].includes(current.status)) {
+          await client.query(
+            `UPDATE responsibility_assignments SET status = 'confirmed', quantity = 1, signup_source = 'admin_assignment', confirmed_at = now(), updated_at = now() WHERE id = $1`,
+            [current.id],
+          )
+          added += 1
+          newlyRegisteredUserIds.add(userId)
+        } else if (current.status !== "confirmed") {
+          await client.query(
+            `UPDATE responsibility_assignments SET status = 'confirmed', quantity = 1, signup_source = 'admin_assignment', confirmed_at = COALESCE(confirmed_at, now()), updated_at = now() WHERE id = $1`,
+            [current.id],
+          )
+        }
+        continue
+      }
+      await client.query(
+        `
+          INSERT INTO responsibility_assignments (
+            event_id, responsibility_id, user_id, quantity, status,
+            assigned_by, signup_source, notify_email, confirmed_at
+          )
+          VALUES ($1, $2, $3, 1, 'confirmed', $4, 'admin_assignment', true, now())
+        `,
+        [event.id, responsibility.id, userId, context.actor.id],
+      )
+      added += 1
+      newlyRegisteredUserIds.add(userId)
+    }
+    const eligibleSet = new Set(eligibleIds)
+    for (const current of existing.rows) {
+      if (
+        !eligibleSet.has(current.user_id) &&
+        !["declined", "cancelled", "replaced", "completed"].includes(current.status)
+      ) {
+        await client.query(
+          `UPDATE responsibility_assignments SET status = 'cancelled', updated_at = now() WHERE id = $1`,
+          [current.id],
+        )
+        removed += 1
+      }
+    }
+  }
+  if (added || removed) {
+    await writeSchedulingAudit(client, context, {
+      action: "event.all_members_synchronized",
+      entityType: "event",
+      entityId: event.id,
+      ministryId: event.ministry_id,
+      afterData: { added, removed },
+    })
+  }
+  if (newlyRegisteredUserIds.size) {
+    const seriesKey = event.recurrence_group_id || event.id
+    const recipients = await client.query(
+      `SELECT subject.id AS subject_user_id,
+          COALESCE(guardian.guardian_user_id, subject.id) AS recipient_user_id
+       FROM ministry_accounts subject
+       LEFT JOIN managed_profiles guardian
+         ON guardian.child_user_id = subject.id
+        AND guardian.status IN ('active', 'separation_pending')
+       WHERE subject.id = ANY($1::UUID[])`,
+      [Array.from(newlyRegisteredUserIds)],
+    )
+    for (const recipient of recipients.rows) {
+      const seriesCountResult = await client.query(
+        `SELECT count(DISTINCT assignment.event_id)::INT AS occurrence_count
+         FROM responsibility_assignments assignment
+         JOIN events series_event ON series_event.id = assignment.event_id
+         JOIN event_responsibilities series_responsibility
+           ON series_responsibility.id = assignment.responsibility_id
+         WHERE assignment.user_id = $1
+           AND series_responsibility.assignment_mode = 'all_available_members'
+           AND assignment.status IN ('assigned', 'confirmed')
+           AND COALESCE(series_event.recurrence_group_id, series_event.id) = $2::UUID`,
+        [recipient.subject_user_id, seriesKey],
+      )
+      const occurrenceCount = Number(
+        seriesCountResult.rows[0]?.occurrence_count || 1,
+      )
+      await client.query(
+        `INSERT INTO ministry_alerts (
+           subject_user_id, recipient_user_id, kind, title, message,
+           event_id, ministry_id, dedupe_key, metadata, digest_after
+         )
+         VALUES ($1, $2, 'all_members_series_registered', $3, $4, $5, $6, $7,
+           $8::JSONB, now())
+         ON CONFLICT (dedupe_key) DO UPDATE SET
+           message = excluded.message,
+           event_id = excluded.event_id,
+           metadata = excluded.metadata,
+           updated_at = now()`,
+        [
+          recipient.subject_user_id,
+          recipient.recipient_user_id,
+          `Expected attendance: ${event.title}`,
+          event.recurrence_group_id
+            ? `You are expected at ${occurrenceCount} currently available occurrences in this series. Use Can’t attend on any date you cannot make.`
+            : "You are expected at this event. Use Can’t attend if you cannot make it.",
+          event.id,
+          event.ministry_id,
+          `all-members-series:${seriesKey}:${recipient.subject_user_id}:${recipient.recipient_user_id}`,
+          JSON.stringify({
+            notificationCategory: "schedule_changes",
+            notificationUrl: `/${event.ministry_slug}?event=${event.id}`,
+            privacySafeMessage: "You were added to a ministry event series.",
+            recurrenceGroupId: event.recurrence_group_id,
+          }),
+        ],
+      )
+    }
+  }
+  return { added, removed }
+}
+
+export const syncFutureAllMemberAssignmentsForMinistry = async (
+  client: PoolClient,
+  context: any,
+  ministryId: string,
+) => {
+  const events = await client.query(
+    `
+      SELECT DISTINCT event.id
+      FROM events event
+      JOIN event_responsibilities responsibility ON responsibility.event_id = event.id
+      WHERE COALESCE(responsibility.ministry_id, event.ministry_id) = $1
+        AND responsibility.assignment_mode = 'all_available_members'
+        AND responsibility.status <> 'cancelled'
+        AND event.status = 'published'
+        AND event.end_time >= now()
+      ORDER BY event.id
+    `,
+    [ministryId],
+  )
+  for (const event of events.rows) {
+    await syncAllAvailableMemberAssignments(client, context, event.id)
+  }
+}
+
+const alertLeadersForUnfilledFixedPosition = async (
+  client: PoolClient,
+  eventId: string,
+  responsibilityId: string,
+) => {
+  const result = await client.query(
+    `
+      SELECT event.title, event.recurrence_group_id,
+        responsibility.name AS responsibility_name,
+        COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id,
+        ministry.slug AS ministry_slug
+      FROM events event
+      JOIN event_responsibilities responsibility
+        ON responsibility.event_id = event.id
+      JOIN ministries ministry
+        ON ministry.id = COALESCE(responsibility.ministry_id, event.ministry_id)
+      WHERE event.id = $1 AND responsibility.id = $2
+      LIMIT 1
+    `,
+    [eventId, responsibilityId],
+  )
+  const item = result.rows[0]
+  if (!item) return
+  const leaders = await client.query(
+    `
+      SELECT DISTINCT account.id
+      FROM ministry_accounts account
+      LEFT JOIN ministry_members membership
+        ON membership.user_id = account.id
+       AND membership.ministry_id = $1
+       AND membership.status = 'active'
+      WHERE account.status = 'active'
+        AND (
+          account.global_role IN ('owner', 'super_admin')
+          OR membership.level IN ('owner', 'admin')
+        )
+    `,
+    [item.ministry_id],
+  )
+  for (const leader of leaders.rows) {
+    await client.query(
+      `
+        INSERT INTO ministry_alerts (
+          subject_user_id, recipient_user_id, kind, title, message,
+          event_id, ministry_id, dedupe_key, metadata
+        )
+        VALUES ($1, $1, 'schedule_review', 'Assigned position needs attention',
+          $2, $3, $4, $5, $6::JSONB)
+        ON CONFLICT (dedupe_key) DO UPDATE SET
+          message = excluded.message,
+          read_at = NULL,
+          delivery_status = 'pending',
+          digest_after = now(),
+          updated_at = now()
+      `,
+      [
+        leader.id,
+        `${item.responsibility_name} is unfilled for ${item.title} because the selected member is unavailable.`,
+        eventId,
+        item.ministry_id,
+        `fixed-position-unfilled:${leader.id}:${item.recurrence_group_id || eventId}:${responsibilityId}`,
+        JSON.stringify({
+          notificationCategory: "schedule_changes",
+          notificationUrl: `/${item.ministry_slug}?event=${eventId}`,
+          responsibilityId,
+        }),
+      ],
+    )
+  }
+}
+
 const createEventFromStructure = async (
   client: PoolClient,
   context: any,
@@ -1512,6 +1946,8 @@ const createEventFromStructure = async (
           quantity_needed,
           approval_required,
           substitution_allowed,
+          assignment_mode,
+          preferred_assignee_user_id,
           is_required,
           required_ministry_level_id,
           required_group_id,
@@ -1521,7 +1957,7 @@ const createEventFromStructure = async (
           status
         )
         VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'open'
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'open'
         )
       `,
       [
@@ -1534,6 +1970,8 @@ const createEventFromStructure = async (
         Number(responsibility.quantity_needed) || 1,
         Boolean(responsibility.approval_required),
         responsibility.substitution_allowed !== false,
+        responsibility.assignment_mode || "standard",
+        responsibility.preferred_assignee_user_id || null,
         responsibility.is_required !== false,
         responsibility.required_ministry_level_id || null,
         responsibility.required_group_id || null,
@@ -1877,6 +2315,8 @@ const loadEventDetails = async (
         responsibility.unlimited_capacity,
         responsibility.approval_required,
         responsibility.substitution_allowed,
+        responsibility.assignment_mode,
+        responsibility.preferred_assignee_user_id,
         responsibility.is_required,
         responsibility.required_ministry_level_id,
         required_level.name AS required_level_name,
@@ -1920,6 +2360,8 @@ const loadEventDetails = async (
         responsibility.unlimited_capacity,
         responsibility.approval_required,
         responsibility.substitution_allowed,
+        responsibility.assignment_mode,
+        responsibility.preferred_assignee_user_id,
         responsibility.is_required,
         responsibility.required_ministry_level_id,
         required_level.name AS required_level_name,
@@ -2127,9 +2569,12 @@ const loadEventDetails = async (
             AND NOT EXISTS (
               SELECT 1
               FROM responsibility_assignments current_assignment
+              JOIN event_responsibilities current_responsibility
+                ON current_responsibility.id = current_assignment.responsibility_id
               WHERE current_assignment.event_id = $1
                 AND current_assignment.user_id = member.id
                 AND current_assignment.status NOT IN ('declined', 'cancelled')
+                AND current_responsibility.assignment_mode = 'standard'
             )
             AND NOT EXISTS (
               SELECT 1
@@ -2233,9 +2678,12 @@ const loadEventDetails = async (
             AND NOT EXISTS (
               SELECT 1
               FROM responsibility_assignments current_assignment
+              JOIN event_responsibilities current_responsibility
+                ON current_responsibility.id = current_assignment.responsibility_id
               WHERE current_assignment.event_id = $1
                 AND current_assignment.user_id = member.id
                 AND current_assignment.status NOT IN ('declined', 'cancelled')
+                AND current_responsibility.assignment_mode = 'standard'
             )
             AND NOT EXISTS (
               SELECT 1
@@ -2350,6 +2798,7 @@ const loadEventDetails = async (
         : 0,
       canRequestSubstitute:
         assignment.user_id === context.user.id &&
+        responsibility.assignment_mode !== "all_available_members" &&
         responsibility.substitution_allowed !== false &&
         ["pending", "assigned", "confirmed"].includes(assignment.status) &&
         event.status === "published" &&
@@ -2357,11 +2806,18 @@ const loadEventDetails = async (
         !substitutionRequest,
       canRequestAdminChange:
         assignment.user_id === context.user.id &&
+        responsibility.assignment_mode !== "all_available_members" &&
         responsibility.substitution_allowed === false &&
         ["pending", "assigned", "confirmed"].includes(assignment.status) &&
         event.status === "published" &&
         new Date(event.start_time).getTime() > Date.now() &&
         !substitutionRequest,
+      canDeclineExpectation:
+        assignment.user_id === context.user.id &&
+        responsibility.assignment_mode === "all_available_members" &&
+        ["pending", "assigned", "confirmed"].includes(assignment.status) &&
+        event.status === "published" &&
+        new Date(event.start_time).getTime() > Date.now(),
       substitutionRequest: canSeeSubstitutionRequest && substitutionRequest
         ? {
             id: substitutionRequest.id,
@@ -2585,6 +3041,9 @@ const loadEventDetails = async (
       assignedQuantity: Number(responsibility.assigned_quantity),
       approvalRequired: responsibility.approval_required,
       substitutionAllowed: responsibility.substitution_allowed !== false,
+      assignmentMode: responsibility.assignment_mode || "standard",
+      preferredAssigneeUserId:
+        responsibility.preferred_assignee_user_id || "",
       isRequired: responsibility.is_required,
       requiredLevelId: responsibility.required_ministry_level_id || "",
       requiredLevelName: responsibility.required_level_name || "",
@@ -2714,6 +3173,57 @@ const recordServiceOutcome = async (
   return "Service outcome recorded"
 }
 
+const declineAllMemberExpectation = async (
+  client: PoolClient,
+  context: any,
+  event: any,
+  body: any,
+) => {
+  const assignmentId = cleanText(body.assignmentId, 100)
+  const assignmentResult = await client.query(
+    `
+      SELECT assignment.id, assignment.status,
+        COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id
+      FROM responsibility_assignments assignment
+      JOIN event_responsibilities responsibility
+        ON responsibility.id = assignment.responsibility_id
+      JOIN events event ON event.id = assignment.event_id
+      WHERE assignment.id = $1
+        AND assignment.event_id = $2
+        AND assignment.user_id = $3
+        AND responsibility.assignment_mode = 'all_available_members'
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [assignmentId, event.id, context.user.id],
+  )
+  const assignment = assignmentResult.rows[0]
+  if (!assignment) {
+    throw Object.assign(new Error("Expected attendance assignment not found"), {
+      status: 404,
+    })
+  }
+  if (!["pending", "assigned", "confirmed"].includes(assignment.status)) {
+    throw Object.assign(new Error("This attendance response is already recorded"), {
+      status: 409,
+    })
+  }
+  await client.query(
+    `UPDATE responsibility_assignments SET status = 'declined', updated_at = now() WHERE id = $1`,
+    [assignment.id],
+  )
+  await writeSchedulingAudit(client, context, {
+    action: "event.expected_member_cannot_attend",
+    entityType: "responsibility_assignment",
+    entityId: assignment.id,
+    ministryId: assignment.ministry_id,
+    beforeData: { status: assignment.status },
+    afterData: { status: "declined" },
+    metadata: { eventId: event.id },
+  })
+  return "You are no longer expected at this event"
+}
+
 export const createEvents = async (
   client: PoolClient,
   context: any,
@@ -2735,7 +3245,16 @@ export const createEvents = async (
           description: "",
           participation_type: "members",
         },
-        blocks: [],
+        blocks: [
+          {
+            id: null,
+            ministry_id: ministryId,
+            is_required: true,
+            instructions: null,
+            sort_order: 0,
+            group_ids: [],
+          },
+        ],
         responsibilities: [],
       }
   await requireMinistryAccess(
@@ -2744,6 +3263,27 @@ export const createEvents = async (
     structure.template.ministry_id,
     true,
   )
+  const inlineResponsibilities = normalizeInlineResponsibilities(
+    body.inlineResponsibilities,
+    structure.template.ministry_id,
+  )
+  const allMemberResponsibilityCount = [
+    ...structure.responsibilities,
+    ...inlineResponsibilities,
+  ].filter(
+    (responsibility: any) =>
+      responsibility.assignment_mode === "all_available_members",
+  ).length
+  if (allMemberResponsibilityCount > 1) {
+    throw Object.assign(
+      new Error("An event can include Open to all members only once"),
+      { status: 400 },
+    )
+  }
+  structure.responsibilities = [
+    ...structure.responsibilities,
+    ...inlineResponsibilities,
+  ]
 
   const title = templateId
     ? structure.template.name
@@ -2837,17 +3377,19 @@ export const createEvents = async (
         )
     : []
   if (
-    new Set(requestedAssignments.map((assignment: any) => assignment.userId))
-      .size !== requestedAssignments.length
+    new Set([
+      ...requestedAssignments.map((assignment: any) => assignment.userId),
+      ...inlineResponsibilities
+        .map((responsibility: any) => responsibility.preferred_assignee_user_id)
+        .filter(Boolean),
+    ]).size !==
+    requestedAssignments.length +
+      inlineResponsibilities.filter(
+        (responsibility: any) => responsibility.preferred_assignee_user_id,
+      ).length
   ) {
     throw Object.assign(
       new Error("A member can fill only one position in an event"),
-      { status: 409 },
-    )
-  }
-  if (occurrenceStarts.length > 1 && requestedAssignments.length) {
-    throw Object.assign(
-      new Error("Assign members after creating repeating events"),
       { status: 409 },
     )
   }
@@ -2955,19 +3497,6 @@ export const createEvents = async (
         roomIds,
       })
     eventIds.push(eventId)
-    if (occurrenceStarts.length > 1) {
-      const generated = await fillAndReviewAutomaticSchedule(
-        client,
-        context,
-        eventId,
-        conflicts,
-        null,
-        "repeating_schedule",
-        false,
-      )
-      generatedSchedules.push(generated)
-      assignmentIds.push(...generated.assignmentIds)
-    }
     if (requestedAssignments.length) {
       const generatedResponsibilities = await client.query(
         `
@@ -2994,6 +3523,48 @@ export const createEvents = async (
             { status: 409 },
           )
         }
+        await client.query(
+          `UPDATE event_responsibilities SET preferred_assignee_user_id = $2 WHERE id = $1`,
+          [responsibilityId, assignment.userId],
+        )
+        try {
+          const assigned = await assignMemberToResponsibility(
+            client,
+            context,
+            {
+              id: eventId,
+              ministry_id: structure.template.ministry_id,
+              status,
+              start_time: occurrenceStart,
+              end_time: occurrenceEnd,
+            },
+            { responsibilityId, userId: assignment.userId },
+          )
+          assignmentIds.push(assigned.assignmentId)
+        } catch (error: any) {
+          if (error?.status !== 409) throw error
+          await alertLeadersForUnfilledFixedPosition(
+            client,
+            eventId,
+            responsibilityId,
+          )
+        }
+      }
+    }
+    const inlineFixed = await client.query(
+      `
+        SELECT id, preferred_assignee_user_id
+        FROM event_responsibilities
+        WHERE event_id = $1
+          AND template_responsibility_id IS NULL
+          AND assignment_mode = 'standard'
+          AND preferred_assignee_user_id IS NOT NULL
+          AND status <> 'cancelled'
+      `,
+      [eventId],
+    )
+    for (const responsibility of inlineFixed.rows) {
+      try {
         const assigned = await assignMemberToResponsibility(
           client,
           context,
@@ -3004,10 +3575,34 @@ export const createEvents = async (
             start_time: occurrenceStart,
             end_time: occurrenceEnd,
           },
-          { responsibilityId, userId: assignment.userId },
+          {
+            responsibilityId: responsibility.id,
+            userId: responsibility.preferred_assignee_user_id,
+          },
         )
         assignmentIds.push(assigned.assignmentId)
+      } catch (error: any) {
+        if (error?.status !== 409) throw error
+        await alertLeadersForUnfilledFixedPosition(
+          client,
+          eventId,
+          responsibility.id,
+        )
       }
+    }
+    await syncAllAvailableMemberAssignments(client, context, eventId)
+    if (occurrenceStarts.length > 1) {
+      const generated = await fillAndReviewAutomaticSchedule(
+        client,
+        context,
+        eventId,
+        conflicts,
+        null,
+        "repeating_schedule",
+        false,
+      )
+      generatedSchedules.push(generated)
+      assignmentIds.push(...generated.assignmentIds)
     }
   }
   return { eventIds, assignmentIds, generatedSchedules }
@@ -3238,6 +3833,9 @@ const cloneEvent = async (
         responsibility.required_ministry_level_id,
       required_group_id: responsibility.required_group_id,
       required_qualification: responsibility.required_qualification,
+      assignment_mode: responsibility.assignment_mode || "standard",
+      preferred_assignee_user_id:
+        responsibility.preferred_assignee_user_id || null,
       relative_start_minutes: responsibility.relative_start_minutes,
       instructions: responsibility.instructions,
       sort_order: responsibility.sort_order,
@@ -3529,6 +4127,7 @@ const assignMemberToResponsibility = async (
         responsibility.required_group_id,
         responsibility.required_qualification,
         responsibility.relative_start_minutes,
+        responsibility.assignment_mode,
         responsibility.status
       FROM event_responsibilities responsibility
       JOIN events event ON event.id = responsibility.event_id
@@ -3547,6 +4146,7 @@ const assignMemberToResponsibility = async (
         NULL::UUID AS required_group_id,
         responsibility.required_qualification,
         responsibility.relative_start_minutes,
+        responsibility.assignment_mode,
         responsibility.status
       FROM event_responsibilities responsibility
       JOIN events event ON event.id = responsibility.event_id
@@ -3562,6 +4162,12 @@ const assignMemberToResponsibility = async (
     throw Object.assign(new Error("Responsibility is unavailable"), {
       status: 404,
     })
+  }
+  if (responsibility.assignment_mode === "all_available_members") {
+    throw Object.assign(
+      new Error("Expected-member registrations are managed automatically"),
+      { status: 409 },
+    )
   }
   await requireMinistryAccess(
     client,
@@ -3609,9 +4215,12 @@ const assignMemberToResponsibility = async (
         AND NOT EXISTS (
           SELECT 1
           FROM responsibility_assignments event_assignment
+          JOIN event_responsibilities event_assignment_responsibility
+            ON event_assignment_responsibility.id = event_assignment.responsibility_id
           WHERE event_assignment.user_id = member.id
             AND event_assignment.event_id = $5
             AND event_assignment.status = ANY($4)
+            AND event_assignment_responsibility.assignment_mode = 'standard'
         )
         AND NOT EXISTS (
           SELECT 1
@@ -3661,9 +4270,12 @@ const assignMemberToResponsibility = async (
         )
         AND NOT EXISTS (
           SELECT 1 FROM responsibility_assignments event_assignment
+          JOIN event_responsibilities event_assignment_responsibility
+            ON event_assignment_responsibility.id = event_assignment.responsibility_id
           WHERE event_assignment.user_id = member.id
             AND event_assignment.event_id = $5
             AND event_assignment.status = ANY($4)
+            AND event_assignment_responsibility.assignment_mode = 'standard'
         )
         AND NOT EXISTS (
           SELECT 1
@@ -4400,6 +5012,22 @@ const mutateEventResponsibility = async (
     }
 
     const input = normalizeEventResponsibility(body)
+    if (input.assignmentMode === "all_available_members") {
+      const existingAllMembers = await client.query(
+        `SELECT 1 FROM event_responsibilities
+         WHERE event_id = $1
+           AND assignment_mode = 'all_available_members'
+           AND status <> 'cancelled'
+         LIMIT 1`,
+        [event.id],
+      )
+      if (existingAllMembers.rowCount) {
+        throw Object.assign(
+          new Error("This event already includes Open to all members"),
+          { status: 409 },
+        )
+      }
+    }
     await validateRequiredMinistryLevel(
       client,
       input.requiredLevelId,
@@ -4421,6 +5049,8 @@ const mutateEventResponsibility = async (
           quantity_needed,
           approval_required,
           substitution_allowed,
+          assignment_mode,
+          preferred_assignee_user_id,
           is_required,
           required_ministry_level_id,
           required_group_id,
@@ -4430,7 +5060,7 @@ const mutateEventResponsibility = async (
           status
         )
         VALUES (
-          $1, $2, NULL, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+          $1, $2, NULL, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
           (
             SELECT COALESCE(max(sort_order), -1) + 1
             FROM event_responsibilities
@@ -4449,6 +5079,8 @@ const mutateEventResponsibility = async (
         input.quantityNeeded,
         input.approvalRequired,
         input.substitutionAllowed,
+        input.assignmentMode,
+        input.preferredAssigneeUserId,
         input.isRequired,
         input.requiredLevelId,
         input.requiredGroupId,
@@ -4457,6 +5089,7 @@ const mutateEventResponsibility = async (
       ],
     )
     const created = createdResult.rows[0]
+    await syncAllAvailableMemberAssignments(client, context, event.id)
     await markEventMinistryChanged(client, event.id, ministryId)
     await writeSchedulingAudit(client, context, {
       action: "event_responsibility.created",
@@ -4518,6 +5151,26 @@ const mutateEventResponsibility = async (
 
   if (body.action === "update_responsibility") {
     const input = normalizeEventResponsibility(body)
+    if (
+      input.assignmentMode === "all_available_members" &&
+      responsibility.assignment_mode !== "all_available_members"
+    ) {
+      const existingAllMembers = await client.query(
+        `SELECT 1 FROM event_responsibilities
+         WHERE event_id = $1
+           AND id <> $2
+           AND assignment_mode = 'all_available_members'
+           AND status <> 'cancelled'
+         LIMIT 1`,
+        [event.id, responsibilityId],
+      )
+      if (existingAllMembers.rowCount) {
+        throw Object.assign(
+          new Error("This event already includes Open to all members"),
+          { status: 409 },
+        )
+      }
+    }
     await validateRequiredMinistryLevel(
       client,
       input.requiredLevelId,
@@ -4528,7 +5181,10 @@ const mutateEventResponsibility = async (
       input.requiredGroupId,
       responsibility.ministry_id,
     )
-    if (input.quantityNeeded < Number(responsibility.assigned_quantity)) {
+    if (
+      input.assignmentMode === responsibility.assignment_mode &&
+      input.quantityNeeded < Number(responsibility.assigned_quantity)
+    ) {
       throw Object.assign(
         new Error(
           "Quantity cannot be lower than the number of active assignments",
@@ -4544,11 +5200,13 @@ const mutateEventResponsibility = async (
             quantity_needed = $4,
             approval_required = $5,
             substitution_allowed = $6,
-            is_required = $7,
-            required_ministry_level_id = $8,
-            required_group_id = $9,
-            relative_start_minutes = $10,
-            instructions = $11,
+            assignment_mode = $7,
+            preferred_assignee_user_id = $8,
+            is_required = $9,
+            required_ministry_level_id = $10,
+            required_group_id = $11,
+            relative_start_minutes = $12,
+            instructions = $13,
             updated_at = now()
         WHERE id = $1
         RETURNING *
@@ -4560,6 +5218,8 @@ const mutateEventResponsibility = async (
         input.quantityNeeded,
         input.approvalRequired,
         input.substitutionAllowed,
+        input.assignmentMode,
+        input.preferredAssigneeUserId,
         input.isRequired,
         input.requiredLevelId,
         input.requiredGroupId,
@@ -4568,6 +5228,16 @@ const mutateEventResponsibility = async (
       ],
     )
     const updated = updatedResult.rows[0]
+    if (input.assignmentMode !== responsibility.assignment_mode) {
+      await client.query(
+        `UPDATE responsibility_assignments
+         SET status = 'cancelled', updated_at = now()
+         WHERE responsibility_id = $1
+           AND status NOT IN ('declined', 'cancelled', 'replaced', 'completed')`,
+        [responsibilityId],
+      )
+    }
+    await syncAllAvailableMemberAssignments(client, context, event.id)
     await markEventMinistryChanged(
       client,
       event.id,
@@ -4775,6 +5445,10 @@ const updateEvent = async (
 
   if (body.action === "record_service_outcome") {
     return recordServiceOutcome(client, context, event, body)
+  }
+
+  if (body.action === "decline_all_member_expectation") {
+    return declineAllMemberExpectation(client, context, event, body)
   }
 
   if (body.action === "configure_volunteer_signup") {
@@ -5658,9 +6332,17 @@ export const handleEvents = async (request: Request) => {
 
     if (request.method === "GET") {
       const eventId = url.searchParams.get("eventId")
-      if (eventId) return json(await loadEventDetails(client, context, eventId))
+      if (eventId) {
+        await syncAllAvailableMemberAssignments(client, context, eventId)
+        return json(await loadEventDetails(client, context, eventId))
+      }
       const ministryId = url.searchParams.get("ministryId")
       if (!ministryId) return json({ message: "Ministry is required" }, 400)
+      await syncFutureAllMemberAssignmentsForMinistry(
+        client,
+        context,
+        ministryId,
+      )
       const [events, rooms] = await Promise.all([
         loadEventList(client, context, ministryId),
         loadActiveRooms(client),
@@ -5679,6 +6361,11 @@ export const handleEvents = async (request: Request) => {
         }
         if (body.action === "preview_template_assignments") {
           const preview = await previewTemplateAssignments(client, context, body)
+          await client.query("COMMIT")
+          return json(preview)
+        }
+        if (body.action === "preview_ministry_members") {
+          const preview = await previewMinistryMembers(client, context, body)
           await client.query("COMMIT")
           return json(preview)
         }

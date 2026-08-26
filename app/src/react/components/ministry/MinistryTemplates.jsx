@@ -20,6 +20,7 @@ const emptyResponsibility = (ministryId = "") => ({
   name: "",
   description: "",
   responsibilityType: "position",
+  assignmentMode: "standard",
   quantityNeeded: 1,
   approvalRequired: false,
   substitutionAllowed: true,
@@ -171,7 +172,16 @@ const MinistryTemplates = ({ data, activeAction }) => {
       ...current,
       responsibilities: current.responsibilities.map((responsibility) =>
         responsibility.clientId === clientId
-          ? { ...responsibility, [field]: value }
+          ? field === "assignmentMode" && value === "all_available_members"
+            ? {
+                ...responsibility,
+                assignmentMode: value,
+                name: "Open to all members",
+                quantityNeeded: 1,
+                substitutionAllowed: false,
+                isRequired: false,
+              }
+            : { ...responsibility, [field]: value }
           : responsibility,
       ),
     }))
@@ -684,7 +694,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
                           key={responsibility.clientId}
                           className="rounded-xl border border-gray-100 p-4"
                         >
-                          <div className="grid gap-3 sm:grid-cols-[1.4fr_0.8fr_0.45fr_auto]">
+                          <div className="grid gap-3 sm:grid-cols-[1.2fr_0.9fr_0.8fr_0.4fr_auto]">
                             <input
                               value={responsibility.name}
                               onChange={(event) =>
@@ -695,6 +705,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
                                 )
                               }
                               required
+                              disabled={responsibility.assignmentMode === "all_available_members"}
                               placeholder="Responsibility name"
                               className="h-10 rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#896542]"
                             />
@@ -714,6 +725,21 @@ const MinistryTemplates = ({ data, activeAction }) => {
                               <option value="food">Food or supply</option>
                               <option value="time_slot">Time slot</option>
                             </select>
+                            <select
+                              value={responsibility.assignmentMode || "standard"}
+                              onChange={(event) =>
+                                updateResponsibility(
+                                  responsibility.clientId,
+                                  "assignmentMode",
+                                  event.target.value,
+                                )
+                              }
+                              aria-label={`Assignment mode for ${responsibility.name || "responsibility"}`}
+                              className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm"
+                            >
+                              <option value="standard">Specific position</option>
+                              <option value="all_available_members">Open to all members</option>
+                            </select>
                             <input
                               type="number"
                               min="1"
@@ -726,6 +752,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
                                 )
                               }
                               aria-label="Quantity needed"
+                              disabled={responsibility.assignmentMode === "all_available_members"}
                               className="h-10 rounded-lg border border-gray-200 px-3 text-sm"
                             />
                             <button
@@ -856,6 +883,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
                               <input
                                 type="checkbox"
                                 checked={responsibility.approvalRequired}
+                                disabled={responsibility.assignmentMode === "all_available_members"}
                                 onChange={(event) =>
                                   updateResponsibility(
                                     responsibility.clientId,
@@ -871,6 +899,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
                               <input
                                 type="checkbox"
                                 checked={responsibility.isRequired}
+                                disabled={responsibility.assignmentMode === "all_available_members"}
                                 onChange={(event) =>
                                   updateResponsibility(
                                     responsibility.clientId,
@@ -888,6 +917,7 @@ const MinistryTemplates = ({ data, activeAction }) => {
                                 role="switch"
                                 aria-checked={responsibility.substitutionAllowed !== false}
                                 aria-label={`Substitutions for ${responsibility.name || "responsibility"}`}
+                                disabled={responsibility.assignmentMode === "all_available_members"}
                                 onClick={() =>
                                   updateResponsibility(
                                     responsibility.clientId,

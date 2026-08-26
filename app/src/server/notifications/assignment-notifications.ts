@@ -945,6 +945,7 @@ export const sendEventScheduleNotifications = async (
       WHERE assignment.event_id = $1
         AND assignment.user_id IS NOT NULL
         AND assignment.status <> 'declined'
+        AND responsibility.assignment_mode = 'standard'
         AND ($2::UUID IS NULL OR COALESCE(responsibility.ministry_id, event.ministry_id) = $2)
       ORDER BY assignment.id,
         COALESCE(guardian.guardian_user_id, assignment.user_id)

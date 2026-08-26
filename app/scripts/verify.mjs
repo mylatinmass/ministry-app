@@ -123,6 +123,15 @@ const eventAgenda = await read(
 const eventPinsMigration = await read(
   "migrations/20260824_01_add_profile_event_pins.sql",
 )
+const assignmentModeMigration = await read(
+  "migrations/20260826_01_add_responsibility_assignment_modes.sql",
+)
+const saturdayPracticeBackfill = await read(
+  "migrations/20260826_02_backfill_saturday_practice_members.sql",
+)
+const assignmentNotificationSource = await read(
+  "src/server/notifications/assignment-notifications.ts",
+)
 const globalStyles = await read("src/styles/global.css")
 const priestMinistryMigration = await read(
   "migrations/20260813_01_add_priest_ministry_and_event_conflicts.sql",
@@ -462,6 +471,18 @@ assert.match(schedulingEvents, /title = \$5,[\s\S]*participation_type = \$6/)
 assert.doesNotMatch(schedulingEvents, /rsvp/i)
 assert.doesNotMatch(ministryEventsComponent, /rsvp/i)
 assert.doesNotMatch(eventDetails, /rsvp/i)
+assert.match(assignmentModeMigration, /all_available_members/)
+assert.match(assignmentModeMigration, /preferred_assignee_user_id/)
+assert.match(saturdayPracticeBackfill, /db55364b-63a0-4445-a50d-439f46c3bef0/)
+assert.match(saturdayPracticeBackfill, /membership\.can_serve = true/)
+assert.match(schedulingEvents, /normalizeInlineResponsibilities/)
+assert.match(schedulingEvents, /decline_all_member_expectation/)
+assert.match(schedulingEvents, /all-members-series:/)
+assert.match(ministryEventsComponent, /Open to all members/)
+assert.match(eventDetails, /Can’t attend/)
+assert.match(schedulingAvailability, /assignmentMode === "all_available_members"/)
+assert.match(assignmentNotificationSource, /responsibility\.assignment_mode = 'standard'/)
+assert.match(ministryList, /COALESCE\(e\.visibility, 'public'\) <> 'private'/)
 assert.match(eventDetails, /action: "request_substitute"/)
 assert.match(substitutionScheduling, /assignment\.substitute_requested/)
 assert.match(schedulingEvents, /status: "published",[\s\S]{0,200}sourceEventId/)
@@ -674,7 +695,7 @@ assert.match(schedulingEvents, /event_responsibility\.updated/)
 assert.match(schedulingEvents, /event_responsibility\.cancelled/)
 assert.match(schedulingEvents, /body\.action === "assign_member"/)
 assert.match(schedulingEvents, /FROM availability_blocks block/)
-assert.doesNotMatch(schedulingEvents, /membership\.can_serve = true/)
+assert.match(schedulingEvents, /membership\.can_serve = true/)
 assert.match(schedulingEvents, /responsibility_assignment\.assigned/)
 assert.match(schedulingEvents, /source:\s*"event_override"/)
 assert.match(

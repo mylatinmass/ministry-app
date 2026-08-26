@@ -24,6 +24,7 @@ type ResponsibilityInput = {
   name: string
   description?: string
   responsibilityType?: string
+  assignmentMode?: "standard" | "all_available_members"
   quantityNeeded?: number
   approvalRequired?: boolean
   substitutionAllowed?: boolean
@@ -62,28 +63,47 @@ const normalizeResponsibilities = (
   forcedMinistryId = "",
 ): ResponsibilityInput[] =>
   (Array.isArray(value) ? value : [])
-    .map((responsibility: any, index: number) => ({
-      ministryId:
-        forcedMinistryId || cleanText(responsibility.ministryId, 100),
-      name: cleanText(responsibility.name, 250),
-      description: cleanText(responsibility.description),
-      responsibilityType: RESPONSIBILITY_TYPES.has(
-        responsibility.responsibilityType,
-      )
-        ? responsibility.responsibilityType
-        : "position",
-      quantityNeeded: positiveInteger(responsibility.quantityNeeded),
-      approvalRequired: Boolean(responsibility.approvalRequired),
-      substitutionAllowed: responsibility.substitutionAllowed !== false,
-      isRequired: responsibility.isRequired !== false,
-      requiredLevelId:
-        cleanText(responsibility.requiredLevelId, 100) || undefined,
-      requiredGroupId:
-        cleanText(responsibility.requiredGroupId, 100) || undefined,
-      relativeStartMinutes: integer(responsibility.relativeStartMinutes),
-      instructions: cleanText(responsibility.instructions),
-      sortOrder: integer(responsibility.sortOrder, index),
-    }))
+    .map((responsibility: any, index: number) => {
+      const assignmentMode: ResponsibilityInput["assignmentMode"] =
+        responsibility.assignmentMode === "all_available_members"
+          ? "all_available_members"
+          : "standard"
+      return {
+        ministryId:
+          forcedMinistryId || cleanText(responsibility.ministryId, 100),
+        name:
+          assignmentMode === "all_available_members"
+            ? "Open to all members"
+            : cleanText(responsibility.name, 250),
+        description: cleanText(responsibility.description),
+        responsibilityType: RESPONSIBILITY_TYPES.has(
+          responsibility.responsibilityType,
+        )
+          ? responsibility.responsibilityType
+          : "position",
+        assignmentMode,
+        quantityNeeded:
+          assignmentMode === "all_available_members"
+            ? 1
+            : positiveInteger(responsibility.quantityNeeded),
+        approvalRequired: Boolean(responsibility.approvalRequired),
+        substitutionAllowed:
+          assignmentMode === "all_available_members"
+            ? false
+            : responsibility.substitutionAllowed !== false,
+        isRequired:
+          assignmentMode === "all_available_members"
+            ? false
+            : responsibility.isRequired !== false,
+        requiredLevelId:
+          cleanText(responsibility.requiredLevelId, 100) || undefined,
+        requiredGroupId:
+          cleanText(responsibility.requiredGroupId, 100) || undefined,
+        relativeStartMinutes: integer(responsibility.relativeStartMinutes),
+        instructions: cleanText(responsibility.instructions),
+        sortOrder: integer(responsibility.sortOrder, index),
+      }
+    })
     .filter(
       (responsibility: ResponsibilityInput) =>
         responsibility.ministryId && responsibility.name,
@@ -156,6 +176,17 @@ const validateTemplateInput = (input: TemplateInput) => {
   ) {
     throw Object.assign(
       new Error("Every responsibility must belong to a participating ministry"),
+      { status: 400 },
+    )
+  }
+  if (
+    (input.responsibilities || []).filter(
+      (responsibility) =>
+        responsibility.assignmentMode === "all_available_members",
+    ).length > 1
+  ) {
+    throw Object.assign(
+      new Error("A template can include Open to all members only once"),
       { status: 400 },
     )
   }
@@ -307,6 +338,7 @@ const loadTemplates = async (client: PoolClient, ministryId: string) => {
           responsibility.name,
           responsibility.description,
           responsibility.responsibility_type,
+          responsibility.assignment_mode,
           responsibility.quantity_needed,
           responsibility.approval_required,
           responsibility.substitution_allowed,
@@ -338,6 +370,7 @@ const loadTemplates = async (client: PoolClient, ministryId: string) => {
           responsibility.name,
           responsibility.description,
           responsibility.responsibility_type,
+          responsibility.assignment_mode,
           responsibility.quantity_needed,
           responsibility.approval_required,
           responsibility.substitution_allowed,
@@ -391,6 +424,7 @@ const loadTemplates = async (client: PoolClient, ministryId: string) => {
               responsibility?.responsibility_type ||
               responsibility?.type ||
               "position",
+            assignment_mode: "standard",
             quantity_needed:
               Number(
                 responsibility?.quantity_needed || responsibility?.quantity,
@@ -439,6 +473,7 @@ const loadTemplates = async (client: PoolClient, ministryId: string) => {
         name: responsibility.name,
         description: responsibility.description || "",
         responsibilityType: responsibility.responsibility_type,
+        assignmentMode: responsibility.assignment_mode || "standard",
         quantityNeeded: Number(responsibility.quantity_needed),
         approvalRequired: responsibility.approval_required,
         substitutionAllowed: responsibility.substitution_allowed !== false,
@@ -558,19 +593,19 @@ const insertTemplateResponsibility = async (
         INSERT INTO template_responsibilities (
           template_id, template_ministry_id, name, description,
           responsibility_type, quantity_needed, approval_required,
-          substitution_allowed, is_required, required_ministry_level_id,
+          substitution_allowed, assignment_mode, is_required, required_ministry_level_id,
           required_group_id, relative_start_minutes, instructions, sort_order
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       `
       : `
         INSERT INTO template_responsibilities (
           template_id, template_ministry_id, name, description,
           responsibility_type, quantity_needed, approval_required,
-          substitution_allowed, is_required, required_ministry_level_id,
+          substitution_allowed, assignment_mode, is_required, required_ministry_level_id,
           relative_start_minutes, instructions, sort_order
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       `,
     supportsGroups
       ? [
@@ -582,6 +617,7 @@ const insertTemplateResponsibility = async (
           responsibility.quantityNeeded || 1,
           Boolean(responsibility.approvalRequired),
           responsibility.substitutionAllowed !== false,
+          responsibility.assignmentMode || "standard",
           responsibility.isRequired !== false,
           responsibility.requiredLevelId || null,
           responsibility.requiredGroupId || null,
@@ -598,6 +634,7 @@ const insertTemplateResponsibility = async (
           responsibility.quantityNeeded || 1,
           Boolean(responsibility.approvalRequired),
           responsibility.substitutionAllowed !== false,
+          responsibility.assignmentMode || "standard",
           responsibility.isRequired !== false,
           responsibility.requiredLevelId || null,
           responsibility.relativeStartMinutes || 0,

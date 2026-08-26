@@ -79,7 +79,6 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
   const [privateDetails, setPrivateDetails] = React.useState(null)
   const [canManagePrivateDetails, setCanManagePrivateDetails] = React.useState(false)
   const [isSavingPrivateDetails, setIsSavingPrivateDetails] = React.useState(false)
-  const [isSavingRsvp, setIsSavingRsvp] = React.useState(false)
   const closeTimer = React.useRef(null)
 
   const loadDetails = React.useCallback(async () => {
@@ -245,40 +244,6 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
           (responsibility) => responsibility.canManage,
         ),
       ))
-  const canManageRsvp = Boolean(details) && (
-    Boolean(details?.canManageEvent) ||
-    manageableMinistries.length > 0 ||
-    Boolean(details?.responsibilities?.some((responsibility) => responsibility.canManage))
-  )
-
-  const respondToRsvp = async (responseValue) => {
-    setIsSavingRsvp(true)
-    setErrorMessage("")
-    setMessage("")
-    try {
-      const response = await fetch(getFunctionEndpoint("scheduling/events"), {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${window.sessionStorage.getItem(MINISTRY_SESSION_KEY)}`,
-        },
-        body: JSON.stringify({
-          action: "record_rsvp",
-          eventId: displayedEvent.id,
-          response: responseValue,
-        }),
-      })
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.message || "Unable to save RSVP")
-      setMessage(result.message)
-      await loadDetails()
-    } catch (error) {
-      setErrorMessage(error.message)
-    } finally {
-      setIsSavingRsvp(false)
-    }
-  }
-
   const startAddingResponsibility = () => {
     setMessage("")
     setErrorMessage("")
@@ -840,71 +805,6 @@ const MinistryEventDetails = ({ event, ministryName, onClose }) => {
           {displayedEvent.description ||
             "No event description has been added yet."}
         </p>
-
-        {details?.rsvp?.enabled && (
-          <section className="mt-6 rounded-2xl border border-[#d8c7b8] bg-[#fbf8f4] p-5">
-            <h2 className="century-font text-2xl text-gray-950">RSVP</h2>
-            {details.rsvp.canRespond ? (
-              <>
-                <p className="mt-1 text-sm text-gray-600">Can you attend this event?</p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={isSavingRsvp}
-                    onClick={() => respondToRsvp("attending")}
-                    className={`rounded-xl px-4 py-2.5 text-sm font-semibold disabled:opacity-50 ${
-                      details.rsvp.response === "attending"
-                        ? "bg-[#896542] text-white"
-                        : "border border-[#d8c7b8] bg-white text-[#6f4f34]"
-                    }`}
-                  >
-                    Yes, I can attend
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isSavingRsvp}
-                    onClick={() => respondToRsvp("not_attending")}
-                    className={`rounded-xl px-4 py-2.5 text-sm font-semibold disabled:opacity-50 ${
-                      details.rsvp.response === "not_attending"
-                        ? "bg-gray-700 text-white"
-                        : "border border-gray-300 bg-white text-gray-600"
-                    }`}
-                  >
-                    No, I cannot attend
-                  </button>
-                </div>
-              </>
-            ) : (
-              <p className="mt-1 text-sm text-gray-600">
-                RSVP is available to active members of this event&apos;s ministries.
-              </p>
-            )}
-            {canManageRsvp && (
-              <div className="mt-5 border-t border-[#e7dbcf] pt-4">
-                <div className="flex flex-wrap gap-3 text-sm font-semibold">
-                  <span className="rounded-full bg-green-100 px-3 py-1 text-green-800">
-                    Yes: {details.rsvp.attendingCount}
-                  </span>
-                  <span className="rounded-full bg-gray-200 px-3 py-1 text-gray-700">
-                    No: {details.rsvp.notAttendingCount}
-                  </span>
-                </div>
-                {details.rsvp.responses.length > 0 && (
-                  <ul className="mt-3 space-y-1 text-sm text-gray-700">
-                    {details.rsvp.responses.map((rsvp) => (
-                      <li key={rsvp.userId} className="flex justify-between gap-3">
-                        <span>{rsvp.firstName} {rsvp.lastName}</span>
-                        <span className="font-semibold">
-                          {rsvp.response === "attending" ? "Yes" : "No"}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-          </section>
-        )}
 
         {prioryConflictCount > 0 && (
           <section role="alert" className="mt-6 rounded-2xl bg-orange-500 p-5 text-white">

@@ -459,18 +459,11 @@ assert.match(schedulingEvents, /responsibilities: \[\]/)
 assert.match(schedulingEvents, /Event title is required/)
 assert.match(schedulingEvents, /const title = templateId[\s\S]*structure\.template\.name/)
 assert.match(schedulingEvents, /title = \$5,[\s\S]*participation_type = \$6/)
-const eventRsvpMigration = await read(
-  "migrations/20260825_04_add_event_rsvps.sql",
-)
-assert.match(eventRsvpMigration, /ADD COLUMN IF NOT EXISTS rsvp_enabled/)
-assert.match(eventRsvpMigration, /CREATE TABLE IF NOT EXISTS event_rsvps/)
-assert.match(eventRsvpMigration, /'attending', 'not_attending'/)
-assert.match(ministryEventsComponent, /Allow member RSVP/)
-assert.match(ministryEventsComponent, /rsvpEnabled/)
-assert.match(schedulingEvents, /body\.action === "record_rsvp"/)
-assert.match(schedulingEvents, /event\.rsvp_recorded/)
-assert.match(eventDetails, /Yes, I can attend/)
-assert.match(eventDetails, /No, I cannot attend/)
+assert.doesNotMatch(schedulingEvents, /rsvp/i)
+assert.doesNotMatch(ministryEventsComponent, /rsvp/i)
+assert.doesNotMatch(eventDetails, /rsvp/i)
+assert.match(eventDetails, /action: "request_substitute"/)
+assert.match(substitutionScheduling, /assignment\.substitute_requested/)
 assert.match(schedulingEvents, /status: "published",[\s\S]{0,200}sourceEventId/)
 assert.doesNotMatch(
   schedulingEvents,

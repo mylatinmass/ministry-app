@@ -1402,7 +1402,6 @@ const createEventFromStructure = async (
     conflictOverride = false,
     conflictOverrideReason = null,
     roomIds = [],
-    rsvpEnabled = false,
   }: any,
 ) => {
   const resolvedParticipationType = PARTICIPATION_TYPES.has(participationType)
@@ -1471,10 +1470,6 @@ const createEventFromStructure = async (
     ],
   )
   const eventId = eventResult.rows[0].id
-  await client.query(
-    `UPDATE events SET rsvp_enabled = $2 WHERE id = $1`,
-    [eventId, Boolean(rsvpEnabled)],
-  )
   await replaceEventRooms(client, eventId, roomIds, context.actor.id)
 
   for (const block of structure.blocks) {
@@ -1575,7 +1570,6 @@ const createEventFromStructure = async (
       conflictOverride: Boolean(conflictOverride),
       conflictOverrideReason: conflictOverrideReason || null,
       roomIds,
-      rsvpEnabled: Boolean(rsvpEnabled),
     },
   })
   return eventId
@@ -1866,49 +1860,6 @@ const loadEventDetails = async (
       status: 403,
     })
   }
-
-  const rsvpEligibilityResult = event.rsvp_enabled
-    ? await client.query(
-        `
-          SELECT EXISTS (
-            SELECT 1
-            FROM ministry_members membership
-            WHERE membership.user_id = $2
-              AND membership.status = 'active'
-              AND (
-                membership.ministry_id = $3
-                OR EXISTS (
-                  SELECT 1
-                  FROM event_ministries participant
-                  WHERE participant.event_id = $1
-                    AND participant.ministry_id = membership.ministry_id
-                )
-              )
-          ) AS eligible
-        `,
-        [eventId, context.user.id, event.ministry_id],
-      )
-    : { rows: [{ eligible: false }] }
-  const rsvpResult = event.rsvp_enabled
-    ? await client.query(
-        `
-          SELECT
-            rsvp.user_id,
-            rsvp.response,
-            rsvp.responded_at,
-            account.first_name,
-            account.last_name
-          FROM event_rsvps rsvp
-          JOIN ministry_accounts account ON account.id = rsvp.user_id
-          WHERE rsvp.event_id = $1
-          ORDER BY lower(account.last_name), lower(account.first_name), rsvp.user_id
-        `,
-        [eventId],
-      )
-    : { rows: [] }
-  const currentRsvp = rsvpResult.rows.find(
-    (rsvp: any) => rsvp.user_id === context.user.id,
-  )
 
   const responsibilityResult = await client.query(
     hasMinistryGroupSchema
@@ -2665,30 +2616,6 @@ const loadEventDetails = async (
       automaticMembership: Boolean(group.automatic_membership),
     })),
     canManageEvent: publicView ? false : canManageEvent,
-    rsvp: {
-      enabled: Boolean(event.rsvp_enabled),
-      canRespond:
-        Boolean(event.rsvp_enabled) &&
-        event.status === "published" &&
-        Boolean(rsvpEligibilityResult.rows[0]?.eligible),
-      response: currentRsvp?.response || null,
-      attendingCount: rsvpResult.rows.filter(
-        (rsvp: any) => rsvp.response === "attending",
-      ).length,
-      notAttendingCount: rsvpResult.rows.filter(
-        (rsvp: any) => rsvp.response === "not_attending",
-      ).length,
-      responses:
-        canManageEvent || canManageAny
-          ? rsvpResult.rows.map((rsvp: any) => ({
-              userId: rsvp.user_id,
-              firstName: rsvp.first_name,
-              lastName: rsvp.last_name || "",
-              response: rsvp.response,
-              respondedAt: rsvp.responded_at,
-            }))
-          : [],
-    },
     canSeeProtectedDetails: privacyAccess.canSeeProtectedDetails,
     isPublicView: publicView,
     assignmentVisibilityRestricted:
@@ -2708,77 +2635,6 @@ const loadEventDetails = async (
       requesterLastName: offer.last_name || "",
     })),
   }
-}
-
-const recordEventRsvp = async (
-  client: PoolClient,
-  context: any,
-  event: any,
-  body: any,
-) => {
-  if (!event.rsvp_enabled) {
-    throw Object.assign(new Error("RSVP is not enabled for this event"), {
-      status: 409,
-    })
-  }
-  if (event.status !== "published") {
-    throw Object.assign(new Error("RSVP is available only for published events"), {
-      status: 409,
-    })
-  }
-  const response = cleanText(body.response, 30)
-  if (!new Set(["attending", "not_attending"]).has(response)) {
-    throw Object.assign(new Error("Choose whether you can attend"), {
-      status: 400,
-    })
-  }
-  const eligibleResult = await client.query(
-    `
-      SELECT EXISTS (
-        SELECT 1
-        FROM ministry_members membership
-        WHERE membership.user_id = $2
-          AND membership.status = 'active'
-          AND (
-            membership.ministry_id = $3
-            OR EXISTS (
-              SELECT 1
-              FROM event_ministries participant
-              WHERE participant.event_id = $1
-                AND participant.ministry_id = membership.ministry_id
-            )
-          )
-      ) AS eligible
-    `,
-    [event.id, context.user.id, event.ministry_id],
-  )
-  if (!eligibleResult.rows[0]?.eligible) {
-    throw Object.assign(
-      new Error("Only active members of this event's ministries can RSVP"),
-      { status: 403 },
-    )
-  }
-  await client.query(
-    `
-      INSERT INTO event_rsvps (event_id, user_id, response)
-      VALUES ($1, $2, $3)
-      ON CONFLICT (event_id, user_id) DO UPDATE SET
-        response = excluded.response,
-        responded_at = now(),
-        updated_at = now()
-    `,
-    [event.id, context.user.id, response],
-  )
-  await writeSchedulingAudit(client, context, {
-    action: "event.rsvp_recorded",
-    entityType: "event_rsvp",
-    entityId: event.id,
-    ministryId: event.ministry_id,
-    afterData: { userId: context.user.id, response },
-  })
-  return response === "attending"
-    ? "Your RSVP is Yes"
-    : "Your RSVP is No"
 }
 
 const recordServiceOutcome = async (
@@ -3097,7 +2953,6 @@ export const createEvents = async (
         conflictOverride: conflicts.length > 0 && conflictOverride,
         conflictOverrideReason,
         roomIds,
-        rsvpEnabled: body.rsvpEnabled === true,
       })
     eventIds.push(eventId)
     if (occurrenceStarts.length > 1) {
@@ -3434,7 +3289,6 @@ const cloneEvent = async (
       ? cleanText(body.conflictOverrideReason, 500) || "Overlap reviewed by ministry administrator"
       : null,
     roomIds,
-    rsvpEnabled: body.rsvpEnabled === true,
   })
 }
 
@@ -4923,10 +4777,6 @@ const updateEvent = async (
     return recordServiceOutcome(client, context, event, body)
   }
 
-  if (body.action === "record_rsvp") {
-    return recordEventRsvp(client, context, event, body)
-  }
-
   if (body.action === "configure_volunteer_signup") {
     return configureVolunteerSignup(client, context, event, body)
   }
@@ -5298,9 +5148,6 @@ const updateEvent = async (
   const participationType = PARTICIPATION_TYPES.has(body.participationType)
     ? body.participationType
     : event.participation_type
-  const rsvpEnabled = body.rsvpEnabled === undefined
-    ? Boolean(event.rsvp_enabled)
-    : body.rsvpEnabled === true
   const visibility = EVENT_VISIBILITIES.has(body.visibility)
     ? body.visibility
     : event.visibility || "public"
@@ -5466,10 +5313,6 @@ const updateEvent = async (
         roomIds,
         context.actor.id,
       )
-      await client.query(
-        `UPDATE events SET rsvp_enabled = $2 WHERE id = $1`,
-        [affectedEvent.id, rsvpEnabled],
-      )
       if (
         toChapelDateKey(affectedEvent.start_time) !==
         toChapelDateKey(occurrenceStart)
@@ -5597,10 +5440,6 @@ const updateEvent = async (
     ],
   )
   await replaceEventRooms(client, eventId, roomIds, context.actor.id)
-  await client.query(
-    `UPDATE events SET rsvp_enabled = $2 WHERE id = $1`,
-    [eventId, rsvpEnabled],
-  )
   if (["volunteers", "both"].includes(participationType)) {
     await ensureDefaultGeneralVolunteer(client, eventId)
   }

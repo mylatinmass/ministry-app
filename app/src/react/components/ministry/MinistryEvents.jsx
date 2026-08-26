@@ -50,7 +50,6 @@ const initialForm = () => ({
   updateScope: "this_event",
   participationType: "members",
   visibility: "public",
-  rsvpEnabled: false,
 })
 
 const formatEventDate = (value) =>
@@ -448,7 +447,6 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       updateScope: "this_event",
       participationType: event.participation_type || "members",
       visibility: event.visibility || "public",
-      rsvpEnabled: Boolean(event.rsvp_enabled),
     })
   }
 
@@ -465,7 +463,6 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       endTime: "",
       participationType: event.participation_type || "members",
       visibility: event.visibility || "public",
-      rsvpEnabled: Boolean(event.rsvp_enabled),
     })
 
   const persistEvent = async (body, { editing, cloning }) => {
@@ -1017,20 +1014,6 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
               </select>
               <span className="mt-2 block text-xs font-normal text-gray-500">
                 Volunteer events can receive signups through a public link after the event is published.
-              </span>
-            </label>
-            <label className="flex items-start gap-3 rounded-xl border border-gray-200 p-4 text-sm text-gray-700 sm:col-span-2">
-              <input
-                type="checkbox"
-                checked={form.rsvpEnabled}
-                onChange={(event) => updateField("rsvpEnabled", event.target.checked)}
-                className="mt-0.5 size-4 rounded border-gray-300 text-[#896542]"
-              />
-              <span>
-                <span className="block font-semibold">Allow member RSVP</span>
-                <span className="mt-1 block text-xs font-normal text-gray-500">
-                  Ministry members can answer whether they can attend. This is separate from position assignments.
-                </span>
               </span>
             </label>
             <label className="text-sm font-semibold text-gray-700 sm:col-span-2">

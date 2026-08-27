@@ -157,7 +157,6 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
   const [memberPreview, setMemberPreview] = React.useState(null)
   const [assignmentSelections, setAssignmentSelections] = React.useState({})
   const [isLoadingCandidates, setIsLoadingCandidates] = React.useState(false)
-  const [recurrencePreview, setRecurrencePreview] = React.useState(null)
   const [conflictPreview, setConflictPreview] = React.useState(null)
   const closeConflictPreview = React.useCallback(() => setConflictPreview(null), [])
   const conflictDialogRef = useAccessibleDialog(
@@ -450,7 +449,6 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
   }
 
   const updateField = (field, value) => {
-    setRecurrencePreview(null)
     setConflictPreview(null)
     if (field !== "templateId") setTemplatePreview(null)
     if (["startTime", "endTime"].includes(field)) {
@@ -557,7 +555,6 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
 
   const editEvent = (event) => {
     const recurrence = event.recurrence_rule || {}
-    setRecurrencePreview(null)
     setCreatingRepeatingEvent(false)
     setForm({
       ...initialForm(),
@@ -603,7 +600,6 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
     }
     setMessage(result.message)
     setForm(initialForm())
-    setRecurrencePreview(null)
     setConflictPreview(null)
     setConflictReason("")
     setCreatingRepeatingEvent(false)
@@ -619,6 +615,12 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
     try {
       const editing = Boolean(form.eventId)
       const cloning = Boolean(form.sourceEventId)
+      const requestedUpdateScope =
+        editing && form.recurrenceFrequency !== "none"
+          ? event.nativeEvent?.submitter?.value === "this_and_future"
+            ? "this_and_future"
+            : "this_event"
+          : form.updateScope
       const body = {
         ...form,
         ministryId: data.ministry.id,
@@ -634,7 +636,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
           weekday: Number(form.recurrenceWeekday),
           ordinal: Number(form.recurrenceOrdinal),
         },
-        updateScope: form.updateScope,
+        updateScope: requestedUpdateScope,
         action: cloning ? "clone" : undefined,
         status: editing ? undefined : "published",
         assignments:
@@ -649,45 +651,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                 }))
             : [],
       }
-      if (
-        editing &&
-        form.updateScope === "this_and_future" &&
-        !recurrencePreview
-      ) {
-        const previewResponse = await fetch(
-          getFunctionEndpoint("scheduling/events"),
-          {
-            method: "POST",
-            headers: requestHeaders(),
-            body: JSON.stringify({
-              ...body,
-              action: "preview_recurrence_change",
-            }),
-          },
-        )
-        const previewResult = await previewResponse.json()
-        if (!previewResponse.ok) {
-          throw new Error(
-            previewResult.message || "Unable to preview repeating-event changes",
-          )
-        }
-        setRecurrencePreview(previewResult)
-        return
-      }
-      if (
-        editing &&
-        form.updateScope === "this_and_future" &&
-        recurrencePreview?.conflicts?.length
-      ) {
-        setConflictPreview({
-          body,
-          editing,
-          cloning,
-          conflicts: recurrencePreview.conflicts,
-        })
-        return
-      }
-      if (!(editing && form.updateScope === "this_and_future")) {
+      if (!(editing && requestedUpdateScope === "this_and_future")) {
         const previewResponse = await fetch(
           getFunctionEndpoint("scheduling/events"),
           {
@@ -1621,28 +1585,6 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
               <legend className="px-2 text-sm font-semibold text-gray-700">
                 Repeating-event rule
               </legend>
-              {form.eventId && (
-                <div className="mb-4 grid gap-2 sm:grid-cols-2">
-                  <label className="flex items-center gap-2 rounded-lg border border-gray-200 p-3 text-sm text-gray-700">
-                    <input
-                      type="radio"
-                      name="updateScope"
-                      checked={form.updateScope === "this_event"}
-                      onChange={() => updateField("updateScope", "this_event")}
-                    />
-                    This event only
-                  </label>
-                  <label className="flex items-center gap-2 rounded-lg border border-gray-200 p-3 text-sm text-gray-700">
-                    <input
-                      type="radio"
-                      name="updateScope"
-                      checked={form.updateScope === "this_and_future"}
-                      onChange={() => updateField("updateScope", "this_and_future")}
-                    />
-                    This and future events
-                  </label>
-                </div>
-              )}
               <div className="grid gap-3 sm:grid-cols-3">
                 <label className="text-sm text-gray-600">
                   Rule
@@ -1733,11 +1675,6 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                   </label>
                 </div>
               )}
-              {form.eventId && form.updateScope === "this_and_future" && (
-                <p className="mt-3 text-xs leading-relaxed text-gray-500">
-                  The existing rule ends before this event. A new effective-dated rule begins here; earlier events and history remain unchanged.
-                </p>
-              )}
               {!form.eventId && repeatingDatePreview.length > 0 && (
                 <div className="mt-4 rounded-xl bg-[#f7f3ef] p-4 text-sm text-gray-700">
                   <p className="font-semibold text-[#6f4f34]">Date preview</p>
@@ -1753,49 +1690,44 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                   )}
                 </div>
               )}
-              {recurrencePreview && (
-                <div className="mt-4 rounded-xl bg-[#f7f3ef] p-4 text-sm text-gray-700">
-                  <p className="font-semibold text-[#6f4f34]">Change preview</p>
-                  <p className="mt-1">
-                    {recurrencePreview.affectedEvents} events and {recurrencePreview.affectedAssignments} assignments will be affected.
-                  </p>
-                  <p className="mt-1">
-                    {recurrencePreview.peopleToNotify} people will receive change notices after published events are updated.
-                  </p>
-                  {recurrencePreview.conflicts?.length > 0 && (
-                    <p className="mt-2 font-semibold text-amber-800">
-                      {recurrencePreview.conflicts.length} schedule {recurrencePreview.conflicts.length === 1 ? "conflict needs" : "conflicts need"} review.
-                    </p>
-                  )}
-                  <ul className="mt-2 space-y-1 text-xs text-gray-600">
-                    {recurrencePreview.dates.map((date) => (
-                      <li key={date}>{formatEventDate(date)}</li>
-                    ))}
-                    {recurrencePreview.remainingDates > 0 && (
-                      <li>+ {recurrencePreview.remainingDates} more dates</li>
-                    )}
-                  </ul>
-                </div>
-              )}
             </fieldset>
           )}
 
           <div className="mt-6 flex flex-wrap gap-2">
             {form.eventId ? (
-              <button
-                type="submit"
-                disabled={isSaving}
-                className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-5 py-3 font-semibold text-white hover:bg-[#6f4f34] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <CheckIcon className="size-5" />
-                {isSaving
-                  ? "Saving..."
-                  : form.updateScope === "this_and_future" && !recurrencePreview
-                    ? "Preview changes"
-                    : form.updateScope === "this_and_future"
-                      ? "Apply to this and future events"
-                      : "Update event"}
-              </button>
+              canManageRecurrence && form.recurrenceFrequency !== "none" ? (
+                <>
+                  <button
+                    type="submit"
+                    name="updateScope"
+                    value="this_event"
+                    disabled={isSaving}
+                    className="inline-flex items-center gap-2 rounded-xl border border-[#896542] bg-white px-5 py-3 font-semibold text-[#6f4f34] hover:bg-[#f7f3ef] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <CheckIcon className="size-5" />
+                    {isSaving ? "Saving..." : "Update current event"}
+                  </button>
+                  <button
+                    type="submit"
+                    name="updateScope"
+                    value="this_and_future"
+                    disabled={isSaving}
+                    className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-5 py-3 font-semibold text-white hover:bg-[#6f4f34] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <CheckIcon className="size-5" />
+                    {isSaving ? "Saving..." : "Update all future events"}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-5 py-3 font-semibold text-white hover:bg-[#6f4f34] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <CheckIcon className="size-5" />
+                  {isSaving ? "Saving..." : "Update event"}
+                </button>
+              )
             ) : (
               <button
                 type="submit"

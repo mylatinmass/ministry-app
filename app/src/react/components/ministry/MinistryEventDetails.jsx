@@ -442,6 +442,12 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
 
   const saveResponsibility = async (submitEvent) => {
     submitEvent.preventDefault()
+    const updateScope =
+      responsibilityForm.responsibilityId && displayedEvent.recurrence_group_id
+        ? submitEvent.nativeEvent?.submitter?.value === "this_and_future"
+          ? "this_and_future"
+          : "this_event"
+        : "this_event"
     setIsSavingResponsibility(true)
     setMessage("")
     setErrorMessage("")
@@ -461,6 +467,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
               ? "update_responsibility"
               : "add_responsibility",
             eventId: displayedEvent.id,
+            updateScope,
             ...responsibilityForm,
           }),
         },
@@ -1687,17 +1694,45 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  type="submit"
-                  disabled={isSavingResponsibility}
-                  className="rounded-lg bg-[#896542] px-4 py-2 text-sm font-semibold text-white hover:bg-[#6f4f34] disabled:opacity-50"
-                >
-                  {isSavingResponsibility
-                    ? "Saving..."
-                    : responsibilityForm.responsibilityId
-                      ? "Update responsibility"
-                      : "Add responsibility"}
-                </button>
+                {responsibilityForm.responsibilityId &&
+                displayedEvent.recurrence_group_id ? (
+                  <>
+                    <button
+                      type="submit"
+                      name="updateScope"
+                      value="this_event"
+                      disabled={isSavingResponsibility}
+                      className="rounded-lg border border-[#896542] bg-white px-4 py-2 text-sm font-semibold text-[#6f4f34] hover:bg-[#f8f4ef] disabled:opacity-50"
+                    >
+                      {isSavingResponsibility
+                        ? "Saving..."
+                        : "Update current event"}
+                    </button>
+                    <button
+                      type="submit"
+                      name="updateScope"
+                      value="this_and_future"
+                      disabled={isSavingResponsibility}
+                      className="rounded-lg bg-[#896542] px-4 py-2 text-sm font-semibold text-white hover:bg-[#6f4f34] disabled:opacity-50"
+                    >
+                      {isSavingResponsibility
+                        ? "Saving..."
+                        : "Update all future events"}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={isSavingResponsibility}
+                    className="rounded-lg bg-[#896542] px-4 py-2 text-sm font-semibold text-white hover:bg-[#6f4f34] disabled:opacity-50"
+                  >
+                    {isSavingResponsibility
+                      ? "Saving..."
+                      : responsibilityForm.responsibilityId
+                        ? "Update responsibility"
+                        : "Add responsibility"}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setResponsibilityForm(null)}

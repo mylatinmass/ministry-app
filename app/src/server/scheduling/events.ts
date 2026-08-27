@@ -5501,78 +5501,152 @@ const mutateEventResponsibility = async (
       input.requiredGroupId,
       responsibility.ministry_id,
     )
-    if (
-      input.assignmentMode === responsibility.assignment_mode &&
-      input.quantityNeeded < Number(responsibility.assigned_quantity)
-    ) {
-      throw Object.assign(
-        new Error(
-          "Quantity cannot be lower than the number of active assignments",
-        ),
-        { status: 409 },
+    const updateScope =
+      body.updateScope === "this_and_future"
+        ? "this_and_future"
+        : "this_event"
+    let responsibilitiesToUpdate = [responsibility]
+    if (updateScope === "this_and_future") {
+      if (!event.recurrence_group_id) {
+        throw Object.assign(
+          new Error("This event is not part of a repeating series"),
+          { status: 409 },
+        )
+      }
+      const futureResult = await client.query(
+        `
+          SELECT responsibility.*,
+            (
+              SELECT count(*)::INT
+              FROM responsibility_assignments assignment
+              WHERE assignment.responsibility_id = responsibility.id
+                AND assignment.status IN (
+                  'interested', 'pending', 'assigned', 'confirmed',
+                  'change_requested', 'completed'
+                )
+            ) AS assigned_quantity
+          FROM events future_event
+          JOIN event_responsibilities responsibility
+            ON responsibility.event_id = future_event.id
+          WHERE future_event.recurrence_group_id = $1
+            AND COALESCE(future_event.recurrence_anchor_at, future_event.start_time) > $2
+            AND future_event.status IN ('draft', 'published')
+            AND responsibility.status <> 'cancelled'
+            AND (
+              ($3::UUID IS NOT NULL
+                AND responsibility.template_responsibility_id = $3)
+              OR
+              ($3::UUID IS NULL
+                AND responsibility.template_responsibility_id IS NULL
+                AND responsibility.ministry_id IS NOT DISTINCT FROM $4::UUID
+                AND responsibility.sort_order = $5
+                AND responsibility.name = $6
+                AND responsibility.responsibility_type = $7)
+            )
+          ORDER BY COALESCE(future_event.recurrence_anchor_at, future_event.start_time),
+            future_event.id
+          FOR UPDATE
+        `,
+        [
+          event.recurrence_group_id,
+          event.recurrence_anchor_at || event.start_time,
+          responsibility.template_responsibility_id,
+          responsibility.ministry_id,
+          responsibility.sort_order,
+          responsibility.name,
+          responsibility.responsibility_type,
+        ],
       )
+      responsibilitiesToUpdate = [
+        responsibility,
+        ...futureResult.rows,
+      ]
     }
-    const updatedResult = await client.query(
-      `
-        UPDATE event_responsibilities
-        SET name = $2,
-            responsibility_type = $3,
-            quantity_needed = $4,
-            approval_required = $5,
-            substitution_allowed = $6,
-            assignment_mode = $7,
-            preferred_assignee_user_id = $8,
-            is_required = $9,
-            required_ministry_level_id = $10,
-            required_group_id = $11,
-            relative_start_minutes = $12,
-            instructions = $13,
-            updated_at = now()
-        WHERE id = $1
-        RETURNING *
-      `,
-      [
-        responsibilityId,
-        input.name,
-        input.responsibilityType,
-        input.quantityNeeded,
-        input.approvalRequired,
-        input.substitutionAllowed,
-        input.assignmentMode,
-        input.preferredAssigneeUserId,
-        input.isRequired,
-        input.requiredLevelId,
-        input.requiredGroupId,
-        input.relativeStartMinutes,
-        input.instructions,
-      ],
-    )
-    const updated = updatedResult.rows[0]
-    if (input.assignmentMode !== responsibility.assignment_mode) {
-      await client.query(
-        `UPDATE responsibility_assignments
-         SET status = 'cancelled', updated_at = now()
-         WHERE responsibility_id = $1
-           AND status NOT IN ('declined', 'cancelled', 'replaced', 'completed')`,
-        [responsibilityId],
+
+    for (const target of responsibilitiesToUpdate) {
+      if (
+        !EXPECTED_ATTENDANCE_MODES.includes(input.assignmentMode) &&
+        input.assignmentMode === target.assignment_mode &&
+        input.quantityNeeded < Number(target.assigned_quantity)
+      ) {
+        throw Object.assign(
+          new Error(
+            `Quantity cannot be lower than the number of active assignments for one of the affected events`,
+          ),
+          { status: 409 },
+        )
+      }
+    }
+
+    for (const target of responsibilitiesToUpdate) {
+      const updatedResult = await client.query(
+        `
+          UPDATE event_responsibilities
+          SET name = $2,
+              responsibility_type = $3,
+              quantity_needed = $4,
+              approval_required = $5,
+              substitution_allowed = $6,
+              assignment_mode = $7,
+              preferred_assignee_user_id = $8,
+              is_required = $9,
+              required_ministry_level_id = $10,
+              required_group_id = $11,
+              relative_start_minutes = $12,
+              instructions = $13,
+              updated_at = now()
+          WHERE id = $1
+          RETURNING *
+        `,
+        [
+          target.id,
+          input.name,
+          input.responsibilityType,
+          input.quantityNeeded,
+          input.approvalRequired,
+          input.substitutionAllowed,
+          input.assignmentMode,
+          input.preferredAssigneeUserId,
+          input.isRequired,
+          input.requiredLevelId,
+          input.requiredGroupId,
+          input.relativeStartMinutes,
+          input.instructions,
+        ],
       )
+      const updated = updatedResult.rows[0]
+      if (input.assignmentMode !== target.assignment_mode) {
+        await client.query(
+          `UPDATE responsibility_assignments
+           SET status = 'cancelled', updated_at = now()
+           WHERE responsibility_id = $1
+             AND status NOT IN ('declined', 'cancelled', 'replaced', 'completed')`,
+          [target.id],
+        )
+      }
+      await syncAllAvailableMemberAssignments(client, context, target.event_id)
+      await markEventMinistryChanged(
+        client,
+        target.event_id,
+        target.ministry_id,
+      )
+      await writeSchedulingAudit(client, context, {
+        action: "event_responsibility.updated",
+        entityType: "event_responsibility",
+        entityId: target.id,
+        ministryId: target.ministry_id,
+        beforeData: target,
+        afterData: updated,
+        metadata: {
+          eventId: target.event_id,
+          updateScope,
+          effectiveFromEventId: event.id,
+        },
+      })
     }
-    await syncAllAvailableMemberAssignments(client, context, event.id)
-    await markEventMinistryChanged(
-      client,
-      event.id,
-      responsibility.ministry_id,
-    )
-    await writeSchedulingAudit(client, context, {
-      action: "event_responsibility.updated",
-      entityType: "event_responsibility",
-      entityId: responsibilityId,
-      ministryId: responsibility.ministry_id,
-      beforeData: responsibility,
-      afterData: updated,
-      metadata: { eventId: event.id },
-    })
-    return "Event responsibility updated"
+    return updateScope === "this_and_future"
+      ? `${responsibilitiesToUpdate.length} event responsibilities updated`
+      : "Event responsibility updated"
   }
 
   await client.query(

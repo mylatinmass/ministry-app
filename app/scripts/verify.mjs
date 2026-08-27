@@ -461,12 +461,28 @@ assert.match(schedulingEvents, /friday_before_first_saturday/)
 assert.match(schedulingEvents, /previewRecurrenceChange/)
 assert.match(schedulingEvents, /event\.recurrence_rule_changed/)
 assert.match(schedulingEvents, /body\.updateScope === "this_and_future"/)
+assert.match(
+  schedulingEvents,
+  /responsibilitiesToUpdate = \[\s*responsibility,\s*\.\.\.futureResult\.rows/,
+)
+assert.match(
+  schedulingEvents,
+  /!EXPECTED_ATTENDANCE_MODES\.includes\(input\.assignmentMode\)[\s\S]{0,200}input\.quantityNeeded < Number\(target\.assigned_quantity\)/,
+)
+assert.match(schedulingEvents, /effectiveFromEventId: event\.id/)
 const ministryEventsComponent = await read(
   "src/react/components/ministry/MinistryEvents.jsx",
 )
 assert.match(ministryEventsComponent, /status: editing \? undefined : "published"/)
 assert.match(ministryEventsComponent, /"PUBLISH EVENT"/)
 assert.match(ministryEventsComponent, /"PUBLISH COPY"/)
+assert.match(ministryEventsComponent, /Update current event/)
+assert.match(ministryEventsComponent, /Update all future events/)
+assert.match(
+  ministryEventsComponent,
+  /event\.nativeEvent\?\.submitter\?\.value === "this_and_future"/,
+)
+assert.doesNotMatch(ministryEventsComponent, /type="radio"/)
 assert.match(ministryEventsComponent, /Event template[\s\S]*\(optional\)/)
 assert.match(ministryEventsComponent, /No template — start with a blank event/)
 assert.match(ministryEventsComponent, /ministryId: data\.ministry\.id/)
@@ -741,6 +757,12 @@ assert.match(
 assert.match(workspaceContent, /MinistryTemplates/)
 assert.match(workspaceContent, /MinistryEvents/)
 assert.match(eventDetails, /Add responsibility/)
+assert.match(eventDetails, /Update current event/)
+assert.match(eventDetails, /Update all future events/)
+assert.match(
+  eventDetails,
+  /submitEvent\.nativeEvent\?\.submitter\?\.value === "this_and_future"/,
+)
 assert.match(eventDetails, /Event only/)
 assert.match(eventDetails, /LEAVE BLANK/)
 assert.match(eventDetails, /Auto Assignments/)

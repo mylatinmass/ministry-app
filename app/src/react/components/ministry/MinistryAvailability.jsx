@@ -11,6 +11,7 @@ import {
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
+import MinistrySectionActions from "./MinistrySectionActions"
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 const OCCURRENCES = [
@@ -333,29 +334,14 @@ const MinistryAvailability = ({ ministryId = "" }) => {
   const ranges = data?.blocks || []
 
   return (
-    <div className="w-full space-y-5 pb-10">
-      <nav aria-label="Availability views" className="flex shrink-0 justify-center">
-        <div className="grid grid-cols-2 gap-1 rounded-2xl bg-gray-50 p-1.5 shadow-sm ring-1 ring-gray-100" role="tablist">
-          {[
-            { id: "calendar", label: "Calendar", icon: CalendarDaysIcon },
-            { id: "weekly", label: "Exclusion Rules", icon: ClockIcon },
-          ].map((view) => {
-            const Icon = view.icon
-            return (
-              <button
-                key={view.id}
-                type="button"
-                role="tab"
-                aria-selected={activeView === view.id}
-                onClick={() => setActiveView(view.id)}
-                className={`flex min-w-32 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition ${activeView === view.id ? "bg-white text-[#6f4f34] shadow-sm" : "text-gray-500 hover:bg-white/70 hover:text-gray-800"}`}
-              >
-                <Icon className="size-5" /> {view.label}
-              </button>
-            )
-          })}
-        </div>
-      </nav>
+    <div className="w-full space-y-5 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] lg:pb-10">
+      <MinistrySectionActions
+        label="Availability views"
+        actions={[
+          { id: "calendar", label: "Calendar", icon: CalendarDaysIcon, active: activeView === "calendar", onClick: () => setActiveView("calendar") },
+          { id: "weekly", label: "Exclusion Rules", icon: ClockIcon, active: activeView === "weekly", onClick: () => setActiveView("weekly") },
+        ]}
+      />
 
       {(message || error) && (
         <p role={error ? "alert" : "status"} className={`rounded-xl border px-4 py-3 text-sm ${error ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>

@@ -1,13 +1,14 @@
 import * as React from "react"
 import {
   ChatBubbleLeftRightIcon,
+  CheckCircleIcon,
   ChevronDownIcon,
   EnvelopeIcon,
   PaperAirplaneIcon,
-  XMarkIcon,
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
+import MinistrySectionActions from "./MinistrySectionActions"
 
 const messageDate = (value) =>
   new Intl.DateTimeFormat("en-US", {
@@ -195,19 +196,16 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
   }
 
   return (
-    <div className="space-y-6">
-      {data.canCompose && (
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={() => setShowComposer((open) => !open)}
-            className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#6f4f34]"
-          >
-            {showComposer ? <XMarkIcon className="size-5" /> : <PaperAirplaneIcon className="size-5" />}
-            {showComposer ? "Cancel" : "NEW MESSAGE"}
-          </button>
-        </div>
-      )}
+    <div className="space-y-6 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] lg:pb-0">
+      <MinistrySectionActions
+        label="Message actions"
+        actions={[
+          { id: "all", label: "All Messages", icon: ChatBubbleLeftRightIcon, active: receivedFilter === "all", onClick: () => setReceivedFilter("all") },
+          { id: "unread", label: "Unread Messages", icon: EnvelopeIcon, active: receivedFilter === "unread", onClick: () => setReceivedFilter("unread") },
+          { id: "mark-read", label: "Mark all Read", icon: CheckCircleIcon, disabled: data.unreadCount === 0, onClick: () => patchRead({ action: "mark_all_read" }).catch((readError) => setError(readError.message)) },
+          { id: "new-message", label: "New Message", icon: PaperAirplaneIcon, active: showComposer, hidden: !data.canCompose, onClick: () => setShowComposer((open) => !open) },
+        ]}
+      />
 
       {error && (
         <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -410,43 +408,6 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
           <h3 className="century-font text-2xl text-gray-950">
             {data.canCompose ? "Inbox" : "Your Messages"}
           </h3>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5" aria-label="Filter messages">
-              <button
-                type="button"
-                aria-pressed={receivedFilter === "all"}
-                onClick={() => setReceivedFilter("all")}
-                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
-                  receivedFilter === "all"
-                    ? "bg-white text-[#6f4f34] shadow-sm"
-                    : "text-gray-500 hover:text-gray-800"
-                }`}
-              >
-                All
-              </button>
-              <button
-                type="button"
-                aria-pressed={receivedFilter === "unread"}
-                onClick={() => setReceivedFilter("unread")}
-                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
-                  receivedFilter === "unread"
-                    ? "bg-white text-[#6f4f34] shadow-sm"
-                    : "text-gray-500 hover:text-gray-800"
-                }`}
-              >
-                Unread ({data.unreadCount})
-              </button>
-            </div>
-            {data.unreadCount > 0 && (
-            <button
-              type="button"
-              onClick={() => patchRead({ action: "mark_all_read" }).catch((readError) => setError(readError.message))}
-              className="rounded-lg px-2 py-1.5 text-xs font-semibold text-[#896542] hover:bg-[#f7f3ef]"
-            >
-              Mark all as read
-            </button>
-            )}
-          </div>
         </div>
         {receivedMessages.length ? (
           <div className="space-y-2">
@@ -480,7 +441,9 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
                         {message.subject || "Ministry alert"}
                       </p>
                       <p className="truncate text-xs text-gray-500">
-                        {message.senderName} · {message.ministryName || "All members"}
+                        {message.senderName} · {message.audience === "event_participants"
+                          ? message.eventTitle || "Event participants"
+                          : message.ministryName || "All members"}
                       </p>
                     </div>
                     <time className="hidden shrink-0 text-xs text-gray-400 sm:block">
@@ -498,6 +461,9 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
                       </p>
                       <p className="mt-2 text-xs text-gray-400">
                         {messageTypeLabel(message.channel)}
+                        {message.audience === "event_participants" && message.eventTitle
+                          ? ` · ${message.eventTitle}`
+                          : ""}
                       </p>
                     </div>
                   )}

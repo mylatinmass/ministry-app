@@ -16,6 +16,7 @@ import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 import { memberSections, ministrySections } from "./ministryNavigation"
 import { accountSections, accountSectionUrl } from "./accountNavigation"
 import { applyMinistryTheme } from "../../utils/ministryTheme"
+import { buildHouseholdProfileColors } from "../../utils/householdCalendar"
 import useAccessibleDialog from "../../hooks/useAccessibleDialog"
 
 const accessLabels = {
@@ -40,8 +41,8 @@ const MinistryWorkspace = ({ data }) => {
   const availableSections = isMember ? memberSections : ministrySections
   const [currentUser, setCurrentUser] = React.useState(data.user)
   React.useLayoutEffect(() => {
-    applyMinistryTheme(currentUser?.appearanceTheme, currentUser?.id)
-  }, [currentUser?.appearanceTheme, currentUser?.id])
+    applyMinistryTheme(currentUser?.appearanceTheme)
+  }, [currentUser?.appearanceTheme])
   const [sectionId, setSectionId] = React.useState(() =>
     isMember ? "schedule" : "overview",
   )
@@ -58,6 +59,10 @@ const MinistryWorkspace = ({ data }) => {
   const [familyData, setFamilyData] = React.useState(null)
   const [messageUnreadCount, setMessageUnreadCount] = React.useState(0)
   const [visibleProfileIds, setVisibleProfileIds] = React.useState([])
+  const householdProfileColors = React.useMemo(
+    () => buildHouseholdProfileColors(familyData?.profiles || []),
+    [familyData?.profiles],
+  )
   const activeSection =
     availableSections.find((section) => section.id === sectionId) ||
     availableSections[0]
@@ -79,11 +84,17 @@ const MinistryWorkspace = ({ data }) => {
         })
         .then((result) => {
           setFamilyData(result)
-          const stored = JSON.parse(
-            window.sessionStorage.getItem("ministry_visible_profile_ids") || "[]",
-          )
+          const visibilityKey = `ministry_visible_profile_ids:${result.actor.id}`
+          let stored = []
+          try {
+            stored = JSON.parse(window.localStorage.getItem(visibilityKey) || "[]")
+          } catch (error) {
+            stored = []
+          }
           const allowedIds = new Set(result.profiles.map((profile) => profile.id))
-          const restored = stored.filter((id) => allowedIds.has(id))
+          const restored = Array.isArray(stored)
+            ? stored.filter((id) => allowedIds.has(id))
+            : []
           setVisibleProfileIds(
             restored.length ? restored : result.profiles.map((profile) => profile.id),
           )
@@ -117,13 +128,18 @@ const MinistryWorkspace = ({ data }) => {
 
   const saveVisibleProfiles = (ids) => {
     setVisibleProfileIds(ids)
-    window.sessionStorage.setItem(
-      "ministry_visible_profile_ids",
+    const actorId = familyData?.actor?.id || data.actor?.id || data.user.id
+    window.localStorage.setItem(
+      `ministry_visible_profile_ids:${actorId}`,
       JSON.stringify(ids),
     )
   }
 
   const toggleVisibleProfile = (profileId) => {
+    if (
+      visibleProfileIds.includes(profileId) &&
+      visibleProfileIds.length === 1
+    ) return
     saveVisibleProfiles(
       visibleProfileIds.includes(profileId)
         ? visibleProfileIds.filter((id) => id !== profileId)
@@ -143,7 +159,7 @@ const MinistryWorkspace = ({ data }) => {
     })
     const result = await response.json()
     if (!response.ok) return
-    applyMinistryTheme(result.activeProfile?.appearanceTheme, profileId)
+    applyMinistryTheme(result.activeProfile?.appearanceTheme)
     window.sessionStorage.setItem(MINISTRY_SESSION_KEY, result.token)
     saveVisibleProfiles(
       showAll ? familyData.profiles.map((profile) => profile.id) : [profileId],
@@ -166,17 +182,23 @@ const MinistryWorkspace = ({ data }) => {
       : [data.user.id]
     return (data.calendarEvents || data.events).map((event) => ({
       ...event,
+      isHouseholdAccount: (familyData?.profiles?.length || 0) > 1,
       is_assigned: event.profileAssignments?.some((assignment) =>
         selectedProfileIds.includes(assignment.profileId),
       ),
       visibleProfileAssignments: event.profileAssignments?.filter(
         (assignment) => selectedProfileIds.includes(assignment.profileId),
-      ),
+      ).map((assignment) => ({
+        ...assignment,
+        profileColor: householdProfileColors.get(assignment.profileId),
+      })),
     }))
   }, [
     data.calendarEvents,
     data.events,
     data.user.id,
+    familyData?.profiles?.length,
+    householdProfileColors,
     visibleProfileIds,
   ])
 
@@ -331,7 +353,7 @@ const MinistryWorkspace = ({ data }) => {
                             <button
                               type="button"
                               onClick={() => toggleVisibleProfile(profile.id)}
-                              aria-label={`${visible ? "Hide" : "Show"} ${profile.firstName} ${profile.lastName} events`}
+                              aria-label={`${visible ? "Hide" : "Show"} ${profile.firstName} ${profile.lastName} assignments`}
                               className="p-2 text-gray-500 hover:text-[#896542]"
                             >
                               {visible ? <EyeIcon className="size-5" /> : <EyeSlashIcon className="size-5" />}
@@ -343,6 +365,13 @@ const MinistryWorkspace = ({ data }) => {
                                 active ? "font-semibold text-[#6f4f34]" : "text-gray-700"
                               }`}
                             >
+                              {(familyData.profiles.length > 1) && (
+                                <span
+                                  className="size-2.5 shrink-0 rounded-full"
+                                  style={{ backgroundColor: householdProfileColors.get(profile.id) }}
+                                  aria-hidden="true"
+                                />
+                              )}
                               <span
                                 className={`size-2 shrink-0 rounded-full ${
                                   profile.alertCount > 0

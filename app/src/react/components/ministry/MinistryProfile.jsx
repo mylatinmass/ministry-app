@@ -16,6 +16,7 @@ import {
   UserCircleIcon,
   UserGroupIcon,
   UserPlusIcon,
+  TrashIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
@@ -23,6 +24,7 @@ import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 import PushNotifications from "./PushNotifications"
 import TelegramNotifications from "./TelegramNotifications"
 import { applyMinistryTheme } from "../../utils/ministryTheme"
+import MinistrySectionActions from "./MinistrySectionActions"
 
 const reminderOptions = [
   [15, "15 minutes"],
@@ -356,6 +358,15 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
     await runFamilyAction({ action: "unlink_guardian", profileId: child.id })
   }
 
+  const removePendingChild = async (child) => {
+    const childName = [child.firstName, child.lastName].filter(Boolean).join(" ")
+    const confirmed = window.confirm(
+      `Remove ${childName}? This will cancel the pending app approval and remove this child profile from your account.`,
+    )
+    if (!confirmed) return
+    await runFamilyAction({ action: "remove_pending_child", profileId: child.id })
+  }
+
   const handleChange = (event) => {
     const { name, value } = event.target
     setDraft((current) => ({
@@ -497,7 +508,7 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
 
       setProfile(result.profile)
       setDraft(result.profile)
-      applyMinistryTheme(result.profile.appearanceTheme, result.profile.id)
+      applyMinistryTheme(result.profile.appearanceTheme)
       setIsEditing(false)
       setMessage("Your account has been updated.")
       onUserUpdate?.({
@@ -547,30 +558,16 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
 
   return (
     <div className="relative mx-auto max-w-5xl pb-[calc(env(safe-area-inset-bottom)+5.5rem)] lg:pb-4">
-      <nav
-        aria-label="Profile sections"
-        className="hidden grid-cols-4 gap-1 rounded-2xl bg-gray-50 p-1.5 shadow-sm ring-1 ring-gray-100 lg:grid"
-      >
-        {profileSections.map(([id, label, Icon]) => {
-          const active = activeProfileSection === id
-          return (
-            <button
-              key={id}
-              type="button"
-              aria-pressed={active}
-              onClick={() => selectProfileSection(id)}
-              className={`flex min-w-0 items-center justify-center gap-2 rounded-xl px-3 py-3 text-center text-sm transition ${
-                active
-                  ? "bg-white font-semibold text-[#6f4f34] shadow-sm"
-                  : "font-medium text-gray-500 hover:bg-white/60 hover:text-gray-800"
-              }`}
-            >
-              <Icon className="size-5 shrink-0" />
-              <span className="leading-tight">{label}</span>
-            </button>
-          )
-        })}
-      </nav>
+      <MinistrySectionActions
+        label="Profile sections"
+        actions={profileSections.map(([id, label, icon]) => ({
+          id,
+          label,
+          icon,
+          active: activeProfileSection === id,
+          onClick: () => selectProfileSection(id),
+        }))}
+      />
 
       {activeProfileSection === "account" && (
       <section className="relative border-b border-gray-100 py-4">
@@ -651,7 +648,7 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
               role="switch"
               aria-checked={(draft.appearanceTheme || "light") === "dark"}
               aria-label={`Use ${(draft.appearanceTheme || "light") === "dark" ? "light" : "dark"} appearance`}
-              disabled={!isEditing}
+              disabled={!isEditing || profile.isManagedProfile}
               onClick={() =>
                 setDraft((current) => ({
                   ...current,
@@ -686,6 +683,11 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
                 <span className="sr-only">Dark</span>
               </span>
             </button>
+            {profile.isManagedProfile && (
+              <p className="mt-1 text-xs text-gray-500">
+                Managed profiles use the parent account's appearance.
+              </p>
+            )}
           </div>
         </div>
       </section>
@@ -975,6 +977,16 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
                     {child.guardianCount} linked {child.guardianCount === 1 ? "guardian" : "guardians"}
                     {child.hasPendingGuardianInvitation ? " · Link invitation pending" : ""}
                   </p>
+                  {child.status === "pending" && (
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() => removePendingChild(child)}
+                      className="mt-3 inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-50"
+                    >
+                      <TrashIcon className="size-4" /> Remove child
+                    </button>
+                  )}
                   {child.status === "active" && child.relationshipStatus === "active" && familyData.ministries.length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       <select value={requestMinistryId} onChange={(event) => setRequestMinistryId(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
@@ -1085,31 +1097,6 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
           Loading profiles…
         </p>
       )}
-
-      <nav
-        aria-label="Profile sections"
-        className="ministry-mobile-actions fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 shadow-[0_-8px_30px_rgba(63,45,29,0.10)] backdrop-blur lg:hidden"
-      >
-        <div className="mx-auto grid max-w-xl grid-cols-4 gap-1">
-          {profileSections.map(([id, label, Icon]) => {
-            const active = activeProfileSection === id
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => selectProfileSection(id)}
-                aria-pressed={active}
-                className={`flex min-w-0 flex-col items-center gap-1 rounded-xl px-1 py-2 text-[11px] font-medium transition ${
-                  active ? "bg-[#f7f3ef] text-[#6f4f34]" : "text-gray-500"
-                }`}
-              >
-                <Icon className="size-5" />
-                <span className="leading-tight">{label}</span>
-              </button>
-            )
-          })}
-        </div>
-      </nav>
 
       <div aria-live="polite" aria-atomic="true" className="min-h-6 text-center text-sm">
         {errorMessage ? (

@@ -145,7 +145,7 @@ const MinistryEventAgenda = ({
       onTouchEnd={() => {
         touchStartRef.current = null
       }}
-      className="ministry-scroll-region min-h-0 flex-1 overflow-y-auto w-full"
+      className="ministry-scroll-region min-h-0 w-full max-w-full flex-1 overflow-x-hidden overflow-y-auto"
     >
       {dateKeys.length ? (
         <div className={showDateRail ? "space-y-4" : "space-y-2"}>
@@ -221,6 +221,13 @@ const MinistryEventAgenda = ({
                         : event.title
                       const isPinned = pinnedEventIds.includes(event.id)
                       const isPinUpdating = pinUpdatingEventIds.includes(event.id)
+                      const assignmentProfiles = event.isHouseholdAccount
+                        ? [...new Map(
+                            (event.visibleProfileAssignments || []).map(
+                              (assignment) => [assignment.profileId, assignment],
+                            ),
+                          ).values()]
+                        : []
 
                       return (
                         <div
@@ -256,6 +263,21 @@ const MinistryEventAgenda = ({
                               </span>
                             )}
                             <span>{formatTime(displayTime)}</span>
+                            {assignmentProfiles.length > 0 && (
+                              <span
+                                className="inline-flex items-center gap-1"
+                                aria-label={`${assignmentProfiles.length} household ${assignmentProfiles.length === 1 ? "member is" : "members are"} assigned`}
+                              >
+                                {assignmentProfiles.map((assignment) => (
+                                  <span
+                                    key={assignment.profileId}
+                                    title={`${assignment.firstName} ${assignment.lastName}`}
+                                    className="size-2.5 rounded-full ring-1 ring-black/10"
+                                    style={{ backgroundColor: assignment.profileColor }}
+                                  />
+                                ))}
+                              </span>
+                            )}
                             {templateName && (
                               <h6 className="ml-1 font-semibold uppercase">
                                 {templateName}

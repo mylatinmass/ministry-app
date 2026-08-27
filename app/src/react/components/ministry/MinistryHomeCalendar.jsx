@@ -9,6 +9,7 @@ import {
   Squares2X2Icon,
 } from "@heroicons/react/24/outline";
 import MinistryEventAgenda, { toDateKey } from "./MinistryEventAgenda";
+import MinistrySectionActions from "./MinistrySectionActions";
 import {
   downloadEventSchedulePdf,
   eventsWithinRange,
@@ -78,7 +79,9 @@ const MinistryHomeCalendar = ({ events = [], onEventSelect }) => {
   );
   const [agendaFocusRequest, setAgendaFocusRequest] = React.useState(0);
   const [showsTwoMonths, setShowsTwoMonths] = React.useState(false);
-  const [calendarView, setCalendarView] = React.useState("month");
+  const [calendarView, setCalendarView] = React.useState(() =>
+    window.matchMedia("(max-width: 639px)").matches ? "week" : "month",
+  );
   const [eventFilter, setEventFilter] = React.useState("all");
   const visibleMonths = React.useMemo(
     () => [
@@ -309,33 +312,16 @@ const MinistryHomeCalendar = ({ events = [], onEventSelect }) => {
 
   return (
     <section className="flex h-full min-h-0 flex-col pb-[calc(env(safe-area-inset-bottom)+4.75rem)] lg:pb-0">
-      <nav
-        aria-label="Desktop calendar view"
-        className="hidden shrink-0 justify-center pb-4 lg:flex"
-      >
-        <div className="grid grid-cols-4 gap-1 rounded-2xl bg-gray-50 p-1.5 shadow-sm ring-1 ring-gray-100">
-          {CALENDAR_VIEWS.map((view) => {
-            const Icon = view.icon;
-            const active = calendarView === view.id;
-            return (
-              <button
-                key={view.id}
-                type="button"
-                onClick={() => selectCalendarView(view.id)}
-                aria-pressed={active}
-                className={`flex min-w-24 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition ${
-                  active
-                    ? "bg-white text-[#6f4f34] shadow-sm"
-                    : "text-gray-500 hover:bg-white/70 hover:text-gray-800"
-                }`}
-              >
-                <Icon className="size-5" />
-                <span>{view.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </nav>
+      <div className="shrink-0 pb-4">
+        <MinistrySectionActions
+          label="Calendar view"
+          actions={CALENDAR_VIEWS.map((view) => ({
+            ...view,
+            active: calendarView === view.id,
+            onClick: () => selectCalendarView(view.id),
+          }))}
+        />
+      </div>
 
       <div
         className={`relative shrink-0 xl:mx-12 ${
@@ -486,6 +472,9 @@ const MinistryHomeCalendar = ({ events = [], onEventSelect }) => {
             const selected = key === selectedKey;
             const focused = key === toDateKey(selectedDate || agendaFocusDate);
             const hasEvents = dayEvents.length > 0;
+            const hasAssignment = dayEvents.some(
+              (event) => event.is_assigned,
+            );
 
             return (
               <button
@@ -500,7 +489,7 @@ const MinistryHomeCalendar = ({ events = [], onEventSelect }) => {
                   year: "numeric",
                 }).format(
                   date,
-                )}, ${dayEvents.length} ${dayEvents.length === 1 ? "event" : "events"}`}
+                )}, ${dayEvents.length} ${dayEvents.length === 1 ? "event" : "events"}${hasAssignment ? ", includes a household assignment" : ""}`}
                 className="flex min-w-0 flex-col items-center py-1 text-gray-800 transition"
               >
                 <span className="text-[11px] font-medium text-gray-500">
@@ -513,12 +502,14 @@ const MinistryHomeCalendar = ({ events = [], onEventSelect }) => {
                 >
                   {date.getDate()}
                 </span>
-                <span
-                  aria-hidden="true"
-                  className={`mt-1 size-1.5 rounded-full ${
-                    hasEvents ? "bg-orange-500" : "bg-gray-300"
-                  }`}
-                />
+                {hasEvents && (
+                  <span
+                    aria-hidden="true"
+                    className={`mt-1 size-1.5 rounded-full ${
+                      hasAssignment ? "bg-orange-500" : "bg-gray-400"
+                    }`}
+                  />
+                )}
               </button>
             );
           })}
@@ -620,31 +611,6 @@ const MinistryHomeCalendar = ({ events = [], onEventSelect }) => {
         onEventSelect={onEventSelect}
       />
 
-      <nav
-        aria-label="Calendar view"
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 shadow-[0_-8px_30px_rgba(63,45,29,0.10)] backdrop-blur lg:hidden"
-      >
-        <div className="mx-auto grid max-w-xl grid-cols-4 gap-1">
-          {CALENDAR_VIEWS.map((view) => {
-            const Icon = view.icon;
-            const active = calendarView === view.id;
-            return (
-              <button
-                key={view.id}
-                type="button"
-                onClick={() => selectCalendarView(view.id)}
-                aria-pressed={active}
-                className={`flex flex-col items-center gap-1 rounded-xl px-2 py-2 text-[11px] font-medium transition ${
-                  active ? "bg-[#f7f3ef] text-[#6f4f34]" : "text-gray-500"
-                }`}
-              >
-                <Icon className="size-5" />
-                <span>{view.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </nav>
     </section>
   );
 };

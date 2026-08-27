@@ -3,6 +3,7 @@ import type { PoolClient } from "pg"
 import { getPool } from "../database"
 import { json } from "../request"
 import {
+  sendAssignmentNotifications,
   sendEventScheduleNotifications,
   sendSubstitutionAcceptedNotifications,
   sendSubstitutionRequestNotifications,
@@ -1907,16 +1908,11 @@ export const syncAllAvailableMemberAssignments = async (
       if (current) {
         if (["cancelled", "replaced"].includes(current.status)) {
           await client.query(
-            `UPDATE responsibility_assignments SET status = 'confirmed', quantity = 1, signup_source = 'admin_assignment', confirmed_at = now(), updated_at = now() WHERE id = $1`,
+            `UPDATE responsibility_assignments SET status = 'assigned', quantity = 1, signup_source = 'admin_assignment', confirmed_at = NULL, updated_at = now() WHERE id = $1`,
             [current.id],
           )
           added += 1
           newlyRegisteredUserIds.add(userId)
-        } else if (current.status !== "confirmed") {
-          await client.query(
-            `UPDATE responsibility_assignments SET status = 'confirmed', quantity = 1, signup_source = 'admin_assignment', confirmed_at = COALESCE(confirmed_at, now()), updated_at = now() WHERE id = $1`,
-            [current.id],
-          )
         }
         continue
       }
@@ -1924,9 +1920,9 @@ export const syncAllAvailableMemberAssignments = async (
         `
           INSERT INTO responsibility_assignments (
             event_id, responsibility_id, user_id, quantity, status,
-            assigned_by, signup_source, notify_email, confirmed_at
+            assigned_by, signup_source, notify_email
           )
-          VALUES ($1, $2, $3, 1, 'confirmed', $4, 'admin_assignment', true, now())
+          VALUES ($1, $2, $3, 1, 'assigned', $4, 'admin_assignment', true)
         `,
         [event.id, responsibility.id, userId, context.actor.id],
       )
@@ -2594,8 +2590,7 @@ const loadEventDetails = async (
     accessChecks.some((access) => access.canView)
   const canManageAny = accessChecks.some((access) => access.canManage)
   const canManageEvent = isPublicEvent
-    ? ["owner", "super_admin"].includes(context.user.global_role) ||
-      event.created_by === context.user.id
+    ? ["owner", "super_admin"].includes(context.user.global_role)
     : coordinatorAccess.canManage
   const canManageAllResponsibilities = ["owner", "super_admin"].includes(
     context.user.global_role,
@@ -2664,6 +2659,7 @@ const loadEventDetails = async (
       LEFT JOIN ministry_groups required_group
         ON required_group.id = responsibility.required_group_id
       WHERE responsibility.event_id = $1
+        AND responsibility.status <> 'cancelled'
       ORDER BY lower(ministry.name), responsibility.sort_order, lower(responsibility.name)
     `
       : `
@@ -2707,6 +2703,7 @@ const loadEventDetails = async (
       LEFT JOIN ministry_levels required_level
         ON required_level.id = responsibility.required_ministry_level_id
       WHERE responsibility.event_id = $1
+        AND responsibility.status <> 'cancelled'
       ORDER BY lower(ministry.name), responsibility.sort_order, lower(responsibility.name)
     `,
     [eventId],
@@ -2799,7 +2796,7 @@ const loadEventDetails = async (
             ON assigned_responsibility.id = assignment.responsibility_id
           LEFT JOIN ministry_accounts member ON member.id = assignment.user_id
           WHERE assignment.event_id = $1
-            AND assignment.status NOT IN ('declined', 'cancelled')
+            AND assignment.status NOT IN ('cancelled', 'replaced')
           ORDER BY lower(COALESCE(member.last_name, '')), lower(COALESCE(member.first_name, assignment.volunteer_name))
         `,
         [eventId, event.start_time, event.end_time, ACTIVE_ASSIGNMENT_STATUSES],
@@ -3086,6 +3083,11 @@ const loadEventDetails = async (
         id: assignment.id,
         firstName: assignment.first_name,
         lastName: assignment.last_name || "",
+        status: assignment.status,
+        substitutionRequest:
+          substitutionRequest?.status === "pending"
+            ? { status: "pending" }
+            : null,
       })
       assignmentsByResponsibility.set(
         assignment.responsibility_id,
@@ -3118,18 +3120,26 @@ const loadEventDetails = async (
       conflictCount: canManageAssignment
         ? Number(assignment.conflict_count)
         : 0,
+      canConfirm:
+        assignment.user_id === context.user.id &&
+        ["pending", "assigned"].includes(assignment.status) &&
+        event.status === "published" &&
+        new Date(event.start_time).getTime() > Date.now() &&
+        !substitutionRequest,
       canRequestSubstitute:
         assignment.user_id === context.user.id &&
         !EXPECTED_ATTENDANCE_MODES.includes(responsibility.assignment_mode) &&
+        !responsibility.is_public_assignment &&
         responsibility.substitution_allowed !== false &&
         ["pending", "assigned", "confirmed"].includes(assignment.status) &&
         event.status === "published" &&
         new Date(event.start_time).getTime() > Date.now() &&
         !substitutionRequest,
-      canRequestAdminChange:
+      canDeclineAssignment:
         assignment.user_id === context.user.id &&
         !EXPECTED_ATTENDANCE_MODES.includes(responsibility.assignment_mode) &&
-        responsibility.substitution_allowed === false &&
+        (responsibility.is_public_assignment ||
+          responsibility.substitution_allowed === false) &&
         ["pending", "assigned", "confirmed"].includes(assignment.status) &&
         event.status === "published" &&
         new Date(event.start_time).getTime() > Date.now() &&
@@ -3483,6 +3493,135 @@ const recordServiceOutcome = async (
     metadata: { eventId: event.id },
   })
   return "Service outcome recorded"
+}
+
+const confirmMyEventAssignments = async (
+  client: PoolClient,
+  context: any,
+  event: any,
+) => {
+  if (
+    event.status !== "published" ||
+    new Date(event.start_time).getTime() <= Date.now()
+  ) {
+    throw Object.assign(new Error("Attendance can only be confirmed before a published event begins"), {
+      status: 409,
+    })
+  }
+  const confirmed = await client.query(
+    `UPDATE responsibility_assignments
+     SET status = 'confirmed', confirmed_at = now(),
+         confirmation_overdue_at = NULL, updated_at = now()
+     WHERE event_id = $1
+       AND user_id = $2
+       AND status IN ('pending', 'assigned')
+     RETURNING id`,
+    [event.id, context.user.id],
+  )
+  if (!confirmed.rowCount) {
+    throw Object.assign(new Error("There are no unconfirmed assignments for this event"), {
+      status: 409,
+    })
+  }
+  await writeSchedulingAudit(client, context, {
+    action: "event.assignments_confirmed",
+    entityType: "event",
+    entityId: event.id,
+    ministryId: event.ministry_id,
+    beforeData: { status: "assigned" },
+    afterData: {
+      status: "confirmed",
+      assignmentIds: confirmed.rows.map((assignment) => assignment.id),
+    },
+  })
+  return {
+    message: confirmed.rowCount === 1
+      ? "Assignment confirmed"
+      : `${confirmed.rowCount} assignments confirmed`,
+  }
+}
+
+const declineAssignment = async (
+  client: PoolClient,
+  context: any,
+  event: any,
+  body: any,
+) => {
+  const assignmentId = cleanText(body.assignmentId, 100)
+  const assignmentResult = await client.query(
+    `SELECT assignment.id, assignment.status, assignment.responsibility_id,
+        responsibility.assignment_mode, responsibility.is_public_assignment,
+        responsibility.substitution_allowed,
+        COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id
+     FROM responsibility_assignments assignment
+     JOIN event_responsibilities responsibility
+       ON responsibility.id = assignment.responsibility_id
+     JOIN events event ON event.id = assignment.event_id
+     WHERE assignment.id = $1
+       AND assignment.event_id = $2
+       AND assignment.user_id = $3
+     LIMIT 1
+     FOR UPDATE OF assignment`,
+    [assignmentId, event.id, context.user.id],
+  )
+  const assignment = assignmentResult.rows[0]
+  if (!assignment) {
+    throw Object.assign(new Error("Assignment not found"), { status: 404 })
+  }
+  const requiresSubstitute =
+    !EXPECTED_ATTENDANCE_MODES.includes(assignment.assignment_mode) &&
+    !assignment.is_public_assignment &&
+    assignment.substitution_allowed !== false
+  if (requiresSubstitute) {
+    throw Object.assign(new Error("This position requires a substitute request"), {
+      status: 409,
+    })
+  }
+  if (!['pending', 'assigned', 'confirmed'].includes(assignment.status)) {
+    throw Object.assign(new Error("This attendance response is already recorded"), {
+      status: 409,
+    })
+  }
+  if (
+    event.status !== "published" ||
+    new Date(event.start_time).getTime() <= Date.now()
+  ) {
+    throw Object.assign(new Error("Attendance changes close when the event begins"), {
+      status: 409,
+    })
+  }
+  await client.query(
+    `UPDATE responsibility_assignments
+     SET status = 'declined', updated_at = now()
+     WHERE id = $1`,
+    [assignment.id],
+  )
+  await client.query(
+    `UPDATE event_responsibilities responsibility
+     SET status = CASE
+           WHEN responsibility.unlimited_capacity THEN 'open'
+           WHEN (
+             SELECT COALESCE(sum(quantity), 0)
+             FROM responsibility_assignments current_assignment
+             WHERE current_assignment.responsibility_id = responsibility.id
+               AND current_assignment.status NOT IN ('declined', 'cancelled', 'replaced')
+           ) >= responsibility.quantity_needed THEN 'filled'
+           ELSE 'open'
+         END,
+         updated_at = now()
+     WHERE responsibility.id = $1`,
+    [assignment.responsibility_id],
+  )
+  await writeSchedulingAudit(client, context, {
+    action: "assignment.cannot_attend",
+    entityType: "responsibility_assignment",
+    entityId: assignment.id,
+    ministryId: assignment.ministry_id,
+    beforeData: { status: assignment.status },
+    afterData: { status: "declined" },
+    metadata: { eventId: event.id },
+  })
+  return { message: "Attendance updated" }
 }
 
 const declineAllMemberExpectation = async (
@@ -5772,6 +5911,14 @@ const updateEvent = async (
     return acceptAssignmentSubstitute(client, context, event, body)
   }
 
+  if (body.action === "confirm_my_assignments") {
+    return confirmMyEventAssignments(client, context, event)
+  }
+
+  if (body.action === "decline_assignment") {
+    return declineAssignment(client, context, event, body)
+  }
+
   if (body.action === "assign_member") {
     return assignMemberToResponsibility(client, context, event, body)
   }
@@ -6141,6 +6288,13 @@ const updateEvent = async (
         }
       }
     }
+    const affectedAssignmentIds = status === "cancelled"
+      ? (await client.query(
+          `SELECT id FROM responsibility_assignments
+           WHERE event_id = $1 AND status = ANY($2)`,
+          [eventId, ACTIVE_ASSIGNMENT_STATUSES],
+        )).rows.map((assignment) => assignment.id)
+      : []
     await client.query(
       `
       UPDATE events
@@ -6202,7 +6356,12 @@ const updateEvent = async (
       beforeData: { status: event.status },
       afterData: { status },
     })
-    return
+    return {
+      message: `Event ${status}`,
+      eventIds: [eventId],
+      publishedEventIds: status === "published" ? [eventId] : [],
+      affectedAssignmentIds,
+    }
   }
 
   const templateNameResult = event.template_id
@@ -6832,6 +6991,38 @@ export const handleEvents = async (request: Request) => {
         }
         const result: any = await updateEvent(client, context, body)
         await client.query("COMMIT")
+        const assignmentIds = [
+          ...(result?.assignmentId && [result.assignmentId] || []),
+          ...(Array.isArray(result?.assignmentIds) ? result.assignmentIds : []),
+          ...(Array.isArray(result?.applied)
+            ? result.applied.map((item: any) => item.assignmentId).filter(Boolean)
+            : []),
+        ]
+        const shouldNotifyNewAssignments = [
+          "assign_member",
+          "save_assignments",
+          "auto_fill_event",
+          "apply_matching_conflicts",
+        ].includes(body.action)
+        const newAssignmentRecipientIds = new Set<string>()
+        if (shouldNotifyNewAssignments && assignmentIds.length) {
+          const uniqueAssignmentIds = [...new Set<string>(assignmentIds)]
+          const notificationBatchKey = uniqueAssignmentIds.sort().join(":")
+          const notification = await sendAssignmentNotifications(
+            uniqueAssignmentIds,
+            request.url,
+            notificationBatchKey,
+          ).catch((error) => {
+            console.error(
+              "Assignment saved but its notification could not be prepared:",
+              error,
+            )
+            return null
+          })
+          for (const recipientUserId of notification?.recipientUserIds || []) {
+            newAssignmentRecipientIds.add(recipientUserId)
+          }
+        }
         for (const eventId of result?.publishedEventIds || []) {
           await sendEventScheduleNotifications(eventId, "published").catch(
             (error) => {
@@ -6841,6 +7032,31 @@ export const handleEvents = async (request: Request) => {
               )
             },
           )
+        }
+        const changedEventIds = new Set<string>()
+        if (
+          !body.action ||
+          body.action === "replace_template" ||
+          body.action === "save_assignments" ||
+          RESPONSIBILITY_ACTIONS.has(body.action)
+        ) {
+          for (const eventId of result?.eventIds || [body.eventId]) {
+            if (eventId) changedEventIds.add(eventId)
+          }
+        }
+        for (const eventId of changedEventIds) {
+          if ((result?.publishedEventIds || []).includes(eventId)) continue
+          await sendEventScheduleNotifications(
+            eventId,
+            "changed",
+            null,
+            [...newAssignmentRecipientIds],
+          ).catch((error) => {
+            console.error(
+              "Event changed but its notification could not be prepared:",
+              error,
+            )
+          })
         }
         if (
           body.action === "request_substitute" &&
@@ -6872,7 +7088,13 @@ export const handleEvents = async (request: Request) => {
             body.action === "set_status" &&
             body.status === "cancelled"
           ) {
-            await sendEventScheduleNotifications(body.eventId, "cancelled")
+            await sendEventScheduleNotifications(
+              body.eventId,
+              "cancelled",
+              null,
+              [],
+              result?.affectedAssignmentIds || [],
+            )
           } else if (
             body.action === "record_service_outcome" &&
             body.outcome === "substitute_served"

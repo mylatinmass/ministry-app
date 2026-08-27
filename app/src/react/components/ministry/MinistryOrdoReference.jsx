@@ -4,6 +4,7 @@ import {
   BookOpenIcon,
   CheckIcon,
   ExclamationTriangleIcon,
+  InformationCircleIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
@@ -64,6 +65,7 @@ const MinistryOrdoReference = ({
   const [errorMessage, setErrorMessage] = React.useState("")
   const [showVerificationNotice, setShowVerificationNotice] =
     React.useState(false)
+  const [showDayDetails, setShowDayDetails] = React.useState(false)
   const closeVerificationNotice = React.useCallback(
     () => setShowVerificationNotice(false),
     [],
@@ -71,6 +73,11 @@ const MinistryOrdoReference = ({
   const verificationDialogRef = useAccessibleDialog(
     showVerificationNotice,
     closeVerificationNotice,
+  )
+  const closeDayDetails = React.useCallback(() => setShowDayDetails(false), [])
+  const dayDetailsDialogRef = useAccessibleDialog(
+    showDayDetails,
+    closeDayDetails,
   )
 
   const loadReference = React.useCallback(async () => {
@@ -241,13 +248,31 @@ const MinistryOrdoReference = ({
 
   if (compact) {
     return (
-      <section className="h-full">
+      <section className="border-b border-gray-100 pb-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
-
+          <div>
             <h2 className="mt-1 century-font text-2xl text-gray-900">
               {day.celebration}
             </h2>
-
+            <div className="mt-3 flex flex-wrap gap-2">
+              {day.classLabel && (
+                <span className="rounded-full bg-[#f4ede6] px-3 py-1 text-xs font-semibold text-[#896542]">
+                  {day.classLabel}
+                </span>
+              )}
+              {day.vestmentColor && (
+                <span className="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700">
+                  <span
+                    aria-hidden="true"
+                    className={`size-3 rounded-full ${
+                      colorClasses[day.vestmentColor] || "bg-gray-400"
+                    }`}
+                  />
+                  {day.vestmentColor} vestments
+                </span>
+              )}
+            </div>
+          </div>
           <div className="flex items-center gap-2">
             {verificationNotice}
             {day.sourceUrl && (
@@ -257,37 +282,155 @@ const MinistryOrdoReference = ({
                 rel="noreferrer"
                 className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-[#6f4f34] hover:border-[#C1A387]"
               >
-                {isOrdoSource ? "View 1962 Ordo" : "View fallback source"}
+                {isOrdoSource ? "1962 Ordo" : "Ordo source"}
                 <ArrowTopRightOnSquareIcon className="size-4" />
               </a>
             )}
+            <button
+              type="button"
+              onClick={() => setShowDayDetails(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-[#6f4f34] hover:border-[#C1A387] sm:hidden"
+            >
+              <InformationCircleIcon className="size-4" />
+              More Details
+            </button>
           </div>
         </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {day.classLabel && (
-            <span className="rounded-full bg-[#f4ede6] px-3 py-1 text-xs font-semibold text-[#896542]">
-              {day.classLabel}
-            </span>
-          )}
-          {day.vestmentColor && (
-            <span className="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700">
-              <span
-                aria-hidden="true"
-                className={`size-3 rounded-full ${
-                  colorClasses[day.vestmentColor] || "bg-gray-400"
-                }`}
-              />
-              {day.vestmentColor} vestments
-            </span>
-          )}
-        </div>
-        {day.commemorations.length > 0 && (
-          <div className="mt-4 text-sm leading-relaxed text-gray-600">
-            {day.commemorations.map((commemoration) => (
-              <p key={commemoration}>{commemoration}</p>
+        <button
+          type="button"
+          onClick={() => setShowDayDetails(true)}
+          className="mt-4 hidden items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-[#6f4f34] hover:border-[#C1A387] sm:inline-flex"
+        >
+          <InformationCircleIcon className="size-4" />
+          More Details
+        </button>
+        <div
+          aria-hidden={!showDayDetails}
+          className={`fixed inset-0 z-[120] transition-visibility duration-300 ${
+            showDayDetails ? "visible" : "invisible"
+          }`}
+        >
+          <button
+            type="button"
+            aria-label="Close details about this day"
+            onClick={closeDayDetails}
+            className={`absolute inset-0 bg-black/35 transition-opacity duration-300 ${
+              showDayDetails ? "opacity-100" : "opacity-0"
+            }`}
+          />
+          <aside
+            ref={dayDetailsDialogRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ordo-day-details-title"
+            className={`absolute inset-y-0 right-0 flex w-full max-w-xl flex-col bg-white shadow-2xl transition-transform duration-300 ease-out ${
+              showDayDetails ? "translate-x-0" : "translate-x-full"
+            }`}
+          >
+            <header className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#896542]">
+                  Liturgical day
+                </p>
+                <h3 id="ordo-day-details-title" className="mt-1 century-font text-2xl text-gray-950">
+                  {day.celebration}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={closeDayDetails}
+                aria-label="Close details about this day"
+                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100"
+              >
+                <XMarkIcon className="size-5" />
+              </button>
+            </header>
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5 text-sm text-gray-600">
+            {day.commemorations.length > 0 && (
+              <div>
+                {day.commemorations.map((commemoration) => (
+                  <p key={commemoration}>{commemoration}</p>
+                ))}
+              </div>
+            )}
+            {day.massOptions.map((option) => {
+              const selected = selectedOptionId === option.id
+              return (
+                <label
+                  key={option.id}
+                  className={`block rounded-lg border p-3 ${
+                    selected
+                      ? "border-[#C1A387] bg-white"
+                      : "border-gray-200 bg-white/70"
+                  }`}
+                >
+                  <span className="flex items-start gap-2">
+                    {eventReference?.canSelectMass && (
+                      <input
+                        type="radio"
+                        name={`compact-ordo-mass-${eventId}`}
+                        value={option.id}
+                        checked={selected}
+                        onChange={() => setSelectedOptionId(option.id)}
+                        className="mt-1"
+                      />
+                    )}
+                    <span>{option.instructions}</span>
+                  </span>
+                </label>
+              )
+            })}
+            {day.generalInformation.map((information) => (
+              <p key={information}>{information}</p>
             ))}
-          </div>
-        )}
+            {day.reminders.map((reminder) => (
+              <p key={reminder} className="text-amber-800">{reminder}</p>
+            ))}
+            {eventReference?.sourceChanged && (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
+                The Ordo changed after this Mass was selected. Review the source before updating the approved selection.
+              </p>
+            )}
+            {eventReference?.canEditSacristyNotes && (
+              <label className="block font-semibold text-gray-700">
+                Sacristy page and setup notes
+                <textarea
+                  value={sacristyNotes}
+                  onChange={(event) => setSacristyNotes(event.target.value)}
+                  rows={3}
+                  placeholder="Missal pages, ribbon placement, altar setup, and other local preparation notes"
+                  className="mt-2 w-full rounded-xl border border-gray-200 bg-white p-3 font-normal"
+                />
+              </label>
+            )}
+            {(message || errorMessage) && (
+              <p
+                role={errorMessage ? "alert" : "status"}
+                className={errorMessage ? "text-red-700" : "text-green-800"}
+              >
+                {errorMessage || message}
+              </p>
+            )}
+            {canUpdate && (
+              <button
+                type="button"
+                onClick={saveReference}
+                disabled={
+                  isSaving ||
+                  (eventReference.canSelectMass &&
+                    day.massOptions.length > 1 &&
+                    !selectedOptionId)
+                }
+                className="inline-flex items-center gap-2 rounded-lg bg-[#896542] px-4 py-2 font-semibold text-white disabled:opacity-50"
+              >
+                <CheckIcon className="size-4" />
+                {isSaving ? "Updating…" : "Update Ordo details"}
+              </button>
+            )}
+            </div>
+          </aside>
+        </div>
       </section>
     )
   }

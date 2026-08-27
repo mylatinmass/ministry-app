@@ -19,6 +19,7 @@ const ASSIGNMENT_STATUSES = [
   "confirmed",
   "change_requested",
 ]
+const DAY_IN_MILLISECONDS = 24 * 60 * 60 * 1000
 const reminderKey = (...parts: unknown[]) =>
   crypto
     .createHash("sha256")
@@ -75,6 +76,10 @@ const reconcileReminders = async () => {
     for (const candidate of candidates.rows) {
       const dutyStart = new Date(candidate.duty_start_time)
       const schedules: Array<{ type: string; at: Date }> = [
+        {
+          type: "day_before",
+          at: new Date(dutyStart.getTime() - DAY_IN_MILLISECONDS),
+        },
         {
           type: "event_offset",
           at: new Date(

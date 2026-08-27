@@ -162,7 +162,10 @@ const listProfiles = async (client, context) => {
 
   return {
     actor: toPublicMinistryUser(context.actor),
-    activeProfile: toPublicMinistryUser(context.user),
+    activeProfile: {
+      ...toPublicMinistryUser(context.user),
+      appearanceTheme: context.actor.appearance_theme || "light",
+    },
     profiles: [
       {
         ...toPublicMinistryUser(context.actor),
@@ -176,7 +179,7 @@ const listProfiles = async (client, context) => {
         lastName: row.last_name,
         username: row.username,
         globalRole: row.global_role,
-        appearanceTheme: row.appearance_theme || "light",
+        appearanceTheme: context.actor.appearance_theme || "light",
         status: row.status,
         isGuardian: false,
         relationshipId: row.relationship_id,
@@ -477,6 +480,114 @@ const unlinkGuardian = async (client, actor, body) => {
     return jsonResponse(200, {
       success: true,
       message: "Child profile unlinked from your account",
+    })
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {})
+    throw error
+  }
+}
+
+const removePendingChild = async (client, actor, body) => {
+  const childId = body.profileId?.toString()
+  if (!childId) return jsonResponse(400, { message: "Child profile is required" })
+
+  await client.query("BEGIN")
+  try {
+    const relationshipResult = await client.query(
+      `
+        SELECT profile.id, child.first_name, child.last_name, child.status,
+          (
+            SELECT count(*)::INT
+            FROM managed_profiles linked_profile
+            WHERE linked_profile.child_user_id = child.id
+              AND linked_profile.status IN ('active', 'separation_pending')
+          ) AS guardian_count,
+          EXISTS (
+            SELECT 1
+            FROM ministry_members membership
+            WHERE membership.user_id = child.id
+              AND membership.status IN ('active', 'pending')
+          ) AS has_membership,
+          EXISTS (
+            SELECT 1
+            FROM responsibility_assignments assignment
+            WHERE assignment.user_id = child.id
+              AND assignment.status NOT IN ('declined', 'cancelled')
+          ) AS has_assignment
+        FROM managed_profiles profile
+        JOIN ministry_accounts child ON child.id = profile.child_user_id
+        WHERE profile.guardian_user_id = $1
+          AND profile.child_user_id = $2
+          AND profile.status = 'active'
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [actor.id, childId]
+    )
+    if (!relationshipResult.rowCount) {
+      await client.query("ROLLBACK")
+      return jsonResponse(404, { message: "This child is not linked to your account" })
+    }
+
+    const child = relationshipResult.rows[0]
+    if (child.status !== "pending") {
+      await client.query("ROLLBACK")
+      return jsonResponse(409, {
+        message: "Only a child awaiting app approval can be removed. Active profiles must be unlinked or activated independently.",
+      })
+    }
+    if (Number(child.guardian_count || 0) !== 1) {
+      await client.query("ROLLBACK")
+      return jsonResponse(409, { message: "This child is linked to another guardian and cannot be removed" })
+    }
+    if (child.has_membership || child.has_assignment) {
+      await client.query("ROLLBACK")
+      return jsonResponse(409, {
+        message: "This child already has ministry activity and cannot be removed. Contact a super admin for help.",
+      })
+    }
+
+    await client.query(
+      `
+        UPDATE managed_profile_membership_requests
+        SET status = 'cancelled', updated_at = now()
+        WHERE child_user_id = $1
+          AND guardian_user_id = $2
+          AND status = 'pending'
+      `,
+      [childId, actor.id]
+    )
+    await client.query(
+      `
+        UPDATE managed_profile_link_invitations
+        SET status = 'revoked', responded_at = now(), updated_at = now()
+        WHERE child_user_id = $1
+          AND status = 'pending'
+      `,
+      [childId]
+    )
+    await client.query(
+      `UPDATE managed_profiles SET status = 'inactive', ended_at = now(), updated_at = now() WHERE id = $1`,
+      [child.id]
+    )
+    await client.query(
+      `UPDATE ministry_accounts SET status = 'inactive', updated_at = now() WHERE id = $1 AND status = 'pending'`,
+      [childId]
+    )
+    await audit(
+      client,
+      actor.id,
+      childId,
+      "managed_profile.removed",
+      "managed_profile",
+      child.id,
+      { previousStatus: "pending" }
+    )
+    await queueKlaviyoProfileSync(client, childId)
+    await client.query("COMMIT")
+    return jsonResponse(200, {
+      success: true,
+      message: `${[child.first_name, child.last_name].filter(Boolean).join(" ")} removed`,
     })
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {})
@@ -869,7 +980,10 @@ const handler = async (event) => {
           activeProfileUserId: profileId,
           authMethod: context.authMethod,
         }),
-        activeProfile: toPublicMinistryUser(targetResult.rows[0]),
+        activeProfile: {
+          ...toPublicMinistryUser(targetResult.rows[0]),
+          appearanceTheme: context.actor.appearance_theme || "light",
+        },
       })
     }
     if (event.httpMethod === "POST" && body.action === "create_child") {
@@ -883,6 +997,9 @@ const handler = async (event) => {
     }
     if (event.httpMethod === "POST" && body.action === "unlink_guardian") {
       return await unlinkGuardian(client, context.actor, body)
+    }
+    if (event.httpMethod === "POST" && body.action === "remove_pending_child") {
+      return await removePendingChild(client, context.actor, body)
     }
     if (event.httpMethod === "POST" && body.action === "start_separation") {
       return await startSeparation(client, event, context.actor, body)

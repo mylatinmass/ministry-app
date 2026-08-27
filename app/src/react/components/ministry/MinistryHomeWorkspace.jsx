@@ -8,6 +8,8 @@ import {
   CheckCircleIcon,
   ChevronRightIcon,
   ExclamationTriangleIcon,
+  EyeIcon,
+  EyeSlashIcon,
   AcademicCapIcon,
   BookOpenIcon,
   CameraIcon,
@@ -19,6 +21,7 @@ import {
   PlusIcon,
   ShieldCheckIcon,
   SparklesIcon,
+  Squares2X2Icon,
   StarIcon,
   UserGroupIcon,
   UserCircleIcon,
@@ -34,6 +37,7 @@ import MinistryHomeCalendar from "./MinistryHomeCalendar"
 import MinistryOrdoReference from "./MinistryOrdoReference"
 import MinistryProfile from "./MinistryProfile"
 import { applyMinistryTheme } from "../../utils/ministryTheme"
+import { buildHouseholdProfileColors } from "../../utils/householdCalendar"
 import useAccessibleDialog from "../../hooks/useAccessibleDialog"
 import MinistryGlobalMembers from "./MinistryGlobalMembers"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
@@ -43,6 +47,7 @@ import MinistryMessages from "./MinistryMessages"
 import ChapelSettings from "./ChapelSettings"
 import MinistryConflictTicker from "./MinistryConflictTicker"
 import { accountSections } from "./accountNavigation"
+import MinistrySectionActions from "./MinistrySectionActions"
 
 const accessLabels = {
   owner: "Global Owner",
@@ -157,6 +162,7 @@ const MinistryCards = ({
   const [ministryItems, setMinistryItems] = React.useState(ministries)
   const [searchQuery, setSearchQuery] = React.useState("")
   const [sortBy, setSortBy] = React.useState("name_asc")
+  const [ministryView, setMinistryView] = React.useState("all")
   const [isAddOpen, setIsAddOpen] = React.useState(false)
   const [newMinistry, setNewMinistry] = React.useState({
     name: "",
@@ -174,12 +180,13 @@ const MinistryCards = ({
     return ministryItems
       .filter(
         (ministry) =>
-          !query ||
-          ministry.name.toLowerCase().includes(query) ||
-          ministry.description?.toLowerCase().includes(query),
+          (ministryView !== "mine" || Boolean(ministry.directAccessLevel)) &&
+          (!query ||
+            ministry.name.toLowerCase().includes(query) ||
+            ministry.description?.toLowerCase().includes(query)),
       )
       .sort(ministrySortOptions[sortBy].compare)
-  }, [ministryItems, searchQuery, sortBy])
+  }, [ministryItems, ministryView, searchQuery, sortBy])
 
   const openAddDialog = () => {
     setCreateError("")
@@ -216,25 +223,19 @@ const MinistryCards = ({
     }
   }
 
-  if (!ministryItems.length && !canAddMinistry) {
-    return (
-      <div className="rounded-xl border border-gray-200 p-8 text-center text-gray-500">
-        This profile does not have access to any ministries yet.
-        {isManagedProfile && actor && (
-          <button
-            type="button"
-            onClick={onReturn}
-            className="mx-auto mt-4 block rounded-xl border border-[#d8c7b8] px-4 py-2 text-sm font-semibold text-[#6f4f34]"
-          >
-            Return to {actor.firstName} {actor.lastName}
-          </button>
-        )}
-      </div>
-    )
-  }
-
   return (
-    <div>
+    <div className="pb-[calc(env(safe-area-inset-bottom)+5.5rem)] lg:pb-0">
+      <div className="mb-6">
+        <MinistrySectionActions
+          label="Ministry actions"
+          actions={[
+            { id: "all", label: "All Ministries", icon: Squares2X2Icon, active: ministryView === "all", onClick: () => setMinistryView("all") },
+            { id: "mine", label: "My Ministries", icon: CheckCircleIcon, active: ministryView === "mine", onClick: () => setMinistryView("mine") },
+            { id: "request", label: "Request Access", icon: ShieldCheckIcon, onClick: () => window.location.assign("/access-request") },
+            { id: "new", label: "New Ministry", icon: PlusIcon, hidden: !canAddMinistry, onClick: openAddDialog },
+          ]}
+        />
+      </div>
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center">
         <label className="relative flex-1">
           <span className="sr-only">Search ministries</span>
@@ -264,16 +265,6 @@ const MinistryCards = ({
             ))}
           </select>
         </label>
-        {canAddMinistry && (
-          <button
-            type="button"
-            onClick={openAddDialog}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-[#896542] px-5 font-semibold text-white shadow-sm transition hover:bg-[#6f4f34] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#896542]"
-          >
-            <PlusIcon aria-hidden="true" className="size-5" />
-            Add ministry
-          </button>
-        )}
       </div>
 
       {visibleMinistries.length ? (
@@ -322,8 +313,19 @@ const MinistryCards = ({
           <p className="mt-1 text-sm text-gray-500">
             {searchQuery
               ? "Try a different search."
-              : "Add the first ministry to get started."}
+              : ministryView === "mine"
+                ? "You do not currently belong to a ministry."
+                : "Request access to join a ministry."}
           </p>
+          {isManagedProfile && actor && (
+            <button
+              type="button"
+              onClick={onReturn}
+              className="mx-auto mt-4 block rounded-xl border border-[#d8c7b8] px-4 py-2 text-sm font-semibold text-[#6f4f34]"
+            >
+              Return to {actor.firstName} {actor.lastName}
+            </button>
+          )}
         </div>
       )}
 
@@ -433,6 +435,7 @@ const MinistryHomeWorkspace = ({ data }) => {
   const hasGlobalAccess = ["owner", "super_admin"].includes(
     data.user.globalRole
   )
+  const isSuperAdmin = data.user.globalRole === "super_admin"
   const canManageMembers =
     hasGlobalAccess ||
     data.ministries.some((ministry) =>
@@ -443,9 +446,9 @@ const MinistryHomeWorkspace = ({ data }) => {
       accountSections.filter(
         (section) =>
           (!section.managerOnly || canManageMembers) &&
-          (!section.globalAdminOnly || hasGlobalAccess),
+          (!section.globalAdminOnly || isSuperAdmin),
       ),
-    [canManageMembers, hasGlobalAccess]
+    [canManageMembers, isSuperAdmin]
   )
   const [sectionId, setSectionId] = React.useState(() => {
     if (typeof window === "undefined") return "home"
@@ -458,14 +461,49 @@ const MinistryHomeWorkspace = ({ data }) => {
   })
   const [currentUser, setCurrentUser] = React.useState(data.user)
   React.useLayoutEffect(() => {
-    applyMinistryTheme(currentUser?.appearanceTheme, currentUser?.id)
-  }, [currentUser?.appearanceTheme, currentUser?.id])
+    applyMinistryTheme(currentUser?.appearanceTheme)
+  }, [currentUser?.appearanceTheme])
   const [selectedEvent, setSelectedEvent] = React.useState(null)
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false)
   const closeMobileMenu = React.useCallback(() => setMobileMenuOpen(false), [])
   const mobileMenuRef = useAccessibleDialog(mobileMenuOpen, closeMobileMenu)
   const [profileMenuOpen, setProfileMenuOpen] = React.useState(false)
   const [familyData, setFamilyData] = React.useState(null)
+  const [visibleProfileIds, setVisibleProfileIds] = React.useState([])
+  const householdProfileColors = React.useMemo(
+    () => buildHouseholdProfileColors(familyData?.profiles || []),
+    [familyData?.profiles],
+  )
+  const calendarEvents = React.useMemo(() => {
+    const selectedProfileIds = visibleProfileIds.length
+      ? visibleProfileIds
+      : [data.user.id]
+    return data.calendarEvents.map((event) => {
+      const visibleAssignments = event.visibleProfileAssignments?.filter(
+        (assignment) => selectedProfileIds.includes(assignment.profileId),
+      ).map((assignment) => ({
+        ...assignment,
+        profileColor: householdProfileColors.get(assignment.profileId),
+      })) || []
+      return {
+        ...event,
+        isHouseholdAccount: (familyData?.profiles?.length || 0) > 1,
+        is_assigned: visibleAssignments.length > 0,
+        assignment_start_time:
+          visibleAssignments
+            .map((assignment) => assignment.dutyStartTime)
+            .filter(Boolean)
+            .sort()[0] || null,
+        visibleProfileAssignments: visibleAssignments,
+      }
+    })
+  }, [
+    data.calendarEvents,
+    data.user.id,
+    familyData?.profiles?.length,
+    householdProfileColors,
+    visibleProfileIds,
+  ])
   const [alertsData, setAlertsData] = React.useState({ alerts: [], unreadCount: 0 })
   const [messageSummary, setMessageSummary] = React.useState({
     received: [],
@@ -495,16 +533,16 @@ const MinistryHomeWorkspace = ({ data }) => {
     availableSections.find((section) => section.id === sectionId) ||
     availableSections[0]
   const myEvents = React.useMemo(
-    () => data.calendarEvents.filter((event) => event.is_assigned),
-    [data.calendarEvents]
+    () => calendarEvents.filter((event) => event.is_assigned),
+    [calendarEvents]
   )
   const upcomingEvents = React.useMemo(() => {
     const now = Date.now()
-    return data.calendarEvents.filter((event) => {
+    return calendarEvents.filter((event) => {
       const endTime = new Date(event.end_time || event.start_time).getTime()
       return !Number.isNaN(endTime) && endTime >= now
     })
-  }, [data.calendarEvents])
+  }, [calendarEvents])
   const upcomingAssignments = React.useMemo(() => {
     const now = Date.now()
     return myEvents
@@ -567,7 +605,23 @@ const MinistryHomeWorkspace = ({ data }) => {
           if (!response.ok) throw new Error(result.message)
           return result
         })
-        .then(setFamilyData)
+        .then((result) => {
+          setFamilyData(result)
+          const visibilityKey = `ministry_visible_profile_ids:${result.actor.id}`
+          let stored = []
+          try {
+            stored = JSON.parse(window.localStorage.getItem(visibilityKey) || "[]")
+          } catch (error) {
+            stored = []
+          }
+          const allowedIds = new Set(result.profiles.map((profile) => profile.id))
+          const restored = Array.isArray(stored)
+            ? stored.filter((id) => allowedIds.has(id))
+            : []
+          setVisibleProfileIds(
+            restored.length ? restored : result.profiles.map((profile) => profile.id),
+          )
+        })
         .catch(() => {})
     }
 
@@ -689,7 +743,28 @@ const MinistryHomeWorkspace = ({ data }) => {
     window.setTimeout(() => alertsSectionRef.current?.focus({ preventScroll: true }), 350)
   }
 
-  const switchProfile = async (profileId) => {
+  const saveVisibleProfiles = (ids) => {
+    setVisibleProfileIds(ids)
+    const actorId = familyData?.actor?.id || data.actor?.id || data.user.id
+    window.localStorage.setItem(
+      `ministry_visible_profile_ids:${actorId}`,
+      JSON.stringify(ids),
+    )
+  }
+
+  const toggleVisibleProfile = (profileId) => {
+    if (
+      visibleProfileIds.includes(profileId) &&
+      visibleProfileIds.length === 1
+    ) return
+    saveVisibleProfiles(
+      visibleProfileIds.includes(profileId)
+        ? visibleProfileIds.filter((id) => id !== profileId)
+        : [...visibleProfileIds, profileId],
+    )
+  }
+
+  const switchProfile = async (profileId, showAll = false) => {
     const token = window.sessionStorage.getItem(MINISTRY_SESSION_KEY)
     const response = await fetch(getFunctionEndpoint("ministry-profiles"), {
       method: "PATCH",
@@ -702,12 +777,11 @@ const MinistryHomeWorkspace = ({ data }) => {
     const result = await response.json()
     if (!response.ok) return
 
-    applyMinistryTheme(result.activeProfile?.appearanceTheme, profileId)
+    applyMinistryTheme(result.activeProfile?.appearanceTheme)
 
     window.sessionStorage.setItem(MINISTRY_SESSION_KEY, result.token)
-    window.sessionStorage.setItem(
-      "ministry_visible_profile_ids",
-      JSON.stringify([profileId])
+    saveVisibleProfiles(
+      showAll ? familyData.profiles.map((profile) => profile.id) : [profileId],
     )
     window.location.assign("/")
   }
@@ -793,21 +867,43 @@ const MinistryHomeWorkspace = ({ data }) => {
           </button>
         )}
         {familyData?.profiles?.length > 0 && (
+          <>
+          <button
+            type="button"
+            onClick={() => switchProfile(familyData.actor.id, true)}
+            className="w-full border-b border-gray-100 px-4 py-3 text-left text-sm font-semibold text-[#6f4f34] hover:bg-[#f7f3ef]"
+          >
+            All Members
+          </button>
           <div className="max-h-72 overflow-y-auto p-2">
             {familyData.profiles.map((profile) => {
               const active = familyData.activeProfile.id === profile.id
+              const visible = visibleProfileIds.includes(profile.id)
               return (
-                <button
-                  key={profile.id}
-                  type="button"
-                  onClick={() => switchProfile(profile.id)}
-                  aria-current={active ? "true" : undefined}
-                  className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50 ${
-                    active
-                      ? "font-semibold text-[#6f4f34]"
-                      : "text-gray-700"
-                  }`}
-                >
+                <div key={profile.id} className="flex items-center gap-1 rounded-lg hover:bg-gray-50">
+                  <button
+                    type="button"
+                    onClick={() => toggleVisibleProfile(profile.id)}
+                    aria-label={`${visible ? "Hide" : "Show"} ${profile.firstName} ${profile.lastName} assignments`}
+                    className="p-2 text-gray-500 hover:text-[#896542]"
+                  >
+                    {visible ? <EyeIcon className="size-5" /> : <EyeSlashIcon className="size-5" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => switchProfile(profile.id)}
+                    aria-current={active ? "true" : undefined}
+                    className={`flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left text-sm ${
+                      active ? "font-semibold text-[#6f4f34]" : "text-gray-700"
+                    }`}
+                  >
+                  {familyData.profiles.length > 1 && (
+                    <span
+                      className="size-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: householdProfileColors.get(profile.id) }}
+                      aria-hidden="true"
+                    />
+                  )}
                   <span
                     className={`size-2 shrink-0 rounded-full ${
                       profile.alertCount > 0
@@ -828,10 +924,12 @@ const MinistryHomeWorkspace = ({ data }) => {
                       Active
                     </span>
                   )}
-                </button>
+                  </button>
+                </div>
               )
             })}
           </div>
+          </>
         )}
         <button
           type="button"
@@ -1052,7 +1150,7 @@ const MinistryHomeWorkspace = ({ data }) => {
   } else if (sectionId === "calendar") {
     content = (
       <MinistryHomeCalendar
-        events={data.calendarEvents}
+        events={calendarEvents}
         onEventSelect={setSelectedEvent}
       />
     )
@@ -1060,8 +1158,52 @@ const MinistryHomeWorkspace = ({ data }) => {
     const createMinistry = manageableMinistries.find(
       (ministry) => ministry.id === createMinistryId,
     )
+    const eventActions = [
+      {
+        id: "all",
+        label: "All Events",
+        icon: CalendarDaysIcon,
+        active: !showCreateEvent && eventView === "all",
+        onClick: () => {
+          setShowCreateEvent(false)
+          setEventView("all")
+        },
+      },
+      {
+        id: "mine",
+        label: "My Events",
+        icon: CheckCircleIcon,
+        active: !showCreateEvent && eventView === "mine",
+        onClick: () => {
+          setShowCreateEvent(false)
+          setEventView("mine")
+        },
+      },
+      {
+        id: "pinned",
+        label: "Pinned Events",
+        icon: StarIcon,
+        active: !showCreateEvent && eventView === "pinned",
+        onClick: () => {
+          setShowCreateEvent(false)
+          setEventView("pinned")
+        },
+      },
+      {
+        id: "create",
+        label: "Create Event",
+        icon: PlusIcon,
+        active: showCreateEvent,
+        hidden: !(hasGlobalAccess || manageableMinistries.length > 0),
+        onClick: () => {
+          setCloneEventDraft(null)
+          setShowCreateEvent(true)
+        },
+      },
+    ]
     content = showCreateEvent && createMinistry ? (
-      <div className="space-y-5">
+      <div className="space-y-5 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] lg:pb-0">
+        <MinistrySectionActions label="Event actions" actions={eventActions} />
         <div className="flex flex-wrap items-end justify-between gap-4">
           <label className="min-w-64 text-sm font-semibold text-gray-700">
             Create for ministry
@@ -1101,53 +1243,10 @@ const MinistryHomeWorkspace = ({ data }) => {
       </div>
     ) : (
       <div className="flex h-full min-h-0 flex-col gap-5 pb-[calc(env(safe-area-inset-bottom)+4.75rem)] lg:pb-0">
-        <div className="relative flex shrink-0 flex-wrap items-center justify-center gap-3">
-          <div
-            className="hidden grid-cols-3 gap-1 rounded-2xl bg-gray-50 p-1.5 shadow-sm ring-1 ring-gray-100 lg:grid"
-            aria-label="Filter events"
-          >
-            {[
-              { id: "all", label: "All Events", icon: CalendarDaysIcon },
-              { id: "mine", label: "My Events", icon: CheckCircleIcon },
-              { id: "pinned", label: "Pinned Events", icon: StarIcon },
-            ].map((filter) => {
-              const Icon = filter.icon
-              const active = eventView === filter.id
-              return (
-                <button
-                  key={filter.id}
-                  type="button"
-                  onClick={() => setEventView(filter.id)}
-                  aria-pressed={active}
-                  className={`flex min-w-0 items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-medium transition sm:min-w-28 sm:px-4 sm:text-sm ${
-                    active
-                      ? "bg-white text-[#6f4f34] shadow-sm"
-                      : "text-gray-500 hover:bg-white/70 hover:text-gray-800"
-                  }`}
-                >
-                  <Icon className="size-5 shrink-0" />
-                  <span className="hidden sm:inline">{filter.label}</span>
-                  <span className="sm:hidden">
-                    {filter.id === "pinned" ? "Pinned" : filter.id === "mine" ? "Mine" : "All"}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-          {(hasGlobalAccess || manageableMinistries.length > 0) && (
-            <button
-              type="button"
-              onClick={() => {
-                setCloneEventDraft(null)
-                setShowCreateEvent(true)
-              }}
-              className="hidden items-center gap-2 rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#6f4f34] lg:absolute lg:right-0 lg:inline-flex"
-            >
-              <PlusIcon className="size-5" />
-              Create event
-            </button>
-          )}
-        </div>
+        <MinistrySectionActions
+          label="Event actions"
+          actions={eventActions}
+        />
         {["sub_requests", "unfilled"].includes(eventView) && (
           <div className="flex shrink-0 justify-center">
             <span className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-700">
@@ -1174,47 +1273,6 @@ const MinistryHomeWorkspace = ({ data }) => {
           pinUpdatingEventIds={pinUpdatingEventIds}
           onTogglePin={togglePinnedEvent}
         />
-        <nav
-          aria-label="Event actions"
-          className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 shadow-[0_-8px_30px_rgba(63,45,29,0.10)] backdrop-blur lg:hidden"
-        >
-          <div className="mx-auto grid max-w-xl grid-cols-4 gap-1">
-            {[
-              { id: "all", label: "All", icon: CalendarDaysIcon },
-              { id: "mine", label: "My Events", icon: CheckCircleIcon },
-              { id: "pinned", label: "Pinned", icon: StarIcon },
-            ].map((filter) => {
-              const Icon = filter.icon
-              const active = eventView === filter.id
-              return (
-                <button
-                  key={filter.id}
-                  type="button"
-                  onClick={() => setEventView(filter.id)}
-                  aria-pressed={active}
-                  className={`flex flex-col items-center gap-1 rounded-xl px-2 py-2 text-[11px] font-medium transition ${
-                    active ? "bg-[#f7f3ef] text-[#6f4f34]" : "text-gray-500"
-                  }`}
-                >
-                  <Icon className="size-5" />
-                  <span>{filter.label}</span>
-                </button>
-              )
-            })}
-            <button
-              type="button"
-              onClick={() => {
-                setCloneEventDraft(null)
-                setShowCreateEvent(true)
-              }}
-              disabled={!(hasGlobalAccess || manageableMinistries.length > 0)}
-              className="flex flex-col items-center gap-1 rounded-xl px-2 py-2 text-[11px] font-medium text-gray-500 transition hover:bg-[#f7f3ef] hover:text-[#6f4f34] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <PlusIcon className="size-5" />
-              <span>Create New</span>
-            </button>
-          </div>
-        </nav>
       </div>
     )
   } else if (sectionId === "availability") {
@@ -1244,7 +1302,7 @@ const MinistryHomeWorkspace = ({ data }) => {
         onUserUpdate={setCurrentUser}
       />
     )
-  } else if (sectionId === "chapel-settings" && hasGlobalAccess) {
+  } else if (sectionId === "chapel-settings" && isSuperAdmin) {
     content = <ChapelSettings />
   } else {
     content = <MinistrySupport />

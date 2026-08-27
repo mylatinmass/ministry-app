@@ -19,6 +19,7 @@ const toMinistry = (row) => ({
   description: row.description,
   status: row.status,
   accessLevel: row.access_level,
+  directAccessLevel: row.direct_access_level || null,
   globalAccess: row.global_access,
   canServe: row.can_serve,
   memberCount: Number(row.member_count),
@@ -69,6 +70,7 @@ const handler = async (event) => {
               m.description,
               m.status,
               $1::STRING AS access_level,
+              access.level AS direct_access_level,
               true AS global_access,
               coalesce(access.can_serve, false) AS can_serve,
               (
@@ -110,6 +112,7 @@ const handler = async (event) => {
               m.description,
               m.status,
               access.level AS access_level,
+              access.level AS direct_access_level,
               false AS global_access,
               access.can_serve,
               (
@@ -154,12 +157,41 @@ const handler = async (event) => {
             ordo_day.general_information AS ordo_general_information,
             e.title,
             CASE WHEN COALESCE(e.visibility, 'public') <> 'private'
-              OR EXISTS (SELECT 1 FROM responsibility_assignments private_assignment WHERE private_assignment.event_id = e.id AND private_assignment.user_id = $1 AND private_assignment.status NOT IN ('declined', 'cancelled'))
+              OR EXISTS (
+                SELECT 1
+                FROM responsibility_assignments private_assignment
+                WHERE private_assignment.event_id = e.id
+                  AND private_assignment.status NOT IN ('declined', 'cancelled')
+                  AND (
+                    private_assignment.user_id = $1
+                    OR EXISTS (
+                      SELECT 1
+                      FROM managed_profiles managed
+                      WHERE managed.guardian_user_id = $1
+                        AND managed.child_user_id = private_assignment.user_id
+                        AND managed.status IN ('active', 'separation_pending')
+                    )
+                  )
+              )
               OR EXISTS (SELECT 1 FROM ministry_members private_access JOIN ministries private_ministry ON private_ministry.id = private_access.ministry_id WHERE private_access.user_id = $1 AND private_access.status = 'active' AND private_access.level IN ('owner', 'admin') AND private_ministry.slug = 'priests')
               OR EXISTS (SELECT 1 FROM ministry_accounts private_user WHERE private_user.id = $1 AND private_user.global_role IN ('owner', 'super_admin'))
               THEN e.description ELSE NULL END AS description,
             CASE WHEN COALESCE(e.visibility, 'public') <> 'private'
-              OR EXISTS (SELECT 1 FROM responsibility_assignments private_assignment WHERE private_assignment.event_id = e.id AND private_assignment.user_id = $1 AND private_assignment.status NOT IN ('declined', 'cancelled'))
+              OR EXISTS (
+                SELECT 1
+                FROM responsibility_assignments private_assignment
+                WHERE private_assignment.event_id = e.id
+                  AND private_assignment.status NOT IN ('declined', 'cancelled')
+                  AND (
+                    private_assignment.user_id = $1
+                    OR EXISTS (
+                      SELECT 1 FROM managed_profiles managed
+                      WHERE managed.guardian_user_id = $1
+                        AND managed.child_user_id = private_assignment.user_id
+                        AND managed.status IN ('active', 'separation_pending')
+                    )
+                  )
+              )
               OR EXISTS (SELECT 1 FROM ministry_members private_access JOIN ministries private_ministry ON private_ministry.id = private_access.ministry_id WHERE private_access.user_id = $1 AND private_access.status = 'active' AND private_access.level IN ('owner', 'admin') AND private_ministry.slug = 'priests')
               OR EXISTS (SELECT 1 FROM ministry_accounts private_user WHERE private_user.id = $1 AND private_user.global_role IN ('owner', 'super_admin'))
               THEN e.location ELSE NULL END AS location,
@@ -190,30 +222,57 @@ const handler = async (event) => {
           WHERE e.status IN ('published', 'cancelled', 'completed')
             AND (
               COALESCE(e.visibility, 'public') <> 'private'
-              OR EXISTS (SELECT 1 FROM responsibility_assignments private_assignment WHERE private_assignment.event_id = e.id AND private_assignment.user_id = $1 AND private_assignment.status NOT IN ('declined', 'cancelled'))
+              OR EXISTS (
+                SELECT 1
+                FROM responsibility_assignments private_assignment
+                WHERE private_assignment.event_id = e.id
+                  AND private_assignment.status NOT IN ('declined', 'cancelled')
+                  AND (
+                    private_assignment.user_id = $1
+                    OR EXISTS (
+                      SELECT 1 FROM managed_profiles managed
+                      WHERE managed.guardian_user_id = $1
+                        AND managed.child_user_id = private_assignment.user_id
+                        AND managed.status IN ('active', 'separation_pending')
+                    )
+                  )
+              )
               OR EXISTS (SELECT 1 FROM ministry_members private_access JOIN ministries private_ministry ON private_ministry.id = private_access.ministry_id WHERE private_access.user_id = $1 AND private_access.status = 'active' AND private_ministry.slug = 'priests')
               OR EXISTS (SELECT 1 FROM ministry_accounts private_user WHERE private_user.id = $1 AND private_user.global_role IN ('owner', 'super_admin'))
             )
           ORDER BY e.start_time
         `,
-        [user.id]
+        [context.actor.id]
       ),
       client.query(
         `
           SELECT
             ra.event_id,
+            ra.user_id,
+            subject.first_name,
+            subject.last_name,
             ra.status,
             er.name AS responsibility_name,
             er.relative_start_minutes
           FROM responsibility_assignments ra
           JOIN event_responsibilities er ON er.id = ra.responsibility_id
-          WHERE ra.user_id = $1
+          JOIN ministry_accounts subject ON subject.id = ra.user_id
+          WHERE (
+              ra.user_id = $1
+              OR EXISTS (
+                SELECT 1
+                FROM managed_profiles managed
+                WHERE managed.guardian_user_id = $1
+                  AND managed.child_user_id = ra.user_id
+                  AND managed.status IN ('active', 'separation_pending')
+              )
+            )
             AND ra.status IN (
               'interested', 'pending', 'assigned', 'confirmed',
               'change_requested', 'completed'
             )
         `,
-        [user.id]
+        [context.actor.id]
       ),
       client.query(
         `
@@ -292,9 +351,9 @@ const handler = async (event) => {
     const calendarEvents = calendarEventsResult.rows.map((event) => {
       const assignments = assignmentsByEvent[event.id] || []
       const visibleProfileAssignments = assignments.map((assignment) => ({
-        profileId: user.id,
-        firstName: user.first_name,
-        lastName: user.last_name,
+        profileId: assignment.user_id,
+        firstName: assignment.first_name,
+        lastName: assignment.last_name,
         status: assignment.status,
         responsibilityName: assignment.responsibility_name,
         dutyStartTime: new Date(
@@ -322,7 +381,10 @@ const handler = async (event) => {
 
     return jsonResponse(200, {
       actor: toPublicMinistryUser(context.actor),
-      user: toPublicMinistryUser(user),
+      user: {
+        ...toPublicMinistryUser(user),
+        appearanceTheme: context.actor.appearance_theme || "light",
+      },
       isManagedProfile: context.isManagedProfile,
       ministries: result.rows.map(toMinistry),
       calendarEvents,

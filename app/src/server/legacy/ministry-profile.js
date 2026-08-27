@@ -63,7 +63,7 @@ const loadProfile = async (client, context) => {
           profile.status,
           profile.background_check_verified,
           profile.background_check_verified_at,
-          profile.appearance_theme,
+          contact.appearance_theme,
           contact.notification_lead_minutes,
           contact.notification_email_enabled,
           contact.notification_telegram_enabled,
@@ -297,11 +297,9 @@ const handler = async (event) => {
         if (!firstName || !lastName) {
           return jsonResponse(400, { message: "First and last name are required" })
         }
-        const appearanceTheme = body.appearanceTheme === "dark" ? "dark" : "light"
-        const beforeTheme = context.user.appearance_theme || "light"
         await client.query(
-          `UPDATE ministry_accounts SET first_name = $1, last_name = $2, appearance_theme = $3, updated_at = now() WHERE id = $4`,
-          [firstName, lastName, appearanceTheme, context.user.id]
+          `UPDATE ministry_accounts SET first_name = $1, last_name = $2, updated_at = now() WHERE id = $3`,
+          [firstName, lastName, context.user.id]
         )
         await client.query(
           `
@@ -313,10 +311,7 @@ const handler = async (event) => {
           [
             context.actor.id,
             context.user.id,
-            JSON.stringify({
-              appearanceThemeBefore: beforeTheme,
-              appearanceThemeAfter: appearanceTheme,
-            }),
+            JSON.stringify({ preferencesInheritedFromGuardian: true }),
           ]
         )
         const profile = await loadProfile(client, context)

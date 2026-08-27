@@ -97,8 +97,14 @@ const claimProfileSyncs = async () => {
       WITH due AS (
         SELECT account_user_id
         FROM klaviyo_profile_syncs
-        WHERE status IN ('pending', 'retry')
-          AND (next_attempt_at IS NULL OR next_attempt_at <= now())
+        WHERE (
+            status IN ('pending', 'retry')
+            AND (next_attempt_at IS NULL OR next_attempt_at <= now())
+          )
+          OR (
+            status = 'failed'
+            AND updated_at <= now() - INTERVAL '24 hours'
+          )
         ORDER BY updated_at
         LIMIT 50
         FOR UPDATE SKIP LOCKED
@@ -106,7 +112,11 @@ const claimProfileSyncs = async () => {
       UPDATE klaviyo_profile_syncs sync
       SET status = 'processing',
           claimed_at = now(),
-          attempt_count = attempt_count + 1,
+          attempt_count = CASE
+            WHEN sync.status = 'failed' THEN 1
+            ELSE attempt_count + 1
+          END,
+          next_attempt_at = NULL,
           updated_at = now()
       FROM due
       WHERE sync.account_user_id = due.account_user_id

@@ -2,6 +2,7 @@ import * as React from "react"
 import {
   ArrowLeftIcon,
   CalendarDaysIcon,
+  CheckCircleIcon,
   ClockIcon,
   ExclamationTriangleIcon,
   MapPinIcon,
@@ -13,6 +14,7 @@ import {
   PlusIcon,
   PaperAirplaneIcon,
   TrashIcon,
+  XCircleIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
@@ -52,6 +54,19 @@ const isExpectedAttendanceMode = (assignmentMode) =>
     "source_event_assignees",
   ].includes(assignmentMode)
 
+const isUnavailableAssignment = (status) =>
+  ["declined", "cancelled"].includes(status)
+
+const isConfirmedAssignment = (assignment) =>
+  ["confirmed", "completed"].includes(assignment.status)
+
+const assignmentResponseOrder = (assignment) => {
+  if (isUnavailableAssignment(assignment.status)) return 3
+  if (assignment.substitutionRequest?.status === "pending") return 2
+  if (isConfirmedAssignment(assignment)) return 0
+  return 1
+}
+
 const formatDutyTime = (eventStart, offsetMinutes = 0) =>
   new Intl.DateTimeFormat("en-US", {
     weekday: "short",
@@ -69,6 +84,8 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
   const [details, setDetails] = React.useState(null)
   const [isLoading, setIsLoading] = React.useState(false)
   const [isSavingResponsibility, setIsSavingResponsibility] =
+    React.useState(false)
+  const [isEditingResponsibilities, setIsEditingResponsibilities] =
     React.useState(false)
   const [responsibilityForm, setResponsibilityForm] =
     React.useState(null)
@@ -190,6 +207,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
 
   React.useEffect(() => {
     setResponsibilityForm(null)
+    setIsEditingResponsibilities(false)
     setMessage("")
     loadDetails()
   }, [loadDetails])
@@ -220,6 +238,16 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
   if (!event) return null
 
   const displayedEvent = details || event
+  const currentUserAssignments = (details?.responsibilities || []).flatMap(
+    (responsibility) =>
+      (responsibility.assignments || [])
+        .filter(
+          (assignment) =>
+            assignment.userId === details?.currentUserId &&
+            assignment.status !== "replaced",
+        )
+        .map((assignment) => ({ ...assignment, responsibility })),
+  )
 
   const savePrivateDetails = async () => {
     setIsSavingPrivateDetails(true)
@@ -263,11 +291,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
           (responsibility) => responsibility.canManage,
         ),
       ))
-  const canMessageParticipants = Boolean(details) && (
-    Boolean(details?.canManageEvent) ||
-    manageableMinistries.length > 0 ||
-    Boolean(details?.responsibilities?.some((responsibility) => responsibility.canManage))
-  )
+  const canMessageParticipants = Boolean(details?.canManageEvent)
 
   const sendParticipantMessage = async (submitEvent) => {
     submitEvent.preventDefault()
@@ -289,7 +313,21 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
       })
       const result = await response.json()
       if (!response.ok) throw new Error(result.message || "Unable to message participants")
-      setMessage(`Message sent to ${result.recipientCount} event participant${result.recipientCount === 1 ? "" : "s"}.`)
+      const summary = result.deliverySummary || {}
+      const acceptedCount = Number(summary.acceptedCount || 0)
+      const pendingCount = Number(summary.pendingCount || 0)
+      const failedCount = Number(summary.failedCount || 0)
+      const skippedCount = Number(summary.skippedCount || 0)
+      const participantLabel = `${result.recipientCount} event participant${result.recipientCount === 1 ? "" : "s"}`
+      setMessage(
+        acceptedCount > 0
+          ? `Message processed for ${participantLabel}: ${acceptedCount} ${acceptedCount === 1 ? "delivery" : "deliveries"} accepted${skippedCount ? ` and ${skippedCount} unavailable` : ""}.`
+          : pendingCount > 0 || result.deliveryProcessingDeferred
+            ? `Message queued for ${participantLabel}. Delivery will continue in the background.`
+            : failedCount > 0
+              ? `Message saved for ${participantLabel}, but delivery failed. It will be retried automatically.`
+              : `Message saved for ${participantLabel}, but no recipient currently has an enabled delivery channel.`,
+      )
       setParticipantMessage({ messageType: "email", subject: "", body: "" })
       setShowParticipantMessage(false)
     } catch (error) {
@@ -412,7 +450,34 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
     }
   }
 
-  const declineExpectedAttendance = async (assignmentId) => {
+  const confirmMyAssignments = async () => {
+    setSavingAssignmentId("confirm-my-assignments")
+    setMessage("")
+    setErrorMessage("")
+    try {
+      const response = await fetch(getFunctionEndpoint("scheduling/events"), {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${window.sessionStorage.getItem(MINISTRY_SESSION_KEY)}`,
+        },
+        body: JSON.stringify({
+          action: "confirm_my_assignments",
+          eventId: displayedEvent.id,
+        }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.message || "Unable to confirm attendance")
+      setMessage(result.message)
+      await loadDetails()
+    } catch (error) {
+      setErrorMessage(error.message)
+    } finally {
+      setSavingAssignmentId("")
+    }
+  }
+
+  const declineAssignment = async (assignmentId) => {
     setSavingSubstitutionId(assignmentId)
     setMessage("")
     setErrorMessage("")
@@ -424,7 +489,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
           Authorization: `Bearer ${window.sessionStorage.getItem(MINISTRY_SESSION_KEY)}`,
         },
         body: JSON.stringify({
-          action: "decline_all_member_expectation",
+          action: "decline_assignment",
           eventId: displayedEvent.id,
           assignmentId,
         }),
@@ -797,7 +862,11 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
     setMessage("Volunteer link copied")
   }
 
-  const groupedResponsibilities = (details?.responsibilities || []).reduce(
+  const activeResponsibilities = (details?.responsibilities || []).filter(
+    (responsibility) =>
+      !["cancelled", "deleted"].includes(responsibility.status),
+  )
+  const groupedResponsibilities = activeResponsibilities.reduce(
     (groups, responsibility) => {
       const key = responsibility.ministryId || "unassigned"
       if (!groups[key]) {
@@ -847,6 +916,241 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
       ).length,
     0,
   )
+  const eventDisplayName =
+    displayedEvent.template_name?.trim() || displayedEvent.title
+  const eventDescription = displayedEvent.description?.trim()
+  const renderEventActions = (className = "") => {
+    if (!(details?.canManageEvent && onClone) && !canMessageParticipants) {
+      return null
+    }
+    return (
+      <div className={`flex flex-wrap gap-2 ${className}`}>
+        {details?.canManageEvent && onClone && (
+          <button
+            type="button"
+            onClick={() => onClone(displayedEvent)}
+            className="inline-flex items-center gap-2 rounded-xl border border-[#d8c7b8] bg-white px-4 py-2.5 text-sm font-semibold text-[#6f4f34] hover:bg-[#fbf8f4]"
+          >
+            <DocumentDuplicateIcon className="size-5" />
+            Clone
+          </button>
+        )}
+        {canMessageParticipants && (
+          <button
+            type="button"
+            onClick={() => setShowParticipantMessage((open) => !open)}
+            className="inline-flex items-center gap-2 rounded-xl border border-[#d8c7b8] bg-white px-4 py-2.5 text-sm font-semibold text-[#6f4f34] hover:bg-[#fbf8f4]"
+          >
+            {showParticipantMessage
+              ? <XMarkIcon className="size-5" />
+              : <EnvelopeIcon className="size-5" />}
+            {showParticipantMessage ? "Cancel message" : "Message"}
+          </button>
+        )}
+      </div>
+    )
+  }
+  const renderParticipantMessageComposer = (className = "") =>
+    canMessageParticipants && showParticipantMessage ? (
+      <form
+        onSubmit={sendParticipantMessage}
+        className={`mt-4 space-y-3 rounded-2xl border border-gray-200 bg-[#fbf8f4] p-4 ${className}`}
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="text-sm font-semibold text-gray-700">
+            Type
+            <select
+              value={participantMessage.messageType}
+              onChange={(changeEvent) => setParticipantMessage((current) => ({
+                ...current,
+                messageType: changeEvent.target.value,
+                subject:
+                  changeEvent.target.value === "alert" ? "" : current.subject,
+              }))}
+              className="mt-1 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal"
+            >
+              <option value="email">Email</option>
+              <option value="alert">Alert</option>
+            </select>
+          </label>
+          {participantMessage.messageType === "email" && (
+            <label className="text-sm font-semibold text-gray-700">
+              Subject
+              <input
+                value={participantMessage.subject}
+                onChange={(changeEvent) => setParticipantMessage((current) => ({
+                  ...current,
+                  subject: changeEvent.target.value,
+                }))}
+                required
+                maxLength={250}
+                className="mt-1 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal"
+              />
+            </label>
+          )}
+        </div>
+        <label className="block text-sm font-semibold text-gray-700">
+          Message
+          <textarea
+            value={participantMessage.body}
+            onChange={(changeEvent) => setParticipantMessage((current) => ({
+              ...current,
+              body: changeEvent.target.value,
+            }))}
+            required
+            maxLength={participantMessage.messageType === "alert" ? 200 : undefined}
+            rows={4}
+            className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 font-normal"
+          />
+        </label>
+        <button
+          type="submit"
+          disabled={isSendingParticipantMessage}
+          className="inline-flex items-center gap-2 rounded-lg bg-[#896542] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          <PaperAirplaneIcon className="size-4" />
+          {isSendingParticipantMessage ? "Sending…" : "Send to participants"}
+        </button>
+      </form>
+    ) : null
+
+  const renderAssignmentResponseFooter = () => {
+    if (!details || currentUserAssignments.length === 0) return null
+
+    const canConfirm = currentUserAssignments.some(
+      (assignment) => assignment.canConfirm,
+    )
+    const hasConfirmedAssignment = currentUserAssignments.some(
+      (assignment) =>
+        !isUnavailableAssignment(assignment.status) &&
+        assignment.substitutionRequest?.status !== "pending" &&
+        isConfirmedAssignment(assignment),
+    )
+    const requestedSubstitute = currentUserAssignments.find(
+      (assignment) => assignment.substitutionRequest?.status === "pending",
+    )
+    const substituteAssignment = currentUserAssignments.find(
+      (assignment) => assignment.canRequestSubstitute,
+    )
+    const declineableAssignment = currentUserAssignments.find(
+      (assignment) =>
+        assignment.canDeclineAssignment || assignment.canDeclineExpectation,
+    )
+    const declinedAssignment = currentUserAssignments.find((assignment) =>
+      isUnavailableAssignment(assignment.status),
+    )
+
+    return (
+      <footer className="sticky bottom-0 z-20 border-t border-gray-200 bg-white/95 px-4 py-3 shadow-[0_-8px_24px_rgba(17,24,39,0.06)] backdrop-blur sm:px-6">
+        <div className="mx-auto w-full max-w-4xl">
+          {substitutionForm ? (
+            <form onSubmit={submitSubstitutionRequest} className="space-y-3">
+              <label className="block text-sm font-semibold text-gray-700">
+                Substitute request
+                <textarea
+                  value={substitutionForm.reason}
+                  onChange={(changeEvent) =>
+                    setSubstitutionForm((current) => ({
+                      ...current,
+                      reason: changeEvent.target.value,
+                    }))
+                  }
+                  maxLength={1000}
+                  rows={2}
+                  placeholder="Add a short note for the ministry and possible substitutes."
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 font-normal text-gray-700"
+                />
+              </label>
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={savingSubstitutionId === substitutionForm.assignmentId}
+                  className="rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {savingSubstitutionId === substitutionForm.assignmentId
+                    ? "Sending…"
+                    : "Send request"}
+                </button>
+                <button
+                  type="button"
+                  disabled={Boolean(savingSubstitutionId)}
+                  onClick={() => setSubstitutionForm(null)}
+                  className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div className="flex w-full gap-2 sm:justify-end">
+              {(canConfirm || hasConfirmedAssignment) && (
+                <button
+                  type="button"
+                  disabled={!canConfirm || savingAssignmentId === "confirm-my-assignments"}
+                  onClick={confirmMyAssignments}
+                  className={`inline-flex min-h-11 w-[calc(50%-0.25rem)] max-w-[300px] flex-1 items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold disabled:cursor-default ${
+                    canConfirm
+                      ? "bg-[#896542] text-white disabled:opacity-50"
+                      : "border border-green-200 bg-green-50 text-green-700"
+                  }`}
+                >
+                  <CheckCircleIcon className="size-5" />
+                  {savingAssignmentId === "confirm-my-assignments"
+                    ? "Confirming…"
+                    : canConfirm
+                      ? "Confirm"
+                      : "Confirmed"}
+                </button>
+              )}
+              {requestedSubstitute ? (
+                <button
+                  type="button"
+                  disabled
+                  className="inline-flex min-h-11 w-[calc(50%-0.25rem)] max-w-[300px] flex-1 items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm font-semibold text-amber-700"
+                >
+                  <ExclamationTriangleIcon className="size-5" />
+                  Substitute requested
+                </button>
+              ) : substituteAssignment ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSubstitutionForm({
+                      assignmentId: substituteAssignment.id,
+                      reason: "",
+                    })
+                  }
+                  className="min-h-11 w-[calc(50%-0.25rem)] max-w-[300px] flex-1 rounded-lg border border-orange-300 px-3 text-sm font-semibold text-orange-700"
+                >
+                  Request Sub
+                </button>
+              ) : declineableAssignment ? (
+                <button
+                  type="button"
+                  disabled={savingSubstitutionId === declineableAssignment.id}
+                  onClick={() => declineAssignment(declineableAssignment.id)}
+                  className="min-h-11 w-[calc(50%-0.25rem)] max-w-[300px] flex-1 rounded-lg border border-gray-300 px-3 text-sm font-semibold text-gray-700 disabled:opacity-50"
+                >
+                  {savingSubstitutionId === declineableAssignment.id
+                    ? "Updating…"
+                    : "Can’t make it"}
+                </button>
+              ) : declinedAssignment ? (
+                <button
+                  type="button"
+                  disabled
+                  className="inline-flex min-h-11 w-[calc(50%-0.25rem)] max-w-[300px] flex-1 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-700"
+                >
+                  <XCircleIcon className="size-5" />
+                  Can’t make it
+                </button>
+              ) : null}
+            </div>
+          )}
+        </div>
+      </footer>
+    )
+  }
 
   return (
     <div
@@ -855,7 +1159,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
       role="dialog"
       aria-modal="true"
       aria-labelledby="ministry-event-details-title"
-      className={`fixed inset-0 z-[90] overflow-y-auto bg-white transition-transform duration-300 ease-out lg:transition-none ${
+      className={`fixed inset-0 z-[90] overflow-x-hidden overflow-y-auto bg-white transition-transform duration-300 ease-out lg:transition-none ${
         isPresented ? "translate-x-0" : "translate-x-full"
       }`}
     >
@@ -881,7 +1185,76 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
         </button>
       </header>
 
-      <main className="mx-auto w-11/12 max-w-3xl py-8 sm:py-12">
+      <main className="mx-auto w-11/12 max-w-4xl py-6 sm:py-9">
+        <MinistryOrdoReference
+          compact
+          eventId={displayedEvent.id}
+          startTime={displayedEvent.start_time}
+        />
+
+        <section className="mt-6">
+          <div className="flex items-start justify-between gap-5">
+            <div className="min-w-0">
+              <h1
+                id="ministry-event-details-title"
+                className="century-font text-3xl leading-tight text-gray-950 sm:text-4xl"
+              >
+                {eventDisplayName}
+              </h1>
+              {eventDescription && (
+                <p className="mt-2 max-w-2xl text-sm leading-relaxed text-gray-600 sm:text-base">
+                  {eventDescription}
+                </p>
+              )}
+            </div>
+            {renderEventActions("hidden shrink-0 sm:flex")}
+          </div>
+          {renderParticipantMessageComposer("hidden sm:block")}
+
+          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 border-y border-gray-100 py-3 text-sm text-gray-700">
+            <span className="inline-flex items-center gap-2">
+              <CalendarDaysIcon className="size-4 text-[#896542]" />
+              {new Intl.DateTimeFormat("en-US", {
+                weekday: "long",
+                month: "long",
+                day: "numeric",
+                year: "numeric",
+              }).format(start)}
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <ClockIcon className="size-4 text-[#896542]" />
+              {new Intl.DateTimeFormat("en-US", {
+                hour: "numeric",
+                minute: "2-digit",
+              }).format(start)}–{new Intl.DateTimeFormat("en-US", {
+                hour: "numeric",
+                minute: "2-digit",
+              }).format(end)}
+            </span>
+            {(displayedEvent.location || details?.rooms?.length > 0) && (
+              <span className="inline-flex items-center gap-2">
+                <MapPinIcon className="size-4 text-[#896542]" />
+                {[
+                  displayedEvent.location,
+                  details?.rooms?.map((room) => room.name).join(", "),
+                ].filter(Boolean).join(" · ")}
+              </span>
+            )}
+          </div>
+        </section>
+
+        {errorMessage && (
+          <p role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {errorMessage}
+          </p>
+        )}
+        {message && (
+          <p role="status" className="mt-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+            {message}
+          </p>
+        )}
+
+        {false && (<div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full bg-[#f4ede6] px-3 py-1 text-xs font-semibold uppercase text-[#896542]">
             {displayedEvent.status}
@@ -1322,27 +1695,37 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
             </div>
           ) : null}
         </section>
+        </div>)}
 
-        <section className="mt-10 border-t border-gray-100 pt-8">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#896542]">
-                Responsibilities
-              </p>
-              <h2 className="mt-2 century-font text-2xl text-gray-950">
-                {details
-                  ? details.responsibilities?.length || 0
-                  : displayedEvent.responsibility_count || 0}{" "}
-                responsibilities
-              </h2>
-              {details?.assignmentVisibilityRestricted && (
-                <p className="mt-2 max-w-xl text-sm text-gray-500">
-                  Ministry assignments are visible only when the active profile belongs to that ministry.
-                </p>
-              )}
-            </div>
-            {eventCanChange && !responsibilityForm && (
-              <div className="flex flex-wrap gap-2">
+        <section className="mt-7">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#896542]">
+              Responsibilities
+            </p>
+            {eventCanChange && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditingResponsibilities((editing) => !editing)
+                  if (isEditingResponsibilities) {
+                    setResponsibilityForm(null)
+                    setMatchingConflictPreview(null)
+                  }
+                }}
+                className="rounded-lg border border-[#d8c7b8] bg-white px-4 py-2 text-xs font-semibold uppercase tracking-wide text-[#6f4f34] hover:bg-[#fbf8f4]"
+              >
+                {isEditingResponsibilities ? "Done" : "Edit"}
+              </button>
+            )}
+          </div>
+          {details?.assignmentVisibilityRestricted && (
+            <p className="mt-2 max-w-xl text-sm text-gray-500">
+              Ministry assignments are visible only when the active profile belongs to that ministry.
+            </p>
+          )}
+
+          {isEditingResponsibilities && eventCanChange && !responsibilityForm && (
+              <div className="mt-4 flex flex-wrap gap-2">
                 {details?.participation_type !== "volunteers" && (
                   <>
                     <button
@@ -1383,8 +1766,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
                   Add responsibility
                 </button>
               </div>
-            )}
-          </div>
+          )}
 
           {matchingConflictPreview && (
             <div className="mt-4 rounded-xl border border-orange-200 bg-orange-50 p-4">
@@ -1745,7 +2127,30 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
             </form>
           )}
 
-          <div className="mt-5 space-y-6">
+          {isLoading && (
+            <div
+              role="status"
+              aria-label="Loading assignments"
+              className="mt-5 space-y-3"
+            >
+              {[0, 1, 2].map((item) => (
+                <div
+                  key={item}
+                  className="animate-pulse rounded-xl border border-gray-100 p-4"
+                >
+                  <div className="h-5 w-2/5 rounded bg-gray-200" />
+                  <div className="mt-3 h-4 w-3/4 rounded bg-gray-100" />
+                  <div className="mt-4 flex gap-2">
+                    <div className="h-9 flex-1 rounded-lg bg-[#f4ede6]" />
+                    <div className="h-9 w-20 rounded-lg bg-gray-100" />
+                  </div>
+                </div>
+              ))}
+              <span className="sr-only">Loading assignments…</span>
+            </div>
+          )}
+
+          {!isLoading && (<div className="mt-5 space-y-6">
             {Object.entries(groupedResponsibilities).map(
               ([ministryId, group]) => (
                 <div key={ministryId}>
@@ -1755,40 +2160,41 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
                   <div className="mt-3 space-y-2">
                     {group.items.map((responsibility) => {
                       const canManage = Boolean(responsibility.canManage)
+                      const isAttendanceRoster = isExpectedAttendanceMode(
+                        responsibility.assignmentMode,
+                      )
+                      const visibleAssignments = (responsibility.assignments || []).filter(
+                        (assignment) => assignment.status !== "replaced",
+                      ).sort((first, second) =>
+                        assignmentResponseOrder(first) - assignmentResponseOrder(second) ||
+                        `${first.lastName || ""} ${first.firstName || ""}`.localeCompare(
+                          `${second.lastName || ""} ${second.firstName || ""}`,
+                        ),
+                      )
                       return (
                         <article
                           key={responsibility.id}
-                          className="flex flex-col gap-3 rounded-xl border border-gray-100 p-4 sm:flex-row sm:items-center"
+                          className="flex flex-col gap-3 border-t border-gray-100 py-4 first:border-t-0 sm:flex-row sm:items-start"
                         >
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
                               <p className="font-semibold text-gray-900">
-                                {responsibility.name}
+                                {isAttendanceRoster ? "Attendance" : responsibility.name}
                               </p>
-                              {!responsibility.summaryOnly &&
+                              {!isAttendanceRoster &&
+                                !responsibility.summaryOnly &&
                                 !responsibility.templateResponsibilityId && (
                                 <span className="rounded-full bg-[#f4ede6] px-2 py-1 text-[10px] font-semibold uppercase text-[#896542]">
                                   Event only
                                 </span>
                               )}
-                              {isExpectedAttendanceMode(responsibility.assignmentMode) && (
-                                <span className="rounded-full bg-green-100 px-2 py-1 text-[10px] font-semibold uppercase text-green-800">
-                                  Expected members
-                                </span>
-                              )}
                             </div>
-                            {!responsibility.summaryOnly && (
+                            {!isAttendanceRoster && !responsibility.summaryOnly && (
                             <p className="mt-1 text-sm text-gray-500">
-                              {isExpectedAttendanceMode(responsibility.assignmentMode)
-                                ? `${responsibility.assignedQuantity} available serving member${responsibility.assignedQuantity === 1 ? "" : "s"} expected`
-                                : `${responsibility.responsibilityType.replaceAll("_", " ")} · ${responsibility.assignedQuantity}/${responsibility.unlimitedCapacity ? "Unlimited" : responsibility.quantityNeeded} assigned`}
+                              {`${responsibility.responsibilityType.replaceAll("_", " ")} · ${responsibility.assignedQuantity}/${responsibility.unlimitedCapacity ? "Unlimited" : responsibility.quantityNeeded} assigned`}
                               {responsibility.requiredLevelName
                                 ? ` · Requires ${responsibility.requiredLevelName} or higher`
                                 : ""}
-                              {` · Duty: ${formatDutyTime(
-                                displayedEvent.start_time,
-                                responsibility.relativeStartMinutes,
-                              )}`}
                             </p>
                             )}
                             {responsibility.instructions && (
@@ -1796,22 +2202,51 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
                                 {responsibility.instructions}
                               </p>
                             )}
-                            {responsibility.assignments?.length > 0 && (
-                              <div className="mt-3 space-y-2">
-                                {responsibility.assignments.map(
-                                  (assignment) => (
+                            {visibleAssignments.length > 0 && (
+                              <div className="mt-3 border-b border-gray-100">
+                                {visibleAssignments.map(
+                                  (assignment) => {
+                                    const isUnavailable = isUnavailableAssignment(
+                                      assignment.status,
+                                    )
+                                    const isSubstitutePending =
+                                      !isUnavailable &&
+                                      assignment.substitutionRequest?.status === "pending"
+                                    const isConfirmed =
+                                      !isUnavailable &&
+                                      !isSubstitutePending &&
+                                      isConfirmedAssignment(assignment)
+                                    return (
                                     <div
                                       key={assignment.id}
-                                      className="flex flex-wrap items-center gap-2 rounded-xl bg-[#f4ede6] px-3 py-2 text-xs text-[#6f4f34]"
+                                      className={`flex flex-wrap items-center gap-2 border-t border-gray-100 py-2.5 text-sm ${
+                                        isUnavailable ? "text-red-700" : "text-gray-800"
+                                      }`}
                                     >
+                                      {isUnavailable ? (
+                                        <XCircleIcon
+                                          className="size-5 shrink-0 text-red-600"
+                                          aria-label="Can’t make it"
+                                        />
+                                      ) : isSubstitutePending ? (
+                                        <ExclamationTriangleIcon
+                                          className="size-5 shrink-0 text-amber-500"
+                                          aria-label="Substitute requested"
+                                        />
+                                      ) : (
+                                        <CheckCircleIcon
+                                          className={`size-5 shrink-0 ${
+                                            isConfirmed ? "text-green-600" : "text-gray-300"
+                                          }`}
+                                          aria-label={isConfirmed ? "Confirmed" : "Not confirmed"}
+                                        />
+                                      )}
                                       <span className="font-semibold">
                                         {assignment.firstName} {assignment.lastName}
                                       </span>
-                                      {assignment.status && (
-                                        <span>
-                                          · {assignment.confirmationOverdueAt && ["pending", "assigned"].includes(assignment.status)
-                                            ? "confirmation overdue"
-                                            : assignment.status.replaceAll("_", " ")}
+                                      {isUnavailable && (
+                                        <span className="text-xs font-semibold text-red-600">
+                                          Can’t make it
                                         </span>
                                       )}
                                       {assignment.isVolunteer && canManage && (
@@ -1824,37 +2259,8 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
                                           Schedule conflict
                                         </span>
                                       )}
-                                      {(assignment.canRequestSubstitute || assignment.canRequestAdminChange) &&
-                                        substitutionForm?.assignmentId !== assignment.id && (
-                                          <button
-                                            type="button"
-                                            onClick={() =>
-                                              setSubstitutionForm({
-                                                assignmentId: assignment.id,
-                                                reason: "",
-                                              })
-                                            }
-                                            className="ml-auto rounded-lg border border-orange-200 bg-white px-3 py-2 font-semibold text-orange-700"
-                                          >
-                                            {assignment.canRequestSubstitute
-                                              ? "Request substitute"
-                                              : "Request change"}
-                                          </button>
-                                        )}
-                                      {assignment.canDeclineExpectation && (
-                                        <button
-                                          type="button"
-                                          disabled={savingSubstitutionId === assignment.id}
-                                          onClick={() => declineExpectedAttendance(assignment.id)}
-                                          className="ml-auto rounded-lg border border-gray-200 bg-white px-3 py-2 font-semibold text-gray-700 disabled:opacity-50"
-                                        >
-                                          {savingSubstitutionId === assignment.id
-                                            ? "Updating…"
-                                            : "Can’t attend"}
-                                        </button>
-                                      )}
-                                      {assignment.substitutionRequest?.status === "pending" && (
-                                        <span className="rounded-full bg-orange-100 px-2 py-1 font-semibold text-orange-700">
+                                      {isSubstitutePending && (
+                                        <span className="text-xs font-semibold text-amber-700">
                                           {responsibility.substitutionAllowed
                                             ? "Substitute requested"
                                             : "Admin change requested"}
@@ -1864,50 +2270,6 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
                                         <span className="w-full text-gray-600">
                                           Comment: {assignment.substitutionRequest.reason}
                                         </span>
-                                      )}
-                                      {substitutionForm?.assignmentId === assignment.id && (
-                                        <form
-                                          onSubmit={submitSubstitutionRequest}
-                                          className="w-full rounded-xl border border-orange-200 bg-white p-3"
-                                        >
-                                          <label className="block font-semibold text-gray-700">
-                                            Comment
-                                            <textarea
-                                              value={substitutionForm.reason}
-                                              onChange={(event) =>
-                                                setSubstitutionForm((current) => ({
-                                                  ...current,
-                                                  reason: event.target.value,
-                                                }))
-                                              }
-                                              maxLength={1000}
-                                              rows={3}
-                                              placeholder={assignment.canRequestSubstitute
-                                                ? "Tell eligible members and the ministry admin what they need to know."
-                                                : "Tell the ministry admin what they need to know."}
-                                              className="mt-2 w-full rounded-lg border border-gray-200 px-3 py-2 font-normal text-gray-700"
-                                            />
-                                          </label>
-                                          <div className="mt-3 flex gap-2">
-                                            <button
-                                              type="submit"
-                                              disabled={savingSubstitutionId === assignment.id}
-                                              className="rounded-lg bg-[#896542] px-3 py-2 font-semibold text-white disabled:opacity-50"
-                                            >
-                                              {savingSubstitutionId === assignment.id
-                                                ? "Sending…"
-                                                : "Send request"}
-                                            </button>
-                                            <button
-                                              type="button"
-                                              disabled={savingSubstitutionId === assignment.id}
-                                              onClick={() => setSubstitutionForm(null)}
-                                              className="rounded-lg border border-gray-200 px-3 py-2 font-semibold text-gray-600"
-                                            >
-                                              Cancel
-                                            </button>
-                                          </div>
-                                        </form>
                                       )}
                                       {assignment.serviceOutcome && (
                                         <span className="rounded-full bg-white px-2 py-1">
@@ -1935,11 +2297,13 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
                                         </select>
                                       )}
                                     </div>
-                                  ),
+                                    )
+                                  },
                                 )}
                               </div>
                             )}
                             {canManage &&
+                              isEditingResponsibilities &&
                               eventCanChange &&
                               !responsibility.isPublicAssignment &&
                               responsibility.status !== "cancelled" && (
@@ -2012,6 +2376,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
                           </div>
                           <div className="flex items-center gap-2 self-start sm:self-auto">
                             {canManage &&
+                              isEditingResponsibilities &&
                               eventCanChange &&
                               responsibility.status !== "cancelled" && (
                                 <>
@@ -2040,9 +2405,11 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
                                   </button>
                                 </>
                               )}
-                            <span className="rounded-full bg-gray-100 px-2 py-1 text-xs uppercase text-gray-500">
-                              {responsibility.status}
-                            </span>
+                            {isEditingResponsibilities && (
+                              <span className="rounded-full bg-gray-100 px-2 py-1 text-xs uppercase text-gray-500">
+                                {responsibility.status}
+                              </span>
+                            )}
                           </div>
                         </article>
                       )
@@ -2051,9 +2418,15 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
                 </div>
               ),
             )}
-          </div>
+          </div>)}
         </section>
+
+        <div className="mt-8 border-t border-gray-100 pt-5 sm:hidden">
+          {renderEventActions()}
+          {renderParticipantMessageComposer()}
+        </div>
       </main>
+      {renderAssignmentResponseFooter()}
     </div>
   )
 }

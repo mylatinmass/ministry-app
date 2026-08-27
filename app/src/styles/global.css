@@ -218,6 +218,8 @@ body select.h-12 {
 
 .ministry-scroll-region {
   -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+  overflow-x: hidden;
   overscroll-behavior-y: contain;
   touch-action: pan-y;
 }

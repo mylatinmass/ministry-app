@@ -97,34 +97,47 @@ const listMessages = async (client: any, context: any) => {
     manageableMembers(client, ministries),
     client.query(
       `
-        SELECT recipient.id AS recipient_id, recipient.read_at,
-          recipient.delivery_status, recipient.delivered_at,
-          message.id, message.audience_scope, message.channel,
-          message.subject, message.body, message.created_at,
-          ministry.id AS ministry_id, ministry.name AS ministry_name,
-          sender.first_name AS sender_first_name,
-          sender.last_name AS sender_last_name,
-          sender.username AS sender_username
-        FROM ministry_message_recipients recipient
-        JOIN ministry_messages message ON message.id = recipient.message_id
-        LEFT JOIN ministries ministry ON ministry.id = message.ministry_id
-        JOIN ministry_accounts sender ON sender.id = message.created_by_profile_id
-        WHERE recipient.profile_user_id = $1
-          AND recipient.delivery_account_user_id = $2
-        ORDER BY recipient.read_at IS NULL DESC, message.created_at DESC
+        SELECT *
+        FROM (
+          SELECT DISTINCT ON (message.id)
+            recipient.id AS recipient_id,
+            CASE WHEN EXISTS (
+              SELECT 1
+              FROM ministry_message_recipients unread_recipient
+              WHERE unread_recipient.message_id = message.id
+                AND unread_recipient.delivery_account_user_id = $1
+                AND unread_recipient.read_at IS NULL
+            ) THEN NULL ELSE recipient.read_at END AS read_at,
+            recipient.delivery_status, recipient.delivered_at,
+            message.id, message.audience_scope, message.channel,
+            message.subject, message.body, message.created_at, message.event_id,
+            ministry.id AS ministry_id, ministry.name AS ministry_name,
+            event.title AS event_title,
+            sender.first_name AS sender_first_name,
+            sender.last_name AS sender_last_name,
+            sender.username AS sender_username
+          FROM ministry_message_recipients recipient
+          JOIN ministry_messages message ON message.id = recipient.message_id
+          LEFT JOIN ministries ministry ON ministry.id = message.ministry_id
+          LEFT JOIN events event ON event.id = message.event_id
+          JOIN ministry_accounts sender ON sender.id = message.created_by_profile_id
+          WHERE recipient.delivery_account_user_id = $1
+          ORDER BY message.id, recipient.is_delivery_target DESC,
+            recipient.created_at
+        ) account_inbox
+        ORDER BY read_at IS NULL DESC, created_at DESC
         LIMIT 100
       `,
-      [context.user.id, context.actor.id],
+      [context.actor.id],
     ),
     client.query(
       `
-        SELECT count(*)::INT AS unread_count
+        SELECT count(DISTINCT message_id)::INT AS unread_count
         FROM ministry_message_recipients
-        WHERE profile_user_id = $1
-          AND delivery_account_user_id = $2
+        WHERE delivery_account_user_id = $1
           AND read_at IS NULL
       `,
-      [context.user.id, context.actor.id],
+      [context.actor.id],
     ),
     client.query(
       `
@@ -209,6 +222,8 @@ const listMessages = async (client: any, context: any) => {
     body: row.body,
     ministryId: row.ministry_id,
     ministryName: row.ministry_name,
+    eventId: row.event_id,
+    eventTitle: row.event_title,
     senderName: displayName(row, "sender"),
     read: Boolean(row.read_at),
     deliveryStatus: row.delivery_status,
@@ -330,16 +345,6 @@ const createMessage = async (client: any, context: any, body: any) => {
           AND (
             $3::BOOL
             OR event.ministry_id = ANY($2::UUID[])
-            OR EXISTS (
-              SELECT 1 FROM event_ministries event_ministry
-              WHERE event_ministry.event_id = event.id
-                AND event_ministry.ministry_id = ANY($2::UUID[])
-            )
-            OR EXISTS (
-              SELECT 1 FROM event_responsibilities responsibility
-              WHERE responsibility.event_id = event.id
-                AND COALESCE(responsibility.ministry_id, event.ministry_id) = ANY($2::UUID[])
-            )
           )
         LIMIT 1
       `,
@@ -358,7 +363,9 @@ const createMessage = async (client: any, context: any, body: any) => {
       `,
       [eventId],
     )
-    ministryIds = eventMinistries.rows.map((row: any) => row.ministry_id)
+    ministryIds = eventMinistries.rows
+      .map((row: any) => row.ministry_id)
+      .filter(Boolean)
   }
   if (!messageBody) return json({ message: "Enter a message" }, 400)
   if (messageType === "alert" && messageBody.length > 200) {
@@ -389,7 +396,10 @@ const createMessage = async (client: any, context: any, body: any) => {
       SELECT 1 FROM responsibility_assignments assignment
       WHERE assignment.event_id = $1
         AND assignment.user_id = member.id
-        AND assignment.status IN ('pending', 'assigned', 'confirmed', 'change_requested', 'completed')
+        AND assignment.status IN (
+          'interested', 'pending', 'assigned', 'confirmed',
+          'change_requested', 'completed'
+        )
     )`
     recipientParameters = [eventId]
   } else if (audience === "groups") {
@@ -457,13 +467,18 @@ const createMessage = async (client: any, context: any, body: any) => {
         [messageId, groupId],
       )
     }
-    const recipients = await client.query(
+    const linkedRecipients = await client.query(
       `
         SELECT eligible.profile_user_id, eligible.delivery_account_user_id,
           row_number() OVER (
             PARTITION BY eligible.delivery_account_user_id
             ORDER BY eligible.is_managed_profile, eligible.profile_user_id
-          ) = 1 AS is_delivery_target
+          ) = 1 AS is_delivery_target,
+          NULL::STRING AS external_name,
+          NULL::STRING AS external_email,
+          NULL::STRING AS external_phone,
+          false AS external_email_enabled,
+          NULL::TIMESTAMPTZ AS external_sms_consent_at
         FROM (
           SELECT DISTINCT member.id AS profile_user_id,
             COALESCE(managed.guardian_user_id, member.id) AS delivery_account_user_id,
@@ -478,6 +493,45 @@ const createMessage = async (client: any, context: any, body: any) => {
       `,
       recipientParameters,
     )
+    const externalRecipients = audience === "event_participants"
+      ? await client.query(
+          `
+            SELECT NULL::UUID AS profile_user_id,
+              NULL::UUID AS delivery_account_user_id,
+              true AS is_delivery_target,
+              max(NULLIF(btrim(assignment.volunteer_name), '')) AS external_name,
+              max(NULLIF(btrim(assignment.volunteer_email), '')) AS external_email,
+              max(NULLIF(btrim(assignment.volunteer_phone), '')) AS external_phone,
+              bool_or(
+                assignment.notify_email
+                OR assignment.volunteer_email_consent_at IS NOT NULL
+              ) AS external_email_enabled,
+              max(assignment.volunteer_sms_consent_at) AS external_sms_consent_at
+            FROM responsibility_assignments assignment
+            WHERE assignment.event_id = $1
+              AND assignment.user_id IS NULL
+              AND assignment.status IN (
+                'interested', 'pending', 'assigned', 'confirmed',
+                'change_requested', 'completed'
+              )
+              AND (
+                NULLIF(btrim(assignment.volunteer_email), '') IS NOT NULL
+                OR NULLIF(btrim(assignment.volunteer_phone), '') IS NOT NULL
+              )
+            GROUP BY lower(COALESCE(
+              NULLIF(btrim(assignment.volunteer_email), ''),
+              NULLIF(btrim(assignment.volunteer_phone), '')
+            ))
+          `,
+          [eventId],
+        )
+      : { rows: [], rowCount: 0 }
+    const recipients = {
+      rows: [...linkedRecipients.rows, ...externalRecipients.rows],
+      rowCount:
+        Number(linkedRecipients.rowCount || 0) +
+        Number(externalRecipients.rowCount || 0),
+    }
     if (!recipients.rowCount) {
       throw Object.assign(new Error("The selected audience has no active recipients"), {
         status: 400,
@@ -488,8 +542,10 @@ const createMessage = async (client: any, context: any, body: any) => {
         `
           INSERT INTO ministry_message_recipients (
             message_id, profile_user_id, delivery_account_user_id,
-            is_delivery_target, delivery_status, last_error
-          ) VALUES ($1, $2, $3, $4, $5, $6)
+            is_delivery_target, delivery_status, last_error,
+            external_name, external_email, external_phone,
+            external_email_enabled, external_sms_consent_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
           ON CONFLICT (
             message_id, profile_user_id, delivery_account_user_id
           ) DO NOTHING
@@ -502,6 +558,11 @@ const createMessage = async (client: any, context: any, body: any) => {
           recipient.is_delivery_target,
           recipient.is_delivery_target ? "pending" : "skipped",
           recipient.is_delivery_target ? null : "delivery_grouped_with_account",
+          recipient.external_name,
+          recipient.external_email,
+          recipient.external_phone,
+          Boolean(recipient.external_email_enabled),
+          recipient.external_sms_consent_at,
         ],
       )
       const recipientId = recipientResult.rows[0]?.id
@@ -536,8 +597,14 @@ const createMessage = async (client: any, context: any, body: any) => {
     })
     await client.query("COMMIT")
     committed = true
-    const processedDeliveryCount =
-      await processMinistryMessageDeliveries(messageId)
+    let processedDeliveryCount = 0
+    let deliveryProcessingDeferred = false
+    try {
+      processedDeliveryCount = await processMinistryMessageDeliveries(messageId)
+    } catch (error) {
+      deliveryProcessingDeferred = true
+      console.error("Immediate Ministry message delivery was deferred:", error)
+    }
     const deliverySummaryResult = await client.query(
       `
         SELECT
@@ -560,6 +627,7 @@ const createMessage = async (client: any, context: any, body: any) => {
       id: messageId,
       recipientCount: recipients.rowCount || 0,
       processedDeliveryCount,
+      deliveryProcessingDeferred,
       deliverySummary: {
         acceptedCount: Number(deliverySummary.accepted_count || 0),
         skippedCount: Number(deliverySummary.skipped_count || 0),
@@ -596,23 +664,21 @@ export const handleMessages = async (request: Request) => {
         `
           UPDATE ministry_message_recipients
           SET read_at = now(), updated_at = now()
-          WHERE profile_user_id = $1
-            AND delivery_account_user_id = $2
+          WHERE delivery_account_user_id = $1
             AND read_at IS NULL
         `,
-        [context.user.id, context.actor.id],
+        [context.actor.id],
       )
     } else if (body.action === "mark_read" && body.messageId) {
       await client.query(
         `
           UPDATE ministry_message_recipients
           SET read_at = now(), updated_at = now()
-          WHERE profile_user_id = $1
+          WHERE delivery_account_user_id = $1
             AND message_id = $2
-            AND delivery_account_user_id = $3
             AND read_at IS NULL
         `,
-        [context.user.id, body.messageId, context.actor.id],
+        [context.actor.id, body.messageId],
       )
     } else {
       return json({ message: "Unknown message action" }, 400)
@@ -674,10 +740,18 @@ const claimDueDeliveries = async (messageId: string | null = null) => {
       WITH due AS (
         SELECT delivery.id
         FROM ministry_message_deliveries delivery
-        WHERE delivery.status IN ('pending', 'retry')
-          AND (
-            delivery.next_attempt_at IS NULL
-            OR delivery.next_attempt_at <= now()
+        WHERE (
+            (
+              delivery.status IN ('pending', 'retry')
+              AND (
+                delivery.next_attempt_at IS NULL
+                OR delivery.next_attempt_at <= now()
+              )
+            )
+            OR (
+              delivery.status = 'failed'
+              AND delivery.updated_at <= now() - INTERVAL '24 hours'
+            )
           )
           AND (
             $1::UUID IS NULL
@@ -694,7 +768,12 @@ const claimDueDeliveries = async (messageId: string | null = null) => {
       )
       UPDATE ministry_message_deliveries delivery
       SET status = 'processing', claimed_at = now(),
-          attempt_count = attempt_count + 1, updated_at = now()
+          attempt_count = CASE
+            WHEN delivery.status = 'failed' THEN 1
+            ELSE attempt_count + 1
+          END,
+          next_attempt_at = NULL,
+          updated_at = now()
       FROM due
       WHERE delivery.id = due.id
       RETURNING delivery.*
@@ -786,19 +865,26 @@ export const processMinistryMessageDeliveries = async (
   const result = await getPool().query(
     `
       SELECT delivery.*, recipient.delivery_account_user_id,
+        recipient.external_email, recipient.external_phone,
+        recipient.external_email_enabled, recipient.external_sms_consent_at,
         message.channel AS message_channel, message.subject, message.body,
-        account.email, account.notification_email_enabled,
+        COALESCE(account.email, recipient.external_email) AS email,
+        account.notification_email_enabled,
         account.notification_telegram_enabled,
         account.notification_sms_enabled,
         account.notification_push_enabled,
         account.notification_announcements_enabled,
         account.sms_transactional_consent_at,
-        COALESCE(NULLIF(account.phone, ''), account.telephone) AS recipient_phone,
+        COALESCE(
+          NULLIF(account.phone, ''), account.telephone,
+          recipient.external_phone
+        ) AS recipient_phone,
         telegram.chat_id
       FROM ministry_message_deliveries delivery
       JOIN ministry_message_recipients recipient ON recipient.id=delivery.recipient_id
       JOIN ministry_messages message ON message.id = recipient.message_id
-      JOIN ministry_accounts account ON account.id = recipient.delivery_account_user_id
+      LEFT JOIN ministry_accounts account
+        ON account.id = recipient.delivery_account_user_id
       LEFT JOIN telegram_connections telegram
         ON telegram.account_user_id = account.id
        AND telegram.status = 'active'
@@ -809,14 +895,24 @@ export const processMinistryMessageDeliveries = async (
   const origin = (process.env.SITE_URL || "https://ministry.mylatinmass.com")
     .replace(/\/$/, "")
   for (const delivery of result.rows) {
-    const channelEnabled = delivery.channel === "email"
-      ? delivery.notification_email_enabled
-      : delivery.channel === "telegram"
-        ? delivery.notification_telegram_enabled
+    const externalRecipient = !delivery.delivery_account_user_id
+    const channelEnabled = externalRecipient
+      ? delivery.channel === "email"
+        ? delivery.external_email_enabled && Boolean(delivery.email)
         : delivery.channel === "sms"
-          ? delivery.notification_sms_enabled
-          : delivery.notification_push_enabled
-    if (!delivery.notification_announcements_enabled || !channelEnabled) {
+          ? Boolean(delivery.external_sms_consent_at && delivery.recipient_phone)
+          : false
+      : delivery.channel === "email"
+        ? delivery.notification_email_enabled
+        : delivery.channel === "telegram"
+          ? delivery.notification_telegram_enabled
+          : delivery.channel === "sms"
+            ? delivery.notification_sms_enabled
+            : delivery.notification_push_enabled
+    if (
+      (!externalRecipient && !delivery.notification_announcements_enabled) ||
+      !channelEnabled
+    ) {
       await finishDelivery(
         delivery,
         "skipped",
@@ -833,7 +929,7 @@ export const processMinistryMessageDeliveries = async (
       const attempts = await sendReliableEmail({
         to: delivery.email,
         subject: delivery.subject,
-        text: `${delivery.body}\n\nOpen Ministry App: ${origin}/`,
+        text: `${delivery.body}\n\nOpen Messages: ${origin}/?section=messages`,
       })
       await finishAttempts(delivery, attempts)
       continue
@@ -852,7 +948,7 @@ export const processMinistryMessageDeliveries = async (
         const response = await sendTelegramMessage(
           delivery.chat_id,
           delivery.body,
-          `${origin}/`,
+          `${origin}/?section=messages`,
         )
         await finishDelivery(
           delivery,
@@ -877,7 +973,7 @@ export const processMinistryMessageDeliveries = async (
         accountUserId: delivery.delivery_account_user_id,
         title: "Ministry Alert",
         body: delivery.body,
-        url: "/",
+        url: "/?section=messages",
         tag: `ministry-message-${delivery.recipient_id}`,
       })
       await finishAttempts(delivery, attempts)
@@ -889,11 +985,15 @@ export const processMinistryMessageDeliveries = async (
         kind: "announcement_message",
         notification_category: "announcements",
         privacy_safe_message: delivery.body,
-        notification_url: "/",
-        subject_user_id: delivery.delivery_account_user_id,
-        recipient_user_id: delivery.delivery_account_user_id,
+        notification_url: "/?section=messages",
+        subject_user_id:
+          delivery.delivery_account_user_id || `external:${delivery.recipient_id}`,
+        recipient_user_id:
+          delivery.delivery_account_user_id || `external:${delivery.recipient_id}`,
         recipient_phone: delivery.recipient_phone,
-        sms_transactional_consent_at: delivery.sms_transactional_consent_at,
+        sms_transactional_consent_at:
+          delivery.sms_transactional_consent_at ||
+          delivery.external_sms_consent_at,
       })
       await finishDelivery(delivery, "sent", "klaviyo", null, String(response.status))
     } catch (error: any) {

@@ -11,6 +11,7 @@ import {
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 import MinistryPendingInvitations from "./MinistryPendingInvitations"
+import MinistrySectionActions from "./MinistrySectionActions"
 
 const ministryRoleLabels = {
   owner: "Owner",
@@ -79,6 +80,7 @@ const MinistryGlobalMembers = () => {
   const [query, setQuery] = React.useState("")
   const [selectedMemberId, setSelectedMemberId] = React.useState(null)
   const [inviteOpen, setInviteOpen] = React.useState(false)
+  const [memberView, setMemberView] = React.useState("all")
   const [inviteEmail, setInviteEmail] = React.useState("")
   const [inviteMinistryIds, setInviteMinistryIds] = React.useState([])
   const [addMinistryId, setAddMinistryId] = React.useState("")
@@ -242,6 +244,39 @@ const MinistryGlobalMembers = () => {
       {errorMessage || message}
     </div>
   )
+  const memberActions = [
+    {
+      id: "all",
+      label: "All Members",
+      icon: UsersIcon,
+      active: memberView === "all" && !selectedMember,
+      onClick: () => {
+        setSelectedMemberId(null)
+        setMemberView("all")
+      },
+    },
+    {
+      id: "pending",
+      label: "Pending Members",
+      icon: ShieldCheckIcon,
+      active: memberView === "pending" && !selectedMember,
+      onClick: () => {
+        setSelectedMemberId(null)
+        setMemberView("pending")
+      },
+    },
+    {
+      id: "add",
+      label: "Add New Member",
+      icon: EnvelopeIcon,
+      active: inviteOpen && !selectedMember,
+      onClick: () => {
+        setSelectedMemberId(null)
+        setMemberView("all")
+        setInviteOpen((current) => !current)
+      },
+    },
+  ]
 
   if (selectedMember) {
     const existingMinistryIds = new Set(
@@ -253,7 +288,8 @@ const MinistryGlobalMembers = () => {
     const isCurrentUser = selectedMember.id === data.currentUserId
 
     return (
-      <div className="space-y-5">
+      <div className="space-y-5 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] lg:pb-0">
+        <MinistrySectionActions label="Member actions" actions={memberActions} />
         {notice}
         <button
           type="button"
@@ -600,8 +636,13 @@ const MinistryGlobalMembers = () => {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] lg:pb-0">
+      <MinistrySectionActions
+        label="Member actions"
+        actions={memberActions}
+      />
       {notice}
+      {memberView === "all" && (
       <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
@@ -613,14 +654,6 @@ const MinistryGlobalMembers = () => {
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setInviteOpen((current) => !current)}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#896542] px-4 py-2 text-sm font-semibold text-white"
-          >
-            <EnvelopeIcon className="size-4" />
-            Invite new member
-          </button>
         </div>
 
         {inviteOpen && (
@@ -678,7 +711,9 @@ const MinistryGlobalMembers = () => {
           />
         </label>
       </section>
+      )}
 
+      {memberView === "pending" && (
       <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
         <div className="mb-4">
           <h2 className="century-font text-2xl text-gray-950">
@@ -723,7 +758,9 @@ const MinistryGlobalMembers = () => {
           )}
         </div>
       </section>
+      )}
 
+      {memberView === "pending" && (
       <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
         <div className="mb-4">
           <h2 className="century-font text-2xl text-gray-950">
@@ -741,7 +778,9 @@ const MinistryGlobalMembers = () => {
           disabled={isSaving}
         />
       </section>
+      )}
 
+      {memberView === "all" && (
       <section className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="hidden grid-cols-[1.2fr_0.8fr_1.5fr_2rem] gap-4 border-b border-gray-100 bg-gray-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-400 md:grid">
           <span>Member</span>
@@ -790,6 +829,7 @@ const MinistryGlobalMembers = () => {
           )}
         </div>
       </section>
+      )}
     </div>
   )
 }

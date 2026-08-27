@@ -468,7 +468,10 @@ const handler = async (event) => {
 
     return jsonResponse(200, {
       actor: toPublicMinistryUser(context.actor),
-      user: toPublicMinistryUser(user),
+      user: {
+        ...toPublicMinistryUser(user),
+        appearanceTheme: context.actor.appearance_theme || "light",
+      },
       isManagedProfile: context.isManagedProfile,
       familyProfiles: familyResult.rows.map((profile) => ({
         id: profile.id,

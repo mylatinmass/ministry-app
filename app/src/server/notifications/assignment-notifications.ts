@@ -1304,7 +1304,8 @@ export const queueAssignmentReminderAlert = async (reminderId: string) => {
         recipient.last_name AS recipient_last_name,
         reminder.scheduled_for,
         reminder.event_id, reminder.assignment_id, event.title AS event_title,
-        event.start_time, event.end_time, event.updated_at AS event_updated_at,
+        event.start_time, event.end_time,
+        event.updated_at::STRING AS event_updated_at,
         event.start_time + COALESCE(responsibility.relative_start_minutes, 0)
           * INTERVAL '1 minute' AS duty_start_time,
         event.location, responsibility.name AS responsibility_name,
@@ -1328,7 +1329,8 @@ export const queueAssignmentReminderAlert = async (reminderId: string) => {
       WHERE reminder.id = $1
         AND assignment.status IN ('pending', 'assigned', 'confirmed', 'change_requested')
         AND event.status = 'published'
-        AND event.updated_at = reminder.event_updated_at
+        AND date_trunc('milliseconds', event.updated_at) =
+          date_trunc('milliseconds', reminder.event_updated_at)
       LIMIT 1
     `,
     [reminderId],
@@ -1402,7 +1404,7 @@ export const queueAssignmentReminderAlert = async (reminderId: string) => {
     }),
     eventId: reminder.event_id,
     ministryId: reminder.ministry_id,
-    dedupeKey: `${isDayBefore ? "day-before-schedule" : "final-schedule"}:${reminder.recipient_user_id}:${reminder.event_id}:${new Date(reminder.event_updated_at).toISOString()}`,
+    dedupeKey: `${isDayBefore ? "day-before-schedule" : "final-schedule"}:${reminder.recipient_user_id}:${reminder.event_id}:${reminder.event_updated_at}`,
     metadata: {
       notificationCategory: "reminders",
       notificationUrl: `/?event=${reminder.event_id}`,

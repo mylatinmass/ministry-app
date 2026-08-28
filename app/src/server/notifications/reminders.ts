@@ -42,7 +42,7 @@ const reconcileReminders = async () => {
           * INTERVAL '1 minute' AS duty_start_time,
         e.published_at,
         e.confirmation_deadline_at,
-        e.updated_at AS event_updated_at,
+        e.updated_at::STRING AS event_updated_at,
         COALESCE(recipient.notification_lead_minutes, 60) AS lead_minutes
       FROM responsibility_assignments ra
       JOIN events e ON e.id = ra.event_id
@@ -94,7 +94,7 @@ const reconcileReminders = async () => {
           candidate.event_id,
           candidate.recipient_user_id,
           schedule.type,
-          new Date(candidate.event_updated_at).toISOString(),
+          candidate.event_updated_at,
           schedule.at.toISOString(),
         )
         await client.query(

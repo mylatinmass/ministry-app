@@ -648,6 +648,8 @@ assert.doesNotMatch(
 )
 assert.match(reminders, /AS duty_start_time/)
 assert.match(reminders, /dutyStart\.getTime\(\) - Number\(candidate\.lead_minutes\)/)
+assert.match(reminders, /e\.updated_at::STRING AS event_updated_at/)
+assert.doesNotMatch(reminders, /new Date\(candidate\.event_updated_at\)\.toISOString\(\)/)
 assert.match(substitutionMigration, /assignment_substitution_offers/)
 assert.match(substitutionMigration, /'replaced'/)
 assert.match(substitutionScheduling, /minimum_level_rank/)
@@ -1023,6 +1025,15 @@ assert.match(completedNotificationsMigration, /notification_schedule_changes_ena
 assert.match(completedNotificationsMigration, /sms_transactional_consent_at/)
 assert.match(completedNotificationsMigration, /CREATE TABLE IF NOT EXISTS ministry_alert_deliveries/)
 assert.match(assignmentNotifications, /processNotificationDigests/)
+assert.match(assignmentNotifications, /event\.updated_at::STRING AS event_updated_at/)
+assert.match(
+  assignmentNotifications,
+  /date_trunc\('milliseconds', event\.updated_at\)[\s\S]*date_trunc\('milliseconds', reminder\.event_updated_at\)/,
+)
+assert.doesNotMatch(
+  assignmentNotifications,
+  /event\.updated_at = reminder\.event_updated_at/,
+)
 assert.match(assignmentNotifications, /buildDigest/)
 assert.match(assignmentNotifications, /sendEventScheduleNotifications/)
 assert.match(assignmentNotifications, /sendAccountPush/)

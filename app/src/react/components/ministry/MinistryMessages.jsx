@@ -4,6 +4,7 @@ import {
   CheckCircleIcon,
   ChevronDownIcon,
   EnvelopeIcon,
+  FunnelIcon,
   PaperAirplaneIcon,
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
@@ -18,15 +19,6 @@ const messageDate = (value) =>
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(value))
-
-const deliveryLabel = (message) => {
-  const parts = [`${message.recipientCount} recipient${message.recipientCount === 1 ? "" : "s"}`]
-  if (message.sentCount) parts.push(`${message.sentCount} delivered`)
-  if (message.pendingCount) parts.push(`${message.pendingCount} pending`)
-  if (message.skippedCount) parts.push(`${message.skippedCount} not enabled`)
-  if (message.failedCount) parts.push(`${message.failedCount} failed`)
-  return parts.join(" · ")
-}
 
 const messageTypeLabel = (value) => value === "alert" ? "Alert" : "Email"
 
@@ -46,7 +38,6 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
   const [showComposer, setShowComposer] = React.useState(false)
   const [receivedFilter, setReceivedFilter] = React.useState("all")
   const [expandedReceivedId, setExpandedReceivedId] = React.useState("")
-  const [expandedSentId, setExpandedSentId] = React.useState("")
   const [sending, setSending] = React.useState(false)
   const [memberSearch, setMemberSearch] = React.useState("")
   const [form, setForm] = React.useState({
@@ -196,13 +187,13 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
   }
 
   return (
-    <div className="space-y-6 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] lg:pb-0">
+    <div className="space-y-4 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] lg:pb-0">
       <MinistrySectionActions
         label="Message actions"
         actions={[
-          { id: "all", label: "All Messages", icon: ChatBubbleLeftRightIcon, active: receivedFilter === "all", onClick: () => setReceivedFilter("all") },
-          { id: "unread", label: "Unread Messages", icon: EnvelopeIcon, active: receivedFilter === "unread", onClick: () => setReceivedFilter("unread") },
-          { id: "mark-read", label: "Mark all Read", icon: CheckCircleIcon, disabled: data.unreadCount === 0, onClick: () => patchRead({ action: "mark_all_read" }).catch((readError) => setError(readError.message)) },
+          { id: "all", label: "View All", icon: ChatBubbleLeftRightIcon, active: receivedFilter === "all", onClick: () => setReceivedFilter("all") },
+          { id: "unread", label: "Unread", icon: FunnelIcon, active: receivedFilter === "unread", onClick: () => setReceivedFilter("unread") },
+          { id: "mark-read", label: "Mark All Read", icon: CheckCircleIcon, disabled: data.unreadCount === 0, onClick: () => patchRead({ action: "mark_all_read" }).catch((readError) => setError(readError.message)) },
           { id: "new-message", label: "New Message", icon: PaperAirplaneIcon, active: showComposer, hidden: !data.canCompose, onClick: () => setShowComposer((open) => !open) },
         ]}
       />
@@ -221,7 +212,7 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
       {showComposer && data.canCompose && (
         <form
           onSubmit={sendMessage}
-          className="space-y-4 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm"
+          className="space-y-4 bg-white"
         >
           <h3 className="century-font text-2xl text-gray-950">New Message</h3>
           <div className="grid gap-4 md:grid-cols-2">
@@ -403,7 +394,7 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
         </form>
       )}
 
-      <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+      <section className="bg-white">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h3 className="century-font text-2xl text-gray-950">
             {data.canCompose ? "Inbox" : "Your Messages"}
@@ -485,60 +476,6 @@ const MinistryMessages = ({ onUnreadCountChange, initialMinistryId = "" }) => {
         )}
       </section>
 
-      {data.canCompose && (
-        <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
-          <h3 className="mb-4 century-font text-2xl text-gray-950">Sent Messages</h3>
-          {data.sent.length ? (
-            <div className="space-y-2">
-              {data.sent.map((message) => {
-                const isExpanded = expandedSentId === message.id
-                const panelId = `sent-message-${message.id}`
-                return (
-                  <article key={message.id} className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-                    <button
-                      type="button"
-                      onClick={() => setExpandedSentId(isExpanded ? "" : message.id)}
-                      aria-expanded={isExpanded}
-                      aria-controls={panelId}
-                      className="flex w-full items-center gap-3 px-3 py-2.5 text-left sm:px-4"
-                    >
-                      {message.channel === "email" ? (
-                        <EnvelopeIcon className="size-4 shrink-0 text-[#896542]" />
-                      ) : (
-                        <ChatBubbleLeftRightIcon className="size-4 shrink-0 text-[#896542]" />
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-gray-900">
-                          {message.subject || "Ministry alert"}
-                        </p>
-                        <p className="truncate text-xs text-gray-500">
-                          {message.targetLabel || message.ministryName || "All members"} · {deliveryLabel(message)}
-                        </p>
-                      </div>
-                      <time className="hidden shrink-0 text-xs text-gray-400 sm:block">{messageDate(message.createdAt)}</time>
-                      <ChevronDownIcon className={`size-4 shrink-0 text-gray-400 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
-                    </button>
-                    {isExpanded && (
-                      <div id={panelId} className="border-t border-gray-100 px-4 py-3">
-                        <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-700">
-                          {message.body}
-                        </p>
-                        <p className="mt-3 text-xs text-gray-400">
-                          {messageTypeLabel(message.channel)} · {messageDate(message.createdAt)}
-                        </p>
-                      </div>
-                    )}
-                  </article>
-                )
-              })}
-            </div>
-          ) : (
-            <p className="rounded-xl border border-dashed border-gray-200 px-4 py-6 text-center text-sm text-gray-500">
-              No messages have been sent yet.
-            </p>
-          )}
-        </section>
-      )}
     </div>
   )
 }

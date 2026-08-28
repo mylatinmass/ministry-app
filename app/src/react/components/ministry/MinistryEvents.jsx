@@ -902,7 +902,11 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       {showForm && (
         <form
           onSubmit={saveEvent}
-          className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
+          className={
+            activeAction.id === "add-event"
+              ? "w-full border-0 bg-white p-0 shadow-none"
+              : "rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
+          }
         >
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>

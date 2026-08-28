@@ -58,6 +58,23 @@ const getManagedMinistries = async (client, user) => {
   return result.rows
 }
 
+const getDirectlyManagedMinistries = async (client, user) => {
+  const result = await client.query(
+    `
+      SELECT m.id, m.name, m.slug
+      FROM ministry_members mm
+      JOIN ministries m ON m.id = mm.ministry_id
+      WHERE mm.user_id = $1
+        AND mm.status = 'active'
+        AND mm.level IN ('owner', 'admin')
+        AND m.status = 'active'
+      ORDER BY m.name
+    `,
+    [user.id]
+  )
+  return result.rows
+}
+
 const canManageMinistry = (managedMinistries, ministryId) =>
   managedMinistries.some((ministry) => ministry.id === ministryId)
 
@@ -2551,12 +2568,16 @@ const handler = async (event) => {
     const managedMinistries = await getManagedMinistries(client, user)
 
     if (event.httpMethod === "POST") {
+      const directlyManagedMinistries = await getDirectlyManagedMinistries(
+        client,
+        user
+      )
       return await createInvitation(
         client,
         event,
         user,
         context.actor,
-        managedMinistries,
+        directlyManagedMinistries,
         body
       )
     }

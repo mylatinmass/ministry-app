@@ -238,6 +238,7 @@ const MinistryWorkspace = ({ data }) => {
                   <Link
                     key={section.id}
                     to={accountSectionUrl(section.id)}
+                    data-guide-id={`account-nav-${section.id}`}
                     aria-current={active ? "page" : undefined}
                     className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${
                       active
@@ -270,6 +271,7 @@ const MinistryWorkspace = ({ data }) => {
                 <div className="flex items-start gap-2">
                   <button
                     type="button"
+                    data-guide-id="account-menu"
                     onClick={() => setMobileMenuOpen(true)}
                     aria-label="Open account menu"
                     className="mt-0.5 rounded-lg border border-gray-200 bg-white p-2 text-gray-600 lg:hidden"
@@ -415,9 +417,10 @@ const MinistryWorkspace = ({ data }) => {
                 const active = item.id === activeAction.id
 
                 return (
-                  <button
-                    key={item.id}
-                    type="button"
+                    <button
+                      key={item.id}
+                      type="button"
+                      data-guide-id={`action-${item.id}`}
                     onClick={() => setActionId(item.id)}
                     className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${
                       active
@@ -499,6 +502,7 @@ const MinistryWorkspace = ({ data }) => {
                   <Link
                     key={section.id}
                     to={accountSectionUrl(section.id)}
+                    data-guide-id={`account-nav-${section.id}`}
                     onClick={() => setMobileMenuOpen(false)}
                     aria-current={active ? "page" : undefined}
                     className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left ${
@@ -592,6 +596,7 @@ const MinistryWorkspace = ({ data }) => {
               <button
                 key={item.id}
                 type="button"
+                data-guide-id={`action-${item.id}`}
                 onClick={() => setActionId(item.id)}
                 aria-pressed={active}
                 className={`flex min-w-16 flex-1 flex-col items-center gap-1 rounded-xl px-2 py-2 text-[11px] font-medium transition ${

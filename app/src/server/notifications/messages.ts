@@ -556,6 +556,21 @@ const createMessage = async (client: any, context: any, body: any) => {
         rowCount: 1,
       }
     }
+    if (!recipients.rows.some(
+      (recipient: any) => recipient.delivery_account_user_id === context.actor.id,
+    )) {
+      recipients.rows.push({
+        profile_user_id: context.user.id,
+        delivery_account_user_id: context.actor.id,
+        is_delivery_target: true,
+        external_name: null,
+        external_email: null,
+        external_phone: null,
+        external_email_enabled: false,
+        external_sms_consent_at: null,
+      })
+      recipients.rowCount += 1
+    }
     for (const recipient of recipients.rows) {
       const recipientResult = await client.query(
         `

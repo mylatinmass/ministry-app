@@ -5,11 +5,14 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   ClockIcon,
+  InformationCircleIcon,
   NoSymbolIcon,
   PlusIcon,
   TrashIcon,
+  XMarkIcon,
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
+import useAccessibleDialog from "../../hooks/useAccessibleDialog"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 import MinistrySectionActions from "./MinistrySectionActions"
 
@@ -98,6 +101,31 @@ const TimeSelect = ({ label, value, onChange, disabled }) => {
   )
 }
 
+const AvailabilityLegend = () => (
+  <ul className="space-y-4 text-sm text-gray-600">
+    <li className="flex items-center gap-3">
+      <span className="size-4 shrink-0 rounded-full ring-1 ring-[#C1A387]" style={{ backgroundImage: "linear-gradient(to bottom, #fff 0%, #fff 50%, #f4ede6 50%, #f4ede6 100%)" }} />
+      <span><strong className="font-semibold text-gray-900">Partially available</strong><br />Available for only part of the day.</span>
+    </li>
+    <li className="flex items-center gap-3">
+      <span className="size-4 shrink-0 rounded-full bg-[#f4ede6] ring-1 ring-[#d8c7b8]" />
+      <span><strong className="font-semibold text-gray-900">Excluded by a rule</strong><br />A recurring exclusion marks this day unavailable.</span>
+    </li>
+    <li className="flex items-center gap-3">
+      <span className="size-4 shrink-0 rounded-full bg-emerald-600" />
+      <span><strong className="font-semibold text-gray-900">Explicitly available</strong><br />You marked the entire day available.</span>
+    </li>
+    <li className="flex items-center gap-3">
+      <span className="size-4 shrink-0 rounded-full bg-[#f4ede6]" />
+      <span><strong className="font-semibold text-gray-900">Unavailable</strong><br />A date override or unavailable range applies.</span>
+    </li>
+    <li className="flex items-center gap-3">
+      <span className="size-4 shrink-0 rounded bg-[#eee2d5] ring-1 ring-[#C1A387]" />
+      <span><strong className="font-semibold text-gray-900">Selected</strong><br />This is the date currently open for editing.</span>
+    </li>
+  </ul>
+)
+
 const MinistryAvailability = ({ ministryId = "" }) => {
   const [data, setData] = React.useState(null)
   const [activeMinistryId, setActiveMinistryId] = React.useState(ministryId)
@@ -108,6 +136,9 @@ const MinistryAvailability = ({ ministryId = "" }) => {
   const [showsTwoMonths, setShowsTwoMonths] = React.useState(false)
   const [selectedDate, setSelectedDate] = React.useState("")
   const [showPartialAvailability, setShowPartialAvailability] = React.useState(false)
+  const [legendOpen, setLegendOpen] = React.useState(false)
+  const closeLegend = React.useCallback(() => setLegendOpen(false), [])
+  const legendDialogRef = useAccessibleDialog(legendOpen, closeLegend)
   const [partialAvailability, setPartialAvailability] = React.useState({
     startTime: "10:00",
     endTime: "13:00",
@@ -428,24 +459,27 @@ const MinistryAvailability = ({ ministryId = "" }) => {
         </div>
       ) : (
         <>
-          <section className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm sm:p-6">
-            <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-gray-500">
-              <span className="inline-flex items-center gap-2"><span className="size-3 rounded-full ring-1 ring-[#C1A387]" style={{ backgroundImage: "linear-gradient(to bottom, #fff 0%, #fff 50%, #f4ede6 50%, #f4ede6 100%)" }} /> Partially available</span>
-              <span className="inline-flex items-center gap-2"><span className="size-3 rounded-full bg-[#f4ede6] ring-1 ring-[#d8c7b8]" /> Unavailable by exclusion rule</span>
-              <span className="inline-flex items-center gap-2"><span className="size-3 rounded-full bg-emerald-600" /> Explicitly available</span>
-              <span className="inline-flex items-center gap-2"><span className="size-3 rounded-full bg-[#f4ede6]" /> Unavailable override or range</span>
-              <span className="inline-flex items-center gap-2"><span className="size-3 rounded bg-[#eee2d5] ring-1 ring-[#C1A387]" /> Selected</span>
-            </div>
-
-            <div className="relative mt-6 xl:mx-12">
+          <section className="border-0 bg-white p-0 shadow-none">
+            <div className="relative xl:mx-12">
               <button type="button" aria-label="Previous month" onClick={() => setVisibleMonth((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))} className="absolute left-2 top-1 z-10 rounded-xl p-2 text-gray-400 transition hover:bg-gray-100 lg:top-1/2 lg:-translate-y-1/2 xl:-left-12"><ChevronLeftIcon className="size-5" /></button>
               <button type="button" aria-label="Next month" onClick={() => setVisibleMonth((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))} className="absolute right-2 top-1 z-10 rounded-xl p-2 text-gray-400 transition hover:bg-gray-100 lg:top-1/2 lg:-translate-y-1/2 xl:-right-12"><ChevronRightIcon className="size-5" /></button>
+              <button
+                type="button"
+                aria-label="Explain availability calendar markers"
+                aria-haspopup="dialog"
+                aria-expanded={legendOpen}
+                onClick={() => setLegendOpen(true)}
+                className="absolute right-12 top-1 z-10 rounded-xl p-2 text-[#896542] transition hover:bg-[#f4ede6]"
+                title="Explain calendar markers"
+              >
+                <InformationCircleIcon className="size-5" />
+              </button>
 
               <div className="grid gap-6 lg:grid-cols-2">
                 {displayedMonths.map((month) => {
                   const monthKey = `${month.getFullYear()}-${month.getMonth()}`
                   return (
-                    <section key={monthKey} aria-label={new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(month)} className="w-full rounded-xl border border-gray-100 p-3">
+                    <section key={monthKey} aria-label={new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(month)} className="w-full border-0 p-0">
                       <h4 className="text-center font-semibold text-gray-900">{new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(month)}</h4>
                       <div className="mt-2 grid grid-cols-7 text-center text-xs font-semibold uppercase tracking-[0.14em] text-gray-700 sm:text-sm">
                         {WEEKDAYS.map((day) => <div key={day} className="py-2"><abbr title={day} className="no-underline" aria-label={day}>{day.slice(0, 1)}</abbr></div>)}
@@ -576,6 +610,40 @@ const MinistryAvailability = ({ ministryId = "" }) => {
           </section>
         </>
       )}
+
+      <div
+        className={`fixed inset-0 z-[90] transition ${legendOpen ? "pointer-events-auto" : "pointer-events-none"}`}
+        aria-hidden={!legendOpen}
+      >
+        <button
+          type="button"
+          aria-label="Close availability calendar guide"
+          onClick={closeLegend}
+          tabIndex={legendOpen ? 0 : -1}
+          className={`absolute inset-0 bg-black/35 backdrop-blur-[1px] transition-opacity duration-300 ${legendOpen ? "opacity-100" : "opacity-0"}`}
+        />
+        <aside
+          ref={legendDialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="availability-legend-title"
+          tabIndex={-1}
+          className={`absolute inset-y-0 right-0 flex w-[90%] max-w-sm flex-col bg-white shadow-2xl transition-transform duration-300 ease-out ${legendOpen ? "translate-x-0" : "translate-x-full"}`}
+        >
+          <header className="flex items-start justify-between gap-4 border-b border-gray-100 p-5">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#896542]">Calendar guide</p>
+              <h2 id="availability-legend-title" className="mt-1 century-font text-2xl text-gray-950">Availability markers</h2>
+            </div>
+            <button type="button" onClick={closeLegend} tabIndex={legendOpen ? 0 : -1} aria-label="Close availability calendar guide" className="rounded-lg p-2 text-gray-500 hover:bg-gray-100">
+              <XMarkIcon className="size-5" />
+            </button>
+          </header>
+          <div className="ministry-scroll-region flex-1 overflow-y-auto p-5">
+            <AvailabilityLegend />
+          </div>
+        </aside>
+      </div>
     </div>
   )
 }

@@ -5,6 +5,7 @@ import BrowserLocation from "../BrowserLocation"
 import { MINISTRY_SESSION_KEY } from "../../components/ministry/MinistryLogin"
 import MinistryRouteGuard from "../../components/ministry/MinistryRouteGuard"
 import MinistryWorkspace from "../../components/ministry/MinistryWorkspace"
+import { MinistryGuideProvider } from "../../components/ministry/MinistryGuide"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 
 const MinistryPageContent = ({ slug: slugProp, params = {}, location = {} }) => {
@@ -74,7 +75,15 @@ const MinistryPageContent = ({ slug: slugProp, params = {}, location = {} }) => 
           </div>
         </div>
       ) : data ? (
-        <MinistryWorkspace data={data} />
+        <MinistryGuideProvider
+          role={
+            data.user?.globalRole === "super_admin"
+              ? "super_admin"
+              : data.ministry?.accessLevel || "member"
+          }
+        >
+          <MinistryWorkspace data={data} />
+        </MinistryGuideProvider>
       ) : (
         <div className="flex min-h-[60vh] items-center justify-center bg-white">
           <p className="text-gray-500">Loading ministry workspace...</p>

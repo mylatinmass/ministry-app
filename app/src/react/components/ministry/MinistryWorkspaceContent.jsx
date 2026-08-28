@@ -1153,7 +1153,14 @@ const MinistryWorkspaceContent = ({
       />
     )
   } else if (section.id === "support") {
-    content = <MinistrySupport ministryName={data.ministry.name} />
+    content = (
+      <MinistrySupport
+        ministryName={data.ministry.name}
+        initialView={
+          activeAction.id === "contact-support" ? "contact" : "documentation"
+        }
+      />
+    )
   } else if (section.id === "reports") {
     content = <MinistryReports ministry={data.ministry} activeAction={activeAction} currentUser={currentUser || data.user} />
   } else {

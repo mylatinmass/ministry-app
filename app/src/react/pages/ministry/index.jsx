@@ -4,6 +4,7 @@ import Seo from "../../components/Seo"
 import BrowserLocation from "../BrowserLocation"
 import { MINISTRY_SESSION_KEY } from "../../components/ministry/MinistryLogin"
 import MinistryHomeWorkspace from "../../components/ministry/MinistryHomeWorkspace"
+import { MinistryGuideProvider } from "../../components/ministry/MinistryGuide"
 import MinistryRouteGuard from "../../components/ministry/MinistryRouteGuard"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 
@@ -66,14 +67,26 @@ const MinistryHomeContent = () => {
           </div>
         </div>
       ) : data ? (
-        <MinistryHomeWorkspace
-          data={{
-            ...data,
-            actor: data.actor || data.user,
-            ministries: data.ministries || [],
-            calendarEvents: data.calendarEvents || [],
-          }}
-        />
+        <MinistryGuideProvider
+          role={
+            ["owner", "super_admin"].includes(data.user?.globalRole)
+              ? data.user.globalRole
+              : (data.ministries || []).some((ministry) =>
+                    ["owner", "admin"].includes(ministry.accessLevel),
+                  )
+                ? "admin"
+                : "member"
+          }
+        >
+          <MinistryHomeWorkspace
+            data={{
+              ...data,
+              actor: data.actor || data.user,
+              ministries: data.ministries || [],
+              calendarEvents: data.calendarEvents || [],
+            }}
+          />
+        </MinistryGuideProvider>
       ) : (
         <div className="flex min-h-screen items-center justify-center bg-white">
           <p className="text-gray-500">

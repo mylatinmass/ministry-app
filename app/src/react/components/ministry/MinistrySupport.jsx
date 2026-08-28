@@ -1,12 +1,15 @@
 import * as React from "react"
 import {
+  BookOpenIcon,
   CheckCircleIcon,
+  LifebuoyIcon,
   PaperClipIcon,
   PaperAirplaneIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
+import MinistryDocumentation from "./MinistryDocumentation"
 
 const MAX_FILES = 3
 const MAX_FILE_BYTES = 1.5 * 1024 * 1024
@@ -44,7 +47,8 @@ const fileToAttachment = (file) =>
     reader.readAsDataURL(file)
   })
 
-const MinistrySupport = ({ ministryName = "" }) => {
+const MinistrySupport = ({ ministryName = "", initialView = "documentation" }) => {
+  const [activeView, setActiveView] = React.useState(initialView)
   const [category, setCategory] = React.useState("problem")
   const [subject, setSubject] = React.useState("")
   const [message, setMessage] = React.useState("")
@@ -52,6 +56,8 @@ const MinistrySupport = ({ ministryName = "" }) => {
   const [isSubmitting, setIsSubmitting] = React.useState(false)
   const [errorMessage, setErrorMessage] = React.useState("")
   const [successMessage, setSuccessMessage] = React.useState("")
+
+  React.useEffect(() => setActiveView(initialView), [initialView])
 
   const addFiles = (event) => {
     const selected = Array.from(event.target.files || [])
@@ -122,6 +128,41 @@ const MinistrySupport = ({ ministryName = "" }) => {
   }
 
   return (
+    <div className="mx-auto max-w-5xl pb-[calc(env(safe-area-inset-bottom)+5.5rem)] lg:pb-0">
+      <nav aria-label="Support sections" className="mb-4 grid grid-cols-2 gap-2 rounded-2xl border border-gray-100 bg-white p-2 shadow-sm sm:flex sm:w-fit">
+        <button
+          type="button"
+          data-guide-id="action-documentation"
+          onClick={() => setActiveView("documentation")}
+          aria-current={activeView === "documentation" ? "page" : undefined}
+          className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+            activeView === "documentation"
+              ? "bg-[#896542] text-white shadow-sm"
+              : "text-gray-600 hover:bg-[#f7f3ef] hover:text-[#6f4f34]"
+          }`}
+        >
+          <BookOpenIcon className="size-5" />
+          Documentation
+        </button>
+        <button
+          type="button"
+          data-guide-id="action-contact-support"
+          onClick={() => setActiveView("contact")}
+          aria-current={activeView === "contact" ? "page" : undefined}
+          className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+            activeView === "contact"
+              ? "bg-[#896542] text-white shadow-sm"
+              : "text-gray-600 hover:bg-[#f7f3ef] hover:text-[#6f4f34]"
+          }`}
+        >
+          <LifebuoyIcon className="size-5" />
+          Contact Support
+        </button>
+      </nav>
+
+      {activeView === "documentation" ? (
+        <MinistryDocumentation />
+      ) : (
     <section className="mx-auto max-w-3xl rounded-2xl border border-gray-100 bg-white p-5 shadow-sm sm:p-7">
       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#896542]">
         Contact chapel support
@@ -148,6 +189,7 @@ const MinistrySupport = ({ ministryName = "" }) => {
         <label className="block text-sm font-semibold text-gray-700">
           Type of request
           <select
+            data-guide-id="support-category"
             value={category}
             onChange={(event) => setCategory(event.target.value)}
             className="mt-2 h-12 w-full rounded-xl border border-gray-200 bg-white px-3 font-normal text-gray-900"
@@ -161,6 +203,7 @@ const MinistrySupport = ({ ministryName = "" }) => {
         <label className="block text-sm font-semibold text-gray-700">
           Subject
           <input
+            data-guide-id="support-subject"
             value={subject}
             onChange={(event) => setSubject(event.target.value)}
             required
@@ -173,6 +216,7 @@ const MinistrySupport = ({ ministryName = "" }) => {
         <label className="block text-sm font-semibold text-gray-700">
           Details
           <textarea
+            data-guide-id="support-details"
             value={message}
             onChange={(event) => setMessage(event.target.value)}
             required
@@ -221,6 +265,7 @@ const MinistrySupport = ({ ministryName = "" }) => {
 
         <button
           type="submit"
+          data-guide-id="support-submit"
           disabled={isSubmitting}
           className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-5 py-3 font-semibold text-white hover:bg-[#6f4f34] disabled:cursor-wait disabled:opacity-60"
         >
@@ -229,6 +274,8 @@ const MinistrySupport = ({ ministryName = "" }) => {
         </button>
       </form>
     </section>
+      )}
+    </div>
   )
 }
 

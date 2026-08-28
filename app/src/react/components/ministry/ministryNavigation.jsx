@@ -3,6 +3,7 @@ import {
   ArchiveBoxIcon,
   ArrowDownTrayIcon,
   BellAlertIcon,
+  BookOpenIcon,
   CalendarDaysIcon,
   CalendarIcon,
   ChartBarIcon,
@@ -39,8 +40,11 @@ const supportSection = {
   id: "support",
   label: "Support",
   icon: LifebuoyIcon,
-  description: "Contact the chapel support team and attach screenshots or supporting files.",
-  actions: [action("contact-support", "Contact Support", LifebuoyIcon)],
+  description: "Find step-by-step documentation or contact the chapel support team.",
+  actions: [
+    action("documentation", "Documentation", BookOpenIcon),
+    action("contact-support", "Contact Support", LifebuoyIcon),
+  ],
 }
 
 const ministrySections = [

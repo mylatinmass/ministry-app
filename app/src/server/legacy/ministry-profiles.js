@@ -86,7 +86,7 @@ const loadUnreadAlertCounts = async (client, actorId) => {
 }
 
 const listProfiles = async (client, context) => {
-  const [childrenResult, ministriesResult, requestsResult, alertsResult] = await Promise.all([
+  const [childrenResult, ministriesResult, requestsResult, alertsResult, requestableMinistriesResult] = await Promise.all([
     client.query(
       `
         SELECT
@@ -154,6 +154,29 @@ const listProfiles = async (client, context) => {
       [context.actor.id]
     ),
     loadUnreadAlertCounts(client, context.actor.id),
+    client.query(
+      `
+        SELECT ministry.id, ministry.name, ministry.slug
+        FROM ministries ministry
+        WHERE ministry.status = 'active'
+          AND NOT EXISTS (
+            SELECT 1 FROM ministry_members membership
+            WHERE membership.ministry_id = ministry.id
+              AND membership.user_id = $1
+              AND membership.status = 'active'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM managed_profile_membership_requests request
+            WHERE request.ministry_id = ministry.id
+              AND request.child_user_id = $1
+              AND request.status = 'pending'
+          )
+          AND lower(COALESCE(ministry.slug, '')) NOT IN ('ceremony', 'sacred-music', 'choir')
+          AND lower(ministry.name) NOT IN ('ceremony', 'sacred music', 'choir')
+        ORDER BY lower(ministry.name)
+      `,
+      [context.user.id]
+    ),
   ])
 
   const unreadCounts = new Map(
@@ -191,6 +214,7 @@ const listProfiles = async (client, context) => {
       })),
     ],
     ministries: ministriesResult.rows,
+    requestableMinistries: requestableMinistriesResult.rows,
     membershipRequests: requestsResult.rows.map((row) => ({
       id: row.id,
       profileId: row.child_user_id,
@@ -703,7 +727,7 @@ const deliverReviewerNotifications = async (client, event, notifications) => {
   return delivered
 }
 
-const requestMembership = async (client, event, actor, body) => {
+const requestMembership = async (client, event, actor, body, allowAnyActiveMinistry = false) => {
   const childId = body.profileId?.toString()
   const ministryId = body.ministryId?.toString()
   if (!childId || !ministryId) {
@@ -715,7 +739,7 @@ const requestMembership = async (client, event, actor, body) => {
   )
   if (!relationship.rowCount) return jsonResponse(403, { message: "Profile access denied" })
 
-  const eligible = ["owner", "super_admin"].includes(actor.global_role)
+  const eligible = allowAnyActiveMinistry || ["owner", "super_admin"].includes(actor.global_role)
     ? await client.query(`SELECT 1 FROM ministries WHERE id = $1 AND status = 'active'`, [ministryId])
     : await client.query(
         `SELECT 1 FROM ministry_members WHERE user_id = $1 AND ministry_id = $2 AND status = 'active'`,
@@ -784,6 +808,35 @@ const requestMembership = async (client, event, actor, body) => {
   return jsonResponse(201, {
     success: true,
     message: `Membership request emailed to ${delivered} ${delivered === 1 ? "leader" : "leaders"}`,
+  })
+}
+
+const requestMemberships = async (client, event, context, body) => {
+  const ministryIds = Array.isArray(body.ministryIds)
+    ? [...new Set(body.ministryIds.map(String).filter(Boolean))]
+    : []
+  if (!ministryIds.length) {
+    return jsonResponse(400, { message: "Choose at least one ministry" })
+  }
+  if (ministryIds.length > 50) {
+    return jsonResponse(400, { message: "Choose no more than 50 ministries" })
+  }
+
+  let submitted = 0
+  for (const ministryId of ministryIds) {
+    const response = await requestMembership(
+      client,
+      event,
+      context.actor,
+      { profileId: context.user.id, ministryId },
+      true
+    )
+    if (response.statusCode < 200 || response.statusCode >= 300) return response
+    submitted += 1
+  }
+  return jsonResponse(201, {
+    success: true,
+    message: `${submitted} ${submitted === 1 ? "ministry request" : "ministry requests"} submitted`,
   })
 }
 
@@ -991,6 +1044,9 @@ const handler = async (event) => {
     }
     if (event.httpMethod === "POST" && body.action === "request_membership") {
       return await requestMembership(client, event, context.actor, body)
+    }
+    if (event.httpMethod === "POST" && body.action === "request_memberships") {
+      return await requestMemberships(client, event, context, body)
     }
     if (event.httpMethod === "POST" && body.action === "invite_guardian") {
       return await inviteGuardian(client, event, context.actor, body)

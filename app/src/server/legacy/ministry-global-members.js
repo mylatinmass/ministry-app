@@ -51,7 +51,7 @@ const handler = async (event) => {
     const canManageAll = ["owner", "super_admin"].includes(
       context.user.global_role
     )
-    const ministriesResult = canManageAll
+    const visibleMinistriesResult = canManageAll
       ? await client.query(
           `
             SELECT id, name, slug
@@ -67,24 +67,46 @@ const handler = async (event) => {
             JOIN ministries ministry ON ministry.id = membership.ministry_id
             WHERE membership.user_id = $1
               AND membership.status = 'active'
-              AND membership.level IN ('owner', 'admin')
               AND ministry.status = 'active'
             ORDER BY ministry.name
           `,
           [context.user.id]
         )
 
-    if (!ministriesResult.rowCount) {
+    if (!visibleMinistriesResult.rowCount) {
       return jsonResponse(403, {
-        message: "Member management is restricted to Ministry Admins",
+        message: "No active ministry memberships are available",
       })
     }
-    const managedMinistryIds = ministriesResult.rows.map(
+    const directlyManagedMinistriesResult = await client.query(
+          `
+            SELECT ministry.id, ministry.name, ministry.slug
+            FROM ministry_members membership
+            JOIN ministries ministry ON ministry.id = membership.ministry_id
+            WHERE membership.user_id = $1
+              AND membership.status = 'active'
+              AND membership.level IN ('owner', 'admin')
+              AND ministry.status = 'active'
+            ORDER BY ministry.name
+          `,
+          [context.user.id]
+        )
+    const managedMinistriesResult = canManageAll
+      ? visibleMinistriesResult
+      : directlyManagedMinistriesResult
+    const visibleMinistryIds = visibleMinistriesResult.rows.map(
       (ministry) => ministry.id
     )
+    const managedMinistryIds = managedMinistriesResult.rows.map(
+      (ministry) => ministry.id
+    )
+    const directlyManagedMinistryIds = directlyManagedMinistriesResult.rows.map(
+      (ministry) => ministry.id
+    )
+    const canManage = managedMinistriesResult.rowCount > 0
     const canManageBackgroundChecks =
       canManageAll ||
-      ministriesResult.rows.some((ministry) => ministry.slug === "security")
+      managedMinistriesResult.rows.some((ministry) => ministry.slug === "security")
 
     const [
       membershipsResult,
@@ -166,7 +188,7 @@ const handler = async (event) => {
             lower(user_account.first_name),
             lower(COALESCE(ministry.name, ''))
         `,
-          [managedMinistryIds, canManageAll]
+          [visibleMinistryIds, canManageAll]
         ),
         client.query(
           `
@@ -191,6 +213,7 @@ const handler = async (event) => {
                 ELSE NULL
               END AS recipient_email,
               array_agg(ministry.name ORDER BY ministry.name) AS ministry_names,
+              bool_or(item.ministry_id = ANY($4::UUID[])) AS directly_managed,
               concat_ws(' ', requester.first_name, requester.last_name) AS requested_by_name
             FROM ministry_invitations invitation
             JOIN ministry_invitation_items item
@@ -212,9 +235,9 @@ const handler = async (event) => {
               requester.id,
               requester.first_name,
               requester.last_name
-            ORDER BY invitation.created_at DESC
+            ORDER BY directly_managed DESC, invitation.created_at DESC
           `,
-          [managedMinistryIds, canManageAll, context.user.id]
+          [managedMinistryIds, canManageAll, context.user.id, directlyManagedMinistryIds]
         ),
         canManageAll
           ? client.query(
@@ -347,10 +370,17 @@ const handler = async (event) => {
 
     return jsonResponse(200, {
       currentUserId: context.user.id,
+      canManage,
+      canInvite: directlyManagedMinistriesResult.rowCount > 0,
       canManageAll,
       canManageBackgroundChecks,
       members: Array.from(membersById.values()),
-      ministries: ministriesResult.rows.map((ministry) => ({
+      ministries: managedMinistriesResult.rows.map((ministry) => ({
+        id: ministry.id,
+        name: ministry.name,
+        slug: ministry.slug,
+      })),
+      invitableMinistries: directlyManagedMinistriesResult.rows.map((ministry) => ({
         id: ministry.id,
         name: ministry.name,
         slug: ministry.slug,
@@ -370,6 +400,7 @@ const handler = async (event) => {
         createdAt: invitation.created_at,
         ministryNames: invitation.ministry_names,
         requestedByName: invitation.requested_by_name,
+        directlyManaged: Boolean(invitation.directly_managed),
         expired: new Date(invitation.expires_at).getTime() <= Date.now(),
       })),
       pendingMembers: pendingMembersResult.rows.map((member) => ({

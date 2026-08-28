@@ -52,8 +52,7 @@ const accountSections = [
     id: "members",
     label: "Members",
     icon: UserGroupIcon,
-    description: "View and manage members in the ministries you administer.",
-    managerOnly: true,
+    description: "View members in your ministries.",
   },
   {
     id: "chapel-settings",
@@ -73,7 +72,7 @@ const accountSections = [
     label: "Support",
     icon: LifebuoyIcon,
     description:
-      "Contact the chapel support team and attach screenshots or supporting files.",
+      "Search step-by-step documentation or contact the chapel support team.",
   },
 ]
 

@@ -280,7 +280,6 @@ const handler = async (event) => {
           FROM assignment_change_requests request
           JOIN events event ON event.id = request.event_id
           WHERE request.status = 'pending'
-            AND request.request_type = 'substitute'
             AND (request.expires_at IS NULL OR request.expires_at > now())
             AND event.status = 'published'
             AND event.start_time > now()
@@ -378,6 +377,57 @@ const handler = async (event) => {
     const unfilledPositionEventIds = unfilledPositionsResult.rows.map(
       (row) => row.event_id
     )
+    const pendingRequestCounts = new Map(
+      pendingSubRequestsResult.rows.map((row) => [
+        row.event_id,
+        Number(row.request_count || 0),
+      ])
+    )
+    const unfilledCounts = new Map(
+      unfilledPositionsResult.rows.map((row) => [
+        row.event_id,
+        Number(row.missing_count || 0),
+      ])
+    )
+    const todayKey = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date())
+    const attentionEvents = calendarEvents
+      .map((event) => {
+        const requestCount = pendingRequestCounts.get(event.id) || 0
+        const missingCount = unfilledCounts.get(event.id) || 0
+        const issueCount = requestCount + missingCount
+        if (!issueCount) return null
+        const eventDateKey = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/New_York",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(new Date(event.start_time))
+        const hoursUntil =
+          (new Date(event.start_time).getTime() - Date.now()) / 3_600_000
+        const severity = eventDateKey === todayKey
+          ? "critical"
+          : requestCount > 0 || issueCount >= 3 || hoursUntil <= 72
+            ? "high"
+            : "medium"
+        return {
+          ...event,
+          issueCount,
+          requestCount,
+          missingCount,
+          severity,
+        }
+      })
+      .filter(Boolean)
+      .sort(
+        (first, second) =>
+          new Date(first.start_time).getTime() -
+          new Date(second.start_time).getTime()
+      )
 
     return jsonResponse(200, {
       actor: toPublicMinistryUser(context.actor),
@@ -389,6 +439,11 @@ const handler = async (event) => {
       ministries: result.rows.map(toMinistry),
       calendarEvents,
       attention: {
+        pendingRequests: attentionEvents.reduce(
+          (total, event) => total + event.issueCount,
+          0
+        ),
+        events: attentionEvents,
         pendingSubRequests: pendingSubRequestsResult.rows.reduce(
           (total, row) => total + Number(row.request_count || 0),
           0

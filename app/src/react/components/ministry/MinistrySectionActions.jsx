@@ -9,6 +9,7 @@ const MinistrySectionActions = ({ actions, label }) => {
       <button
         key={action.id}
         type="button"
+        data-guide-id={`action-${action.id}`}
         onClick={action.onClick}
         disabled={action.disabled}
         aria-pressed={action.active === undefined ? undefined : action.active}
@@ -23,7 +24,7 @@ const MinistrySectionActions = ({ actions, label }) => {
         }`}
       >
         {Icon && <Icon className="size-5 shrink-0" aria-hidden="true" />}
-        <span className="min-w-0 text-center leading-tight">{action.label}</span>
+        <span className="min-w-0 whitespace-nowrap text-center leading-tight">{action.label}</span>
       </button>
     )
   }

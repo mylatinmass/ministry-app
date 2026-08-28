@@ -1,7 +1,6 @@
 import * as React from "react"
 import {
   ArrowLeftIcon,
-  ChevronRightIcon,
   EnvelopeIcon,
   MagnifyingGlassIcon,
   ShieldCheckIcon,
@@ -12,12 +11,6 @@ import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 import MinistryPendingInvitations from "./MinistryPendingInvitations"
 import MinistrySectionActions from "./MinistrySectionActions"
-
-const ministryRoleLabels = {
-  owner: "Owner",
-  admin: "Ministry Admin",
-  member: "Member",
-}
 
 const globalRoleLabel = (role) => {
   if (role === "owner") return "Global Owner"
@@ -259,6 +252,7 @@ const MinistryGlobalMembers = () => {
       id: "pending",
       label: "Pending Members",
       icon: ShieldCheckIcon,
+      hidden: !data.canManage,
       active: memberView === "pending" && !selectedMember,
       onClick: () => {
         setSelectedMemberId(null)
@@ -269,11 +263,18 @@ const MinistryGlobalMembers = () => {
       id: "add",
       label: "Add New Member",
       icon: EnvelopeIcon,
+      hidden: !data.canInvite,
       active: inviteOpen && !selectedMember,
       onClick: () => {
         setSelectedMemberId(null)
         setMemberView("all")
-        setInviteOpen((current) => !current)
+        setInviteOpen((current) => {
+          const nextOpen = !current
+          if (nextOpen && data.invitableMinistries.length === 1) {
+            setInviteMinistryIds([data.invitableMinistries[0].id])
+          }
+          return nextOpen
+        })
       },
     },
   ]
@@ -282,14 +283,14 @@ const MinistryGlobalMembers = () => {
     const existingMinistryIds = new Set(
       selectedMember.memberships.map((membership) => membership.ministryId)
     )
-    const availableMinistries = data.ministries.filter(
+    const availableMinistries = data.invitableMinistries.filter(
       (ministry) => !existingMinistryIds.has(ministry.id)
     )
     const isCurrentUser = selectedMember.id === data.currentUserId
 
     return (
       <div className="space-y-5 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] lg:pb-0">
-        <MinistrySectionActions label="Member actions" actions={memberActions} />
+        {data.canManage && <MinistrySectionActions label="Member actions" actions={memberActions} />}
         {notice}
         <button
           type="button"
@@ -636,42 +637,29 @@ const MinistryGlobalMembers = () => {
   }
 
   return (
-    <div className="space-y-5 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] lg:pb-0">
-      <MinistrySectionActions
-        label="Member actions"
-        actions={memberActions}
-      />
+    <div className={`space-y-4 ${data.canManage ? "pb-[calc(env(safe-area-inset-bottom)+5.5rem)] lg:pb-0" : "pb-0"}`}>
+      {data.canManage && (
+        <MinistrySectionActions
+          label="Member actions"
+          actions={memberActions}
+        />
+      )}
       {notice}
       {memberView === "all" && (
-      <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
-            <UsersIcon className="size-6 text-[#896542]" />
-            <div>
-              <h2 className="century-font text-2xl text-gray-950">Members</h2>
-              <p className="text-sm text-gray-500">
-                {data.members.length} Ministry app {data.members.length === 1 ? "member" : "members"}
-              </p>
-            </div>
-          </div>
-        </div>
-
+      <section className="bg-white">
         {inviteOpen && (
-          <form onSubmit={sendInvitation} className="mt-5 rounded-xl border border-[#e6ddd4] bg-[#faf8f5] p-4">
+          <form onSubmit={sendInvitation} className="mb-4 space-y-3 bg-white">
             <h3 className="font-semibold text-gray-900">Send a private Ministry invitation</h3>
-            <p className="mt-1 text-sm text-gray-500">
-              After the person accepts, open their profile here to set their Ministry access and level.
-            </p>
             <input
               type="email"
               required
               value={inviteEmail}
               onChange={(event) => setInviteEmail(event.target.value)}
               placeholder="member@example.com"
-              className="mt-3 h-11 w-full max-w-lg rounded-lg border border-gray-200 bg-white px-3 text-sm"
+              className="h-11 w-full max-w-lg rounded-lg border border-gray-200 bg-white px-3 text-sm"
             />
-            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {data.ministries.map((ministry) => (
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {data.invitableMinistries.map((ministry) => (
                 <label key={ministry.id} className="flex items-center gap-2 text-sm text-gray-700">
                   <input
                     type="checkbox"
@@ -692,7 +680,7 @@ const MinistryGlobalMembers = () => {
             <button
               type="submit"
               disabled={isSaving || !inviteMinistryIds.length}
-              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-[#896542] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-lg bg-[#896542] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
             >
               <EnvelopeIcon className="size-4" />
               Send invitation
@@ -700,13 +688,13 @@ const MinistryGlobalMembers = () => {
           </form>
         )}
 
-        <label className="relative mt-5 block">
+        <label className="relative block">
           <span className="sr-only">Search members</span>
           <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-3.5 size-5 text-gray-400" />
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search name, ministry, or access"
+            placeholder="Search members"
             className="h-12 w-full rounded-xl border border-gray-200 pl-10 pr-3 text-sm outline-none focus:border-[#896542]"
           />
         </label>
@@ -781,47 +769,20 @@ const MinistryGlobalMembers = () => {
       )}
 
       {memberView === "all" && (
-      <section className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
-        <div className="hidden grid-cols-[1.2fr_0.8fr_1.5fr_2rem] gap-4 border-b border-gray-100 bg-gray-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-400 md:grid">
-          <span>Member</span>
-          <span>Account access</span>
-          <span>Ministries</span>
-          <span />
-        </div>
+      <section className="bg-white">
         <div className="divide-y divide-gray-100">
           {filteredMembers.map((member) => (
             <button
               key={member.id}
               type="button"
-              onClick={() => {
+              onClick={data.canManage ? () => {
                 setSelectedMemberId(member.id)
                 setMessage("")
                 setErrorMessage("")
-              }}
-              className="grid w-full gap-3 px-5 py-4 text-left transition hover:bg-[#faf8f5] md:grid-cols-[1.2fr_0.8fr_1.5fr_2rem] md:items-center md:gap-4"
+              } : undefined}
+              className={`w-full px-1 py-3 text-left font-semibold text-gray-900 ${data.canManage ? "transition hover:bg-[#faf8f5]" : "cursor-default"}`}
             >
-              <span>
-                <span className="block font-semibold text-gray-900">
-                  {member.firstName} {member.lastName}
-                  {member.backgroundCheckVerified && (
-                    <ShieldCheckIcon
-                      className="ml-1.5 inline size-5 text-orange-500"
-                      aria-label="Background check verified"
-                    />
-                  )}
-                </span>
-              </span>
-              <span className="text-sm font-semibold text-[#6f4f34]">
-                {globalRoleLabel(member.globalRole)}
-              </span>
-              <span className="flex flex-wrap gap-1.5">
-                {member.memberships.map((membership) => (
-                  <span key={membership.id} className="rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-600">
-                    {membership.ministryName} · {ministryRoleLabels[membership.role]}
-                  </span>
-                ))}
-              </span>
-              <ChevronRightIcon className="hidden size-5 text-gray-400 md:block" />
+              {member.firstName} {member.lastName}
             </button>
           ))}
           {!filteredMembers.length && (

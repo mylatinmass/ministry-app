@@ -67,6 +67,30 @@ const assignmentResponseOrder = (assignment) => {
   return 1
 }
 
+const summarizeAdminIssues = (responsibilities = []) =>
+  responsibilities.reduce(
+    (summary, responsibility) => {
+      if (!responsibility.canManage) return summary
+      if (responsibility.isRequired && !responsibility.unlimitedCapacity) {
+        summary.shortages += Math.max(
+          0,
+          responsibility.quantityNeeded - responsibility.assignedQuantity,
+        )
+      }
+      for (const assignment of responsibility.assignments || []) {
+        summary.conflicts += assignment.conflictCount || 0
+        if (
+          assignment.status === "change_requested" ||
+          assignment.substitutionRequest?.status === "pending"
+        ) {
+          summary.requests += 1
+        }
+      }
+      return summary
+    },
+    { shortages: 0, conflicts: 0, requests: 0 },
+  )
+
 const formatDutyTime = (eventStart, offsetMinutes = 0) =>
   new Intl.DateTimeFormat("en-US", {
     weekday: "short",
@@ -80,7 +104,7 @@ const formatDutyTime = (eventStart, offsetMinutes = 0) =>
     ),
   )
 
-const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
+const MinistryEventDetails = ({ event, ministryName, onClose, onClone, onIssuesResolved }) => {
   const [details, setDetails] = React.useState(null)
   const [isLoading, setIsLoading] = React.useState(false)
   const [isSavingResponsibility, setIsSavingResponsibility] =
@@ -198,8 +222,10 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
           ? 10
           : generalVolunteer?.quantityNeeded || 10,
       )
+      return result
     } catch (error) {
       setErrorMessage(error.message)
+      return null
     } finally {
       setIsLoading(false)
     }
@@ -603,25 +629,57 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
   }
 
   const autoAssign = () => {
+    const problematicUserIds = new Set()
+    for (const responsibility of details?.responsibilities || []) {
+      if (!responsibility.canManage) continue
+      for (const assignment of responsibility.assignments || []) {
+        if (
+          isUnavailableAssignment(assignment.status) ||
+          assignment.status === "change_requested" ||
+          assignment.substitutionRequest?.status === "pending" ||
+          assignment.conflictCount > 0
+        ) {
+          problematicUserIds.add(assignment.userId)
+        }
+      }
+    }
     const selected = new Set(
       Object.values(assignmentSelections)
         .map((slot) => slot?.userId)
-        .filter(Boolean),
+        .filter((userId) => userId && !problematicUserIds.has(userId)),
     )
     const next = { ...assignmentSelections }
     for (const responsibility of details?.responsibilities || []) {
-      if (responsibility.isPublicAssignment) continue
+      if (responsibility.isPublicAssignment || !responsibility.canManage) continue
       for (let index = 0; index < responsibility.quantityNeeded; index += 1) {
         const slotKey = `${responsibility.id}:${index}`
-        if (next[slotKey]?.userId) continue
+        const currentAssignment = (responsibility.assignments || []).find(
+          (assignment) => assignment.id === next[slotKey]?.assignmentId,
+        )
+        const needsReplacement = currentAssignment && (
+          isUnavailableAssignment(currentAssignment.status) ||
+          currentAssignment.status === "change_requested" ||
+          currentAssignment.substitutionRequest?.status === "pending" ||
+          currentAssignment.conflictCount > 0
+        )
+        if (next[slotKey]?.userId && !needsReplacement) continue
         const member = (responsibility.availableMembers || []).find(
           (candidate) =>
             candidate.automaticEligible !== false &&
+            candidate.userId !== currentAssignment?.userId &&
             !selected.has(candidate.userId),
         )
         if (member) {
-          next[slotKey] = { assignmentId: "", userId: member.userId }
+          next[slotKey] = {
+            assignmentId: currentAssignment?.id || "",
+            userId: member.userId,
+          }
           selected.add(member.userId)
+        } else if (needsReplacement) {
+          next[slotKey] = {
+            assignmentId: currentAssignment.id,
+            userId: "",
+          }
         }
       }
     }
@@ -668,7 +726,20 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
         throw new Error(result.message || "Unable to assign member")
       }
       setMessage(result.message)
-      await loadDetails()
+      const refreshedDetails = await loadDetails()
+      if (refreshedDetails) {
+        const remainingIssues = summarizeAdminIssues(
+          refreshedDetails.responsibilities || [],
+        )
+        if (
+          remainingIssues.shortages +
+            remainingIssues.conflicts +
+            remainingIssues.requests ===
+          0
+        ) {
+          onIssuesResolved?.(displayedEvent.id)
+        }
+      }
       return true
     } catch (error) {
       setErrorMessage(error.message)
@@ -907,6 +978,11 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
     },
     { shortages: 0, backups: 0, conflicts: 0, overrides: 0, changeRequests: 0 },
   )
+  const adminIssues = summarizeAdminIssues(details?.responsibilities || [])
+  const adminIssueCount =
+    adminIssues.shortages + adminIssues.conflicts + adminIssues.requests
+  const showAssignmentControls =
+    isEditingResponsibilities || (eventCanChange && adminIssueCount > 0)
   const eventHasStarted = start.getTime() <= Date.now()
   const prioryConflictCount = (details?.responsibilities || []).reduce(
     (total, responsibility) =>
@@ -1698,11 +1774,31 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
         </div>)}
 
         <section className="mt-7">
+          {eventCanChange && adminIssueCount > 0 && (
+            <div className="mb-5 rounded-xl border border-orange-300 bg-orange-50 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-orange-700">
+                    Admin attention required
+                  </p>
+                  <h2 className="mt-1 font-semibold text-gray-950">
+                    {adminIssueCount} {adminIssueCount === 1 ? "issue" : "issues"} to resolve
+                  </h2>
+                </div>
+                <ExclamationTriangleIcon className="size-6 shrink-0 text-orange-600" />
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
+                {adminIssues.requests > 0 && <span className="rounded-full bg-white px-2.5 py-1 text-red-700">{adminIssues.requests} change {adminIssues.requests === 1 ? "request" : "requests"}</span>}
+                {adminIssues.shortages > 0 && <span className="rounded-full bg-white px-2.5 py-1 text-orange-700">{adminIssues.shortages} unfilled</span>}
+                {adminIssues.conflicts > 0 && <span className="rounded-full bg-white px-2.5 py-1 text-amber-700">{adminIssues.conflicts} {adminIssues.conflicts === 1 ? "conflict" : "conflicts"}</span>}
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#896542]">
               Responsibilities
             </p>
-            {eventCanChange && (
+            {eventCanChange && adminIssueCount === 0 && (
               <button
                 type="button"
                 onClick={() => {
@@ -1724,7 +1820,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
             </p>
           )}
 
-          {isEditingResponsibilities && eventCanChange && !responsibilityForm && (
+          {showAssignmentControls && eventCanChange && !responsibilityForm && (
               <div className="mt-4 flex flex-wrap gap-2">
                 {details?.participation_type !== "volunteers" && (
                   <>
@@ -1733,15 +1829,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
                       onClick={autoAssign}
                       className="rounded-lg bg-orange-500 px-3 py-2 text-sm font-semibold text-white"
                     >
-                      Auto Assignments
-                    </button>
-                    <button
-                      type="button"
-                      onClick={saveAssignments}
-                      disabled={savingAssignmentId === "batch"}
-                      className="rounded-lg border border-[#d8c7b8] bg-white px-3 py-2 text-sm font-semibold text-[#6f4f34] disabled:opacity-50"
-                    >
-                      {savingAssignmentId === "batch" ? "Saving…" : "Save assignments"}
+                      Automate
                     </button>
                     {details?.recurrence_group_id && (
                       <button
@@ -2303,7 +2391,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
                               </div>
                             )}
                             {canManage &&
-                              isEditingResponsibilities &&
+                              showAssignmentControls &&
                               eventCanChange &&
                               !responsibility.isPublicAssignment &&
                               responsibility.status !== "cancelled" && (
@@ -2376,7 +2464,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
                           </div>
                           <div className="flex items-center gap-2 self-start sm:self-auto">
                             {canManage &&
-                              isEditingResponsibilities &&
+                              showAssignmentControls &&
                               eventCanChange &&
                               responsibility.status !== "cancelled" && (
                                 <>
@@ -2405,7 +2493,7 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
                                   </button>
                                 </>
                               )}
-                            {isEditingResponsibilities && (
+                            {showAssignmentControls && (
                               <span className="rounded-full bg-gray-100 px-2 py-1 text-xs uppercase text-gray-500">
                                 {responsibility.status}
                               </span>
@@ -2419,6 +2507,16 @@ const MinistryEventDetails = ({ event, ministryName, onClose, onClone }) => {
               ),
             )}
           </div>)}
+          {showAssignmentControls && eventCanChange && !responsibilityForm && (
+            <button
+              type="button"
+              onClick={saveAssignments}
+              disabled={savingAssignmentId === "batch"}
+              className="mt-5 w-full rounded-xl bg-[#896542] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50 sm:w-auto"
+            >
+              {savingAssignmentId === "batch" ? "Saving…" : "Save assignments"}
+            </button>
+          )}
         </section>
 
         <div className="mt-8 border-t border-gray-100 pt-5 sm:hidden">

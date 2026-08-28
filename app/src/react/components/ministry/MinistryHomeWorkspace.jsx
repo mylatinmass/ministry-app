@@ -25,7 +25,6 @@ import {
   StarIcon,
   UserGroupIcon,
   UserCircleIcon,
-  UserMinusIcon,
   WrenchScrewdriverIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline"
@@ -96,11 +95,6 @@ const ministrySortOptions = {
     compare: (a, b) =>
       b.memberCount - a.memberCount || a.name.localeCompare(b.name),
   },
-  templates_desc: {
-    label: "Most templates",
-    compare: (a, b) =>
-      b.templateCount - a.templateCount || a.name.localeCompare(b.name),
-  },
 }
 
 const EmptyDashboardBlock = ({ title, text }) => (
@@ -152,6 +146,43 @@ const DashboardAction = ({ icon: Icon, count, label, onClick, urgent = false }) 
   </button>
 )
 
+const PendingRequestList = ({ events, onEventSelect }) => {
+  const severityClasses = {
+    critical: "border-red-300 bg-red-50 text-red-800",
+    high: "border-orange-300 bg-orange-50 text-orange-800",
+    medium: "border-amber-200 bg-amber-50 text-amber-800",
+  }
+  return events.length ? (
+    <div className="ministry-scroll-region min-h-0 flex-1 space-y-2 overflow-y-auto">
+      {events.map((event) => (
+        <button
+          key={event.id}
+          type="button"
+          onClick={() => onEventSelect(event)}
+          className={`grid w-full grid-cols-[5.25rem_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border px-3 py-3 text-left ${severityClasses[event.severity] || severityClasses.medium}`}
+        >
+          <time className="text-xs font-bold uppercase tracking-wide" dateTime={event.start_time}>
+            {new Intl.DateTimeFormat("en-US", {
+              month: "short",
+              day: "numeric",
+            }).format(new Date(event.start_time))}
+          </time>
+          <span className="min-w-0 truncate font-semibold text-gray-950">
+            {event.title}
+          </span>
+          <span className="rounded-full bg-white/80 px-2.5 py-1 text-xs font-bold">
+            {event.issueCount} {event.issueCount === 1 ? "issue" : "issues"}
+          </span>
+        </button>
+      ))}
+    </div>
+  ) : (
+    <p className="rounded-xl border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-500">
+      No pending requests.
+    </p>
+  )
+}
+
 const MinistryCards = ({
   ministries,
   isManagedProfile,
@@ -170,8 +201,15 @@ const MinistryCards = ({
   })
   const [createError, setCreateError] = React.useState("")
   const [isCreating, setIsCreating] = React.useState(false)
+  const [isRequestOpen, setIsRequestOpen] = React.useState(false)
+  const [requestableMinistries, setRequestableMinistries] = React.useState([])
+  const [requestedMinistryIds, setRequestedMinistryIds] = React.useState([])
+  const [requestStatus, setRequestStatus] = React.useState("idle")
+  const [requestFeedback, setRequestFeedback] = React.useState("")
   const closeAddDialog = React.useCallback(() => setIsAddOpen(false), [])
   const addDialogRef = useAccessibleDialog(isAddOpen, closeAddDialog)
+  const closeRequestDialog = React.useCallback(() => setIsRequestOpen(false), [])
+  const requestDialogRef = useAccessibleDialog(isRequestOpen, closeRequestDialog)
 
   React.useEffect(() => setMinistryItems(ministries), [ministries])
 
@@ -191,6 +229,57 @@ const MinistryCards = ({
   const openAddDialog = () => {
     setCreateError("")
     setIsAddOpen(true)
+  }
+
+  const openRequestDialog = async () => {
+    setRequestFeedback("")
+    setRequestStatus("loading")
+    setIsRequestOpen(true)
+    try {
+      const token = window.sessionStorage.getItem(MINISTRY_SESSION_KEY)
+      const response = await fetch(getFunctionEndpoint("ministry-profiles"), {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.message || "Unable to load ministries")
+      setRequestableMinistries(result.requestableMinistries || [])
+      setRequestedMinistryIds([])
+      setRequestStatus("idle")
+    } catch (error) {
+      setRequestStatus("error")
+      setRequestFeedback(error.message)
+    }
+  }
+
+  const submitAccessRequest = async (event) => {
+    event.preventDefault()
+    setRequestStatus("submitting")
+    setRequestFeedback("")
+    try {
+      const token = window.sessionStorage.getItem(MINISTRY_SESSION_KEY)
+      const response = await fetch(getFunctionEndpoint("ministry-profiles"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action: "request_memberships",
+          ministryIds: requestedMinistryIds,
+        }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.message || "Unable to request access")
+      setRequestStatus("success")
+      setRequestFeedback(result.message)
+      setRequestableMinistries((current) =>
+        current.filter((ministry) => !requestedMinistryIds.includes(ministry.id)),
+      )
+      setRequestedMinistryIds([])
+    } catch (error) {
+      setRequestStatus("error")
+      setRequestFeedback(error.message)
+    }
   }
 
   const createMinistry = async (event) => {
@@ -225,18 +314,16 @@ const MinistryCards = ({
 
   return (
     <div className="pb-[calc(env(safe-area-inset-bottom)+5.5rem)] lg:pb-0">
-      <div className="mb-6">
-        <MinistrySectionActions
+      <MinistrySectionActions
           label="Ministry actions"
           actions={[
             { id: "all", label: "All Ministries", icon: Squares2X2Icon, active: ministryView === "all", onClick: () => setMinistryView("all") },
             { id: "mine", label: "My Ministries", icon: CheckCircleIcon, active: ministryView === "mine", onClick: () => setMinistryView("mine") },
-            { id: "request", label: "Request Access", icon: ShieldCheckIcon, onClick: () => window.location.assign("/access-request") },
+            { id: "request", label: "Request Access", icon: ShieldCheckIcon, active: isRequestOpen, onClick: openRequestDialog },
             { id: "new", label: "New Ministry", icon: PlusIcon, hidden: !canAddMinistry, onClick: openAddDialog },
           ]}
-        />
-      </div>
-      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center">
+      />
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center lg:mt-6">
         <label className="relative flex-1">
           <span className="sr-only">Search ministries</span>
           <MagnifyingGlassIcon
@@ -275,30 +362,35 @@ const MinistryCards = ({
               <Link
                 key={ministry.id}
                 to={`/${ministry.slug}`}
-                className="flex flex-col rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition hover:-translate-y-1 hover:border-[#C1A387] hover:shadow-md"
+                data-guide-id="ministry-card"
+                className="grid grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-xl border border-gray-200 bg-white p-3 shadow-sm transition hover:-translate-y-1 hover:border-[#C1A387] hover:shadow-md"
               >
-                <div className="flex items-center gap-3">
-                  <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#f4ede6] text-[#896542]">
-                    <MinistryIcon aria-hidden="true" className="size-5" />
-                  </span>
-                  <h3 className="century-font text-2xl text-[#896542]">
+                <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-[#f4ede6] text-[#896542]">
+                  <MinistryIcon aria-hidden="true" className="size-6" />
+                </span>
+                <div className="min-w-0">
+                  <h3 className="truncate century-font text-xl text-[#896542]">
                     {ministry.name}
                   </h3>
-                </div>
-                <div className="mt-4 border-t border-gray-100 pt-3 text-sm text-gray-500">
-                  <p className="font-semibold text-[#896542]">
-                    {accessLabels[ministry.accessLevel] || ministry.accessLevel}
-                  </p>
-                  {ministry.canServe && (
-                    <p className="font-semibold text-green-700">
-                      Serving member
-                    </p>
-                  )}
-                  <p>
-                    {ministry.memberCount} serving{" "}
-                    {ministry.memberCount === 1 ? "member" : "members"} ·{" "}
-                    {ministry.templateCount}{" "}
-                    {ministry.templateCount === 1 ? "template" : "templates"}
+                  <div className="mt-1 flex min-w-0 items-center gap-1.5 overflow-hidden">
+                    {["owner", "super_admin"].includes(ministry.accessLevel) && (
+                      <span className="shrink-0 rounded-full bg-[#f4ede6] px-2 py-0.5 text-[10px] font-bold text-[#6f4f34]">
+                        SuperAdmin
+                      </span>
+                    )}
+                    {ministry.accessLevel === "admin" && (
+                      <span className="shrink-0 rounded-full bg-[#f4ede6] px-2 py-0.5 text-[10px] font-bold text-[#6f4f34]">
+                        Admin
+                      </span>
+                    )}
+                    {ministry.directAccessLevel && (
+                      <span className="shrink-0 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-bold text-green-700">
+                        Active Member
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1.5 text-xs text-gray-500">
+                    {ministry.memberCount} {ministry.memberCount === 1 ? "member" : "members"}
                   </p>
                 </div>
               </Link>
@@ -326,6 +418,56 @@ const MinistryCards = ({
               Return to {actor.firstName} {actor.lastName}
             </button>
           )}
+        </div>
+      )}
+
+      {isRequestOpen && (
+        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/35 p-0 backdrop-blur-[1px] sm:items-center sm:p-4">
+          <button type="button" aria-label="Close request access" onClick={closeRequestDialog} className="absolute inset-0" />
+          <div ref={requestDialogRef} role="dialog" aria-modal="true" aria-labelledby="request-access-title" tabIndex={-1} className="relative max-h-[85dvh] w-full overflow-y-auto rounded-t-2xl bg-white p-5 shadow-2xl sm:max-w-lg sm:rounded-2xl sm:p-6">
+            <div className="flex items-center justify-between gap-4">
+              <h2 id="request-access-title" className="century-font text-2xl text-[#6f4f34]">Request Access</h2>
+              <button type="button" onClick={closeRequestDialog} aria-label="Close" className="rounded-lg p-2 text-gray-500 hover:bg-gray-100">
+                <XMarkIcon className="size-5" />
+              </button>
+            </div>
+            {requestStatus === "loading" ? (
+              <p className="py-8 text-center text-sm text-gray-500">Loading ministries…</p>
+            ) : (
+              <form onSubmit={submitAccessRequest} className="mt-5 space-y-4">
+                {requestableMinistries.length ? (
+                  <fieldset className="space-y-1">
+                    <legend className="sr-only">Choose ministries</legend>
+                    {requestableMinistries.map((ministry) => (
+                      <label key={ministry.id} className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+                        <input
+                          type="checkbox"
+                          checked={requestedMinistryIds.includes(ministry.id)}
+                          onChange={(event) => setRequestedMinistryIds((current) =>
+                            event.target.checked
+                              ? [...current, ministry.id]
+                              : current.filter((id) => id !== ministry.id),
+                          )}
+                          className="size-4 rounded border-gray-300 text-[#896542]"
+                        />
+                        <span className="min-w-0 truncate">{ministry.name}</span>
+                      </label>
+                    ))}
+                  </fieldset>
+                ) : (
+                  <p className="rounded-xl bg-gray-50 px-4 py-6 text-center text-sm text-gray-600">No additional ministries are available to request.</p>
+                )}
+                {requestFeedback && (
+                  <p role={requestStatus === "error" ? "alert" : "status"} className={`text-sm ${requestStatus === "error" ? "text-red-700" : "text-green-700"}`}>
+                    {requestFeedback}
+                  </p>
+                )}
+                <button type="submit" disabled={!requestedMinistryIds.length || requestStatus === "submitting"} className="w-full rounded-xl bg-[#896542] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+                  {requestStatus === "submitting" ? "Submitting…" : "Request Access"}
+                </button>
+              </form>
+            )}
+          </div>
         </div>
       )}
 
@@ -464,6 +606,7 @@ const MinistryHomeWorkspace = ({ data }) => {
     applyMinistryTheme(currentUser?.appearanceTheme)
   }, [currentUser?.appearanceTheme])
   const [selectedEvent, setSelectedEvent] = React.useState(null)
+  const [resolvedIssueEventIds, setResolvedIssueEventIds] = React.useState([])
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false)
   const closeMobileMenu = React.useCallback(() => setMobileMenuOpen(false), [])
   const mobileMenuRef = useAccessibleDialog(mobileMenuOpen, closeMobileMenu)
@@ -561,26 +704,37 @@ const MinistryHomeWorkspace = ({ data }) => {
       )
   }, [myEvents])
   const attention = data.attention || {
+    pendingRequests: 0,
+    events: [],
     pendingSubRequests: 0,
     unfilledPositions: 0,
     pendingSubRequestEventIds: [],
     unfilledPositionEventIds: [],
   }
+  const activeAttentionEvents = (attention.events || []).filter(
+    (event) => !resolvedIssueEventIds.includes(event.id),
+  )
+  const activePendingRequestCount = activeAttentionEvents.reduce(
+    (total, event) => total + Number(event.issueCount || 0),
+    0,
+  )
   const eventSectionEvents = React.useMemo(() => {
     if (eventView === "mine") return upcomingAssignments
     if (eventView === "pinned") {
       const pinnedIds = new Set(pinnedEventIds)
       return upcomingEvents.filter((event) => pinnedIds.has(event.id))
     }
-    const ids = eventView === "sub_requests"
-      ? attention.pendingSubRequestEventIds
+    const ids = eventView === "issues"
+      ? activeAttentionEvents.map((event) => event.id)
+      : eventView === "sub_requests"
+        ? attention.pendingSubRequestEventIds
       : eventView === "unfilled"
         ? attention.unfilledPositionEventIds
         : null
     if (!ids) return upcomingEvents
     const idSet = new Set(ids)
     return upcomingEvents.filter((event) => idSet.has(event.id))
-  }, [attention.pendingSubRequestEventIds, attention.unfilledPositionEventIds, eventView, pinnedEventIds, upcomingAssignments, upcomingEvents])
+  }, [activeAttentionEvents, attention.pendingSubRequestEventIds, attention.unfilledPositionEventIds, eventView, pinnedEventIds, upcomingAssignments, upcomingEvents])
   const today = React.useMemo(() => new Date(), [])
   const todayLabel = React.useMemo(
     () =>
@@ -957,7 +1111,7 @@ const MinistryHomeWorkspace = ({ data }) => {
           <h2 id="dashboard-actions-title" className="mb-3 century-font text-2xl text-gray-950">
             Your Ministry
           </h2>
-          <div className={`grid grid-cols-2 gap-3 ${canManageMembers ? "xl:grid-cols-5" : "xl:grid-cols-3"}`}>
+          <div className={`grid grid-cols-2 gap-3 ${canManageMembers ? "xl:grid-cols-4" : "xl:grid-cols-3"}`}>
             <DashboardAction
               icon={ChatBubbleLeftRightIcon}
               count={messageSummary.unreadCount || 0}
@@ -980,20 +1134,11 @@ const MinistryHomeWorkspace = ({ data }) => {
             />
             {canManageMembers && (
               <DashboardAction
-                icon={UserMinusIcon}
-                count={attention.pendingSubRequests || 0}
-                label="Sub Requests"
-                onClick={() => selectSection("events", "sub_requests")}
-                urgent={attention.pendingSubRequests > 0}
-              />
-            )}
-            {canManageMembers && (
-              <DashboardAction
                 icon={ExclamationTriangleIcon}
-                count={attention.unfilledPositions || 0}
-                label="Unfilled Positions"
-                onClick={() => selectSection("events", "unfilled")}
-                urgent={attention.unfilledPositions > 0}
+                count={activePendingRequestCount}
+                label="Pending Requests"
+                onClick={() => selectSection("events", "issues")}
+                urgent={activePendingRequestCount > 0}
               />
             )}
           </div>
@@ -1158,6 +1303,7 @@ const MinistryHomeWorkspace = ({ data }) => {
     const createMinistry = manageableMinistries.find(
       (ministry) => ministry.id === createMinistryId,
     )
+    const canCreateEvents = manageableMinistries.length > 0
     const eventActions = [
       {
         id: "all",
@@ -1194,42 +1340,16 @@ const MinistryHomeWorkspace = ({ data }) => {
         label: "Create Event",
         icon: PlusIcon,
         active: showCreateEvent,
-        hidden: !(hasGlobalAccess || manageableMinistries.length > 0),
+        hidden: !canCreateEvents,
         onClick: () => {
           setCloneEventDraft(null)
           setShowCreateEvent(true)
         },
       },
     ]
-    content = showCreateEvent && createMinistry ? (
+    content = showCreateEvent && canCreateEvents && createMinistry ? (
       <div className="space-y-5 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] lg:pb-0">
         <MinistrySectionActions label="Event actions" actions={eventActions} />
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <label className="min-w-64 text-sm font-semibold text-gray-700">
-            Create for ministry
-            <select
-              value={createMinistryId}
-              onChange={(event) => setCreateMinistryId(event.target.value)}
-              className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 font-normal"
-            >
-              {manageableMinistries.map((ministry) => (
-                <option key={ministry.id} value={ministry.id}>
-                  {ministry.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            onClick={() => {
-              setShowCreateEvent(false)
-              setCloneEventDraft(null)
-            }}
-            className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-600"
-          >
-            Back to events
-          </button>
-        </div>
         <MinistryEvents
           key={createMinistry.id}
           data={{ ministry: createMinistry, user: currentUser }}
@@ -1247,12 +1367,10 @@ const MinistryHomeWorkspace = ({ data }) => {
           label="Event actions"
           actions={eventActions}
         />
-        {["sub_requests", "unfilled"].includes(eventView) && (
+        {eventView === "issues" && (
           <div className="flex shrink-0 justify-center">
             <span className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-700">
-              {eventView === "sub_requests"
-                ? "Substitute requests needing attention"
-                : "Required positions needing attention"}
+              Pending requests needing attention
             </span>
           </div>
         )}
@@ -1261,6 +1379,12 @@ const MinistryHomeWorkspace = ({ data }) => {
             {pinError}
           </p>
         )}
+        {eventView === "issues" ? (
+          <PendingRequestList
+            events={activeAttentionEvents}
+            onEventSelect={setSelectedEvent}
+          />
+        ) : (
         <MinistryEventAgenda
           events={eventSectionEvents}
           label={eventView === "mine" ? "My events" : eventView === "pinned" ? "Pinned events" : "Available events"}
@@ -1273,6 +1397,7 @@ const MinistryHomeWorkspace = ({ data }) => {
           pinUpdatingEventIds={pinUpdatingEventIds}
           onTogglePin={togglePinnedEvent}
         />
+        )}
       </div>
     )
   } else if (sectionId === "availability") {
@@ -1293,7 +1418,7 @@ const MinistryHomeWorkspace = ({ data }) => {
         canAddMinistry={currentUser.globalRole === "super_admin"}
       />
     )
-  } else if (sectionId === "members" && canManageMembers) {
+  } else if (sectionId === "members") {
     content = <MinistryGlobalMembers />
   } else if (sectionId === "profile") {
     content = (
@@ -1329,6 +1454,7 @@ const MinistryHomeWorkspace = ({ data }) => {
                   <button
                     key={section.id}
                     type="button"
+                    data-guide-id={`account-nav-${section.id}`}
                     onClick={() => selectSection(section.id)}
                     aria-current={active ? "page" : undefined}
                     className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${
@@ -1358,6 +1484,7 @@ const MinistryHomeWorkspace = ({ data }) => {
             <div className="min-w-0 flex-1">
               <button
                 type="button"
+                data-guide-id="account-menu"
                 onClick={() => setMobileMenuOpen(true)}
                 className="flex min-w-0 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-[#6f4f34] lg:hidden"
               >
@@ -1419,7 +1546,11 @@ const MinistryHomeWorkspace = ({ data }) => {
           />
 
           <div
-            className={`min-h-0 flex-1 px-4 py-5 lg:px-6 ${
+            className={`min-h-0 flex-1 px-4 pb-5 lg:px-6 ${
+              ["calendar", "events", "messages", "ministries", "availability", "members"].includes(sectionId)
+                ? "pt-0"
+                : "pt-5"
+            } ${
               sectionId === "calendar" ||
               (sectionId === "events" && !showCreateEvent)
                 ? "overflow-hidden"
@@ -1469,6 +1600,7 @@ const MinistryHomeWorkspace = ({ data }) => {
                   <button
                     key={section.id}
                     type="button"
+                    data-guide-id={`account-nav-${section.id}`}
                     onClick={() => selectSection(section.id)}
                     aria-current={active ? "page" : undefined}
                     className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left ${
@@ -1498,6 +1630,9 @@ const MinistryHomeWorkspace = ({ data }) => {
         ministryName={selectedEvent?.coordinator_ministry_name || "Ministry"}
         onClose={() => setSelectedEvent(null)}
         onClone={cloneEventFromDetails}
+        onIssuesResolved={(eventId) =>
+          setResolvedIssueEventIds((current) => [...new Set([...current, eventId])])
+        }
       />
     </div>
   )

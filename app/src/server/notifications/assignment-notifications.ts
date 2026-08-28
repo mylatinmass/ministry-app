@@ -3,6 +3,7 @@ import { getPool } from "../database"
 import { sendKlaviyoAlertDue } from "./klaviyo"
 import { sendTelegramMessage } from "./telegram"
 import { sendAccountPush, sendReliableEmail } from "./delivery"
+import { applyNotificationTestMetadata } from "./test-mode"
 
 const deliveryAllowed = () =>
   process.env.MINISTRY_OUTBOUND_DELIVERY_ENABLED === "true" &&
@@ -192,6 +193,10 @@ export const enqueueAlert = async ({
   acknowledgmentRequired = false,
   acknowledgmentDeadline = null,
 }: Record<string, any>) => {
+  const deliveryMetadata = await applyNotificationTestMetadata(
+    metadata,
+    recipientUserId,
+  )
   const digestAfter = immediate
     ? new Date()
     : new Date(Date.now() + digestDelayMinutes() * 60_000)
@@ -215,7 +220,7 @@ export const enqueueAlert = async ({
       eventId || null,
       ministryId || null,
       dedupeKey,
-      JSON.stringify(metadata),
+      JSON.stringify(deliveryMetadata),
       digestAfter,
       acknowledgmentRequired,
       acknowledgmentDeadline,
@@ -1494,7 +1499,10 @@ const claimDueAlerts = async () => {
 
 const buildDigest = (alerts: any[]) => {
   if (alerts.length === 1 && alerts[0].metadata?.summaryType) {
-    return `${alerts[0].title}\n\n${alerts[0].message}`
+    return withNotificationTestContext(
+      alerts,
+      `${alerts[0].title}\n\n${alerts[0].message}`,
+    )
   }
   const groups = new Map<string, { name: string; alerts: any[] }>()
   for (const alert of alerts) {
@@ -1513,12 +1521,43 @@ const buildDigest = (alerts: any[]) => {
     group.name,
     ...group.alerts.map((alert) => `• ${alert.title}\n  ${alert.message}`),
   ])
-  return ["Ministry alerts", "", ...summary, ...details].join("\n")
+  return withNotificationTestContext(
+    alerts,
+    ["Ministry alerts", "", ...summary, ...details].join("\n"),
+  )
+}
+
+const withNotificationTestContext = (alerts: any[], message: string) => {
+  const testAlerts = alerts.filter(
+    (alert) => alert.metadata?.notificationTestMode === true,
+  )
+  if (!testAlerts.length) return message
+  const intendedRecipients = [
+    ...new Set(
+      testAlerts
+        .map((alert) =>
+          [
+            alert.intended_recipient_first_name,
+            alert.intended_recipient_last_name,
+          ]
+            .filter(Boolean)
+            .join(" "),
+        )
+        .filter(Boolean),
+    ),
+  ]
+  const intended = intendedRecipients.length
+    ? ` Intended for: ${intendedRecipients.join(", ")}.`
+    : ""
+  return `TEST MODE.${intended}\n${message}`
 }
 
 const buildConciseDigest = (alerts: any[], recipientName: string) => {
   if (alerts.length === 1 && alerts[0].metadata?.conciseMessage) {
-    return alerts[0].metadata.conciseMessage
+    return withNotificationTestContext(
+      alerts,
+      alerts[0].metadata.conciseMessage,
+    )
   }
   const eventIds = new Set(
     alerts.map((alert) => alert.event_id).filter(Boolean),
@@ -1530,7 +1569,10 @@ const buildConciseDigest = (alerts: any[], recipientName: string) => {
     const period = summaryTypes.size === 1 && summaryTypes.has("tomorrow")
       ? "tomorrow"
       : "soon"
-    return conciseAssignmentMessage(recipientName, eventIds.size, period)
+    return withNotificationTestContext(
+      alerts,
+      conciseAssignmentMessage(recipientName, eventIds.size, period),
+    )
   }
   const alertCounts = new Map<string, number>()
   for (const alert of alerts) {
@@ -1549,7 +1591,10 @@ const buildConciseDigest = (alerts: any[], recipientName: string) => {
   const items = [...alertCounts.entries()].map(([label, count]) =>
     `${count} ${label}${count === 1 ? "" : "s"}`,
   )
-  return `Hello ${recipientName}. You have ${items.join(" and ")}. Check the Ministry App for details.`
+  return withNotificationTestContext(
+    alerts,
+    `Hello ${recipientName}. You have ${items.join(" and ")}. Check the Ministry App for details.`,
+  )
 }
 
 const escapeHtml = (value: unknown) =>
@@ -1591,6 +1636,9 @@ export const processNotificationDigests = async () => {
     `
       SELECT alert.*, subject.first_name AS subject_first_name,
         subject.last_name AS subject_last_name,
+        intended_recipient.first_name AS intended_recipient_first_name,
+        intended_recipient.last_name AS intended_recipient_last_name,
+        recipient.id AS delivery_recipient_user_id,
         recipient.first_name AS recipient_first_name,
         recipient.last_name AS recipient_last_name,
         recipient.email AS recipient_email,
@@ -1605,7 +1653,13 @@ export const processNotificationDigests = async () => {
         telegram.chat_id
       FROM ministry_alerts alert
       JOIN ministry_accounts subject ON subject.id = alert.subject_user_id
-      JOIN ministry_accounts recipient ON recipient.id = alert.recipient_user_id
+      JOIN ministry_accounts intended_recipient
+        ON intended_recipient.id = alert.recipient_user_id
+      JOIN ministry_accounts recipient ON recipient.id = CASE
+        WHEN alert.metadata->>'notificationTestAccountUserId' IS NOT NULL
+          THEN (alert.metadata->>'notificationTestAccountUserId')::UUID
+        ELSE alert.recipient_user_id
+      END
       LEFT JOIN telegram_connections telegram
         ON telegram.account_user_id = recipient.id AND telegram.status = 'active'
       WHERE alert.id = ANY($1)
@@ -1615,9 +1669,9 @@ export const processNotificationDigests = async () => {
   )
   const byRecipient = new Map<string, any[]>()
   for (const alert of hydrated.rows) {
-    const rows = byRecipient.get(alert.recipient_user_id) || []
+    const rows = byRecipient.get(alert.delivery_recipient_user_id) || []
     rows.push(alert)
-    byRecipient.set(alert.recipient_user_id, rows)
+    byRecipient.set(alert.delivery_recipient_user_id, rows)
   }
   const origin = (process.env.SITE_URL || "https://ministry.mylatinmass.com").replace(/\/$/, "")
   let processed = 0
@@ -1699,7 +1753,7 @@ export const processNotificationDigests = async () => {
             `,
             [
               alert.id,
-              alert.recipient_user_id,
+              alert.delivery_recipient_user_id,
               channel,
               attempt.provider,
               attempt.status,
@@ -1777,7 +1831,7 @@ export const processNotificationDigests = async () => {
     const pushAlerts = pendingFor("push", first.notification_push_enabled)
     if (pushAlerts.length) {
       const attempts = await sendAccountPush({
-        accountUserId: first.recipient_user_id,
+        accountUserId: first.delivery_recipient_user_id,
         title: pushAlerts.length === 1 ? pushAlerts[0].title : "Ministry updates",
         body: buildConciseDigest(pushAlerts, recipientName),
         url: pushAlerts[0].metadata?.notificationUrl || "/",
@@ -1803,7 +1857,7 @@ export const processNotificationDigests = async () => {
           notification_url:
             smsAlerts[0].metadata?.notificationUrl || origin,
           subject_user_id: smsAlerts[0].subject_user_id,
-          recipient_user_id: first.recipient_user_id,
+          recipient_user_id: first.delivery_recipient_user_id,
           recipient_phone: first.recipient_phone,
           sms_transactional_consent_at: first.sms_transactional_consent_at,
         })

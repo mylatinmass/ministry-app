@@ -7,6 +7,7 @@ import {
 import { sendAccountPush, sendReliableEmail } from "./delivery"
 import { sendKlaviyoAlertDue } from "./klaviyo"
 import { sendTelegramMessage } from "./telegram"
+import { getNotificationTestMode } from "./test-mode"
 
 const isGlobalManager = (user: Record<string, any>) =>
   ["owner", "super_admin"].includes(user.global_role)
@@ -526,7 +527,7 @@ const createMessage = async (client: any, context: any, body: any) => {
           [eventId],
         )
       : { rows: [], rowCount: 0 }
-    const recipients = {
+    let recipients = {
       rows: [...linkedRecipients.rows, ...externalRecipients.rows],
       rowCount:
         Number(linkedRecipients.rowCount || 0) +
@@ -536,6 +537,24 @@ const createMessage = async (client: any, context: any, body: any) => {
       throw Object.assign(new Error("The selected audience has no active recipients"), {
         status: 400,
       })
+    }
+    const notificationTestMode = await getNotificationTestMode(client)
+    if (notificationTestMode.enabled) {
+      recipients = {
+        rows: [
+          {
+            profile_user_id: notificationTestMode.targetUserId,
+            delivery_account_user_id: notificationTestMode.targetUserId,
+            is_delivery_target: true,
+            external_name: null,
+            external_email: null,
+            external_phone: null,
+            external_email_enabled: false,
+            external_sms_consent_at: null,
+          },
+        ],
+        rowCount: 1,
+      }
     }
     for (const recipient of recipients.rows) {
       const recipientResult = await client.query(
@@ -593,6 +612,9 @@ const createMessage = async (client: any, context: any, body: any) => {
         messageType,
         subject: messageType === "email" ? subject : null,
         recipientCount: recipients.rowCount || 0,
+        notificationTestMode: notificationTestMode.enabled,
+        notificationTestAccountUserId:
+          notificationTestMode.targetUserId || null,
       },
     })
     await client.query("COMMIT")

@@ -1018,6 +1018,23 @@ const [alertMigration, assignmentNotifications, alertsServer] = await Promise.al
   read("src/server/notifications/assignment-notifications.ts"),
   read("src/server/notifications/alerts.ts"),
 ])
+const [chapelSettingsServer, chapelSettingsComponent, notificationTestMode] =
+  await Promise.all([
+    read("src/server/chapel-settings.ts"),
+    read("src/react/components/ministry/ChapelSettings.jsx"),
+    read("src/server/notifications/test-mode.ts"),
+  ])
+assert.match(chapelSettingsComponent, /Danger Zone/)
+assert.match(chapelSettingsComponent, /Notification Settings/)
+assert.match(chapelSettingsComponent, /TEST MODE IS ACTIVE/)
+assert.match(chapelSettingsComponent, /Select a Super Admin/)
+assert.match(chapelSettingsServer, /update_notification_test_mode/)
+assert.match(chapelSettingsServer, /notificationTestModeEnabled/)
+assert.match(chapelSettingsServer, /notificationTestAccountUserId/)
+assert.match(chapelSettingsServer, /global_role IN \('owner', 'super_admin'\)/)
+assert.match(chapelSettingsServer, /Suppressed when Notification Test Mode was enabled/)
+assert.match(notificationTestMode, /applyNotificationTestMetadata/)
+assert.match(notificationTestMode, /notification_test_profile_missing/)
 assert.match(alertMigration, /subject_user_id/)
 assert.match(alertMigration, /recipient_user_id/)
 assert.match(completedNotificationsMigration, /notification_reminders_enabled/)
@@ -1025,6 +1042,9 @@ assert.match(completedNotificationsMigration, /notification_schedule_changes_ena
 assert.match(completedNotificationsMigration, /sms_transactional_consent_at/)
 assert.match(completedNotificationsMigration, /CREATE TABLE IF NOT EXISTS ministry_alert_deliveries/)
 assert.match(assignmentNotifications, /processNotificationDigests/)
+assert.match(assignmentNotifications, /applyNotificationTestMetadata/)
+assert.match(assignmentNotifications, /delivery_recipient_user_id/)
+assert.match(assignmentNotifications, /notificationTestAccountUserId/)
 const outboundAlertKinds = assignmentNotifications.match(
   /const OUTBOUND_ALERT_KINDS = new Set\(\[([\s\S]*?)\]\)/,
 )?.[1] || ""

@@ -28,6 +28,8 @@ const DEFAULT_SETTINGS = {
   facebookUrl: "",
   instagramUrl: "",
   youtubeUrl: "",
+  notificationTestModeEnabled: false,
+  notificationTestAccountUserId: "",
 }
 
 const textFields = new Set([
@@ -51,6 +53,7 @@ const textFields = new Set([
   "facebookUrl",
   "instagramUrl",
   "youtubeUrl",
+  "notificationTestAccountUserId",
 ])
 
 const cleanText = (value: unknown, maximum = 5000) =>
@@ -66,7 +69,7 @@ const requireGlobalAdministrator = (context: any) => {
 }
 
 const normalizeSettings = (value: any) => {
-  const settings: Record<string, string | number> = { ...DEFAULT_SETTINGS }
+  const settings: Record<string, string | number | boolean> = { ...DEFAULT_SETTINGS }
   for (const key of textFields) {
     settings[key] = cleanText(value?.[key], key.includes("Address") ? 2000 : 500)
   }
@@ -79,6 +82,8 @@ const normalizeSettings = (value: any) => {
     365,
     Math.max(1, Number(value?.schedulingHorizonDays) || 60),
   )
+  settings.notificationTestModeEnabled =
+    value?.notificationTestModeEnabled === true
   return settings
 }
 
@@ -131,7 +136,7 @@ const normalizeRoom = (body: any) => {
 }
 
 const loadSettings = async (client: PoolClient) => {
-  const [settingsResult, observancesResult, roomsResult, templatesResult, ministriesResult, auditResult] =
+  const [settingsResult, observancesResult, roomsResult, templatesResult, ministriesResult, testingProfilesResult, auditResult] =
     await Promise.all([
       client.query(
         `SELECT settings, updated_at FROM chapel_settings WHERE setting_key = 'primary'`,
@@ -163,6 +168,15 @@ const loadSettings = async (client: PoolClient) => {
       ),
       client.query(
         `SELECT id, name, description, status FROM ministries ORDER BY lower(name)`,
+      ),
+      client.query(
+        `
+          SELECT id, first_name, last_name, email
+          FROM ministry_accounts
+          WHERE status = 'active'
+            AND global_role IN ('owner', 'super_admin')
+          ORDER BY lower(last_name), lower(first_name), lower(email)
+        `,
       ),
       client.query(
         `
@@ -211,6 +225,12 @@ const loadSettings = async (client: PoolClient) => {
       ministryName: row.ministry_name,
     })),
     ministries: ministriesResult.rows,
+    testingProfiles: testingProfilesResult.rows.map((row) => ({
+      id: row.id,
+      name:
+        [row.first_name, row.last_name].filter(Boolean).join(" ") || row.email,
+      email: row.email || "",
+    })),
     auditHistory: auditResult.rows.map((row) => ({
       id: row.id,
       action: row.action,
@@ -262,6 +282,93 @@ export const handleChapelSettings = async (request: Request) => {
           entityType: "chapel_settings",
           beforeData,
           afterData: settings,
+        })
+      } else if (body.action === "update_notification_test_mode") {
+        const enabled = body.enabled === true
+        const targetUserId = cleanText(body.targetUserId, 100)
+        let target: any = null
+        if (enabled || targetUserId) {
+          const targetResult = await client.query(
+            `
+              SELECT id, first_name, last_name, email
+              FROM ministry_accounts
+              WHERE id = $1
+                AND status = 'active'
+                AND global_role IN ('owner', 'super_admin')
+              LIMIT 1
+            `,
+            [targetUserId],
+          )
+          target = targetResult.rows[0]
+          if (!target) {
+            throw Object.assign(
+              new Error("Choose an active Super Admin testing profile"),
+              { status: 400 },
+            )
+          }
+        }
+        const currentResult = await client.query(
+          `SELECT settings FROM chapel_settings WHERE setting_key = 'primary' FOR UPDATE`,
+        )
+        const beforeData = {
+          ...DEFAULT_SETTINGS,
+          ...(currentResult.rows[0]?.settings || {}),
+        }
+        const settings = {
+          ...beforeData,
+          notificationTestModeEnabled: enabled,
+          notificationTestAccountUserId: targetUserId,
+        }
+        await client.query(
+          `
+            INSERT INTO chapel_settings (setting_key, settings, updated_by)
+            VALUES ('primary', $1::JSONB, $2)
+            ON CONFLICT (setting_key) DO UPDATE SET
+              settings = excluded.settings,
+              updated_by = excluded.updated_by,
+              updated_at = now()
+          `,
+          [JSON.stringify(settings), context.user.id],
+        )
+        if (enabled) {
+          await client.query(
+            `
+              UPDATE ministry_alerts
+              SET metadata = metadata || $1::JSONB,
+                  updated_at = now()
+              WHERE delivery_status IN ('pending', 'retry', 'processing', 'failed')
+            `,
+            [JSON.stringify({
+              notificationTestMode: true,
+              notificationTestAccountUserId: targetUserId,
+            })],
+          )
+          await client.query(
+            `
+              UPDATE ministry_message_deliveries
+              SET status = 'skipped', claimed_at = NULL, next_attempt_at = NULL,
+                  last_error = 'Suppressed when Notification Test Mode was enabled',
+                  updated_at = now()
+              WHERE status IN ('pending', 'retry', 'processing', 'failed')
+            `,
+          )
+        }
+        await writeSchedulingAudit(client, context, {
+          action: enabled
+            ? "chapel.notification_test_mode_enabled"
+            : "chapel.notification_test_mode_disabled",
+          entityType: "chapel_settings",
+          beforeData: {
+            enabled: beforeData.notificationTestModeEnabled === true,
+            targetUserId: beforeData.notificationTestAccountUserId || null,
+          },
+          afterData: {
+            enabled,
+            targetUserId: targetUserId || null,
+            targetName: target
+              ? [target.first_name, target.last_name].filter(Boolean).join(" ") || target.email
+              : null,
+          },
         })
       } else if (body.action === "save_observance") {
         const input = normalizeObservance(body.observance)

@@ -1,6 +1,8 @@
 import * as React from "react"
 import {
+  BellAlertIcon,
   CheckIcon,
+  ExclamationTriangleIcon,
   PencilSquareIcon,
   PlusIcon,
   XMarkIcon,
@@ -227,6 +229,93 @@ const ChapelSettings = () => {
       )}
 
       <PrioryScheduleSettings />
+
+      <section className="rounded-2xl border-2 border-red-200 bg-red-50/40 p-5 shadow-sm">
+        <div className="flex items-start gap-3">
+          <ExclamationTriangleIcon className="mt-0.5 size-6 shrink-0 text-red-600" />
+          <div>
+            <h2 className="century-font text-2xl text-red-900">Danger Zone</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-relaxed text-red-700">
+              Chapel-wide safeguards that change where production notifications are delivered.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-5 rounded-2xl border border-red-200 bg-white p-4">
+          <div className="flex items-start gap-3">
+            <BellAlertIcon className="mt-0.5 size-5 shrink-0 text-red-600" />
+            <div>
+              <h3 className="font-semibold text-gray-950">Notification Settings</h3>
+              <p className="mt-1 text-sm leading-relaxed text-gray-600">
+                Test Mode prevents external Ministry alerts and direct messages from reaching normal recipients. New deliveries go only to the selected Super Admin profile.
+              </p>
+            </div>
+          </div>
+
+          {settings.notificationTestModeEnabled && (
+            <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+              TEST MODE IS ACTIVE. Production notifications are restricted to the selected testing profile.
+            </div>
+          )}
+
+          <div className="mt-4 grid gap-4 md:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto] md:items-end">
+            <label className="text-sm font-semibold text-gray-700">
+              Test Mode
+              <select
+                value={settings.notificationTestModeEnabled ? "on" : "off"}
+                onChange={(event) =>
+                  setSettings((current) => ({
+                    ...current,
+                    notificationTestModeEnabled: event.target.value === "on",
+                  }))
+                }
+                className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 font-normal"
+              >
+                <option value="off">Off</option>
+                <option value="on">On</option>
+              </select>
+            </label>
+            <label className="text-sm font-semibold text-gray-700">
+              Testing profile
+              <select
+                value={settings.notificationTestAccountUserId || ""}
+                onChange={(event) =>
+                  setSettings((current) => ({
+                    ...current,
+                    notificationTestAccountUserId: event.target.value,
+                  }))
+                }
+                className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 font-normal"
+              >
+                <option value="">Select a Super Admin</option>
+                {data.testingProfiles.map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.name}{profile.email ? ` · ${profile.email}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={
+                isSaving ||
+                (settings.notificationTestModeEnabled &&
+                  !settings.notificationTestAccountUserId)
+              }
+              onClick={() =>
+                save({
+                  action: "update_notification_test_mode",
+                  enabled: settings.notificationTestModeEnabled,
+                  targetUserId: settings.notificationTestAccountUserId,
+                })
+              }
+              className="w-full rounded-xl bg-red-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-red-800 disabled:opacity-50 md:w-auto"
+            >
+              {isSaving ? "Saving..." : "Save Notification Settings"}
+            </button>
+          </div>
+        </div>
+      </section>
 
       <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">

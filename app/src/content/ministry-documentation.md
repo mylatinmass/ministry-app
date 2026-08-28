@@ -1885,3 +1885,872 @@ Operational setup:
 1. Sign in to the Ministry App.
 2. Move between the main menu items and any ministry workspace.
 3. The shared MyLatinMass colors, typography, navigation, cards, calendars, and responsive layout apply automatically.
+
+## Add a managed child profile
+<!-- guide: auto -->
+
+**Purpose:** Give a parent or guardian a separate profile for a child so assignments, memberships, availability, and service history belong to the correct person.
+
+### How to
+
+1. Open My Profile.
+2. Select Profiles.
+<!-- guide-step: {"mode":"target","target":"action-profiles","event":"click"} -->
+3. Select Edit.
+<!-- guide-step: {"mode":"target","target":"profile-edit-profiles","event":"click"} -->
+4. Select Add Child.
+<!-- guide-step: {"mode":"target","target":"profile-add-child","event":"click"} -->
+5. Enter the child's first name.
+<!-- guide-step: {"mode":"target","target":"profile-child-first-name","event":"input"} -->
+6. Enter the child's last name.
+<!-- guide-step: {"mode":"target","target":"profile-child-last-name","event":"input"} -->
+7. Add the child profile. The child remains managed by the guardian until an independent account is activated.
+
+## Switch between your profile and a child's profile
+<!-- guide: auto -->
+
+**Purpose:** Make sure changes, availability, and assignment responses are recorded for the intended family member.
+
+### How to
+
+1. Open the profile selector in the upper-right corner.
+2. Select the child or guardian profile you want to manage.
+3. Check the displayed name before changing availability or responding to assignments.
+4. Switch back to All Members when you want the combined household view.
+
+## Choose which family profiles appear on the calendar
+<!-- guide: auto -->
+
+**Purpose:** Let a guardian compare household schedules without changing the active profile or hiding another person's records permanently.
+
+### How to
+
+1. Open the profile selector.
+2. Use the eye control beside each family member to show or hide that profile's assignments.
+3. Keep at least one profile visible.
+4. Open Calendar and identify each selected profile by its color.
+
+## Manage a child's contact information and availability
+<!-- guide: auto -->
+
+**Purpose:** Keep a managed child's information accurate while ensuring availability is saved to the child's profile rather than the guardian's.
+
+### How to
+
+1. Switch to the managed child's profile.
+2. Open My Profile to review the child's managed details.
+3. Open Availability to record dates, ranges, or recurring exclusions for the child.
+4. Confirm the child's name remains active before saving changes.
+
+## Link a child to another parent or guardian
+<!-- guide: auto -->
+
+**Purpose:** Allow another existing guardian account to manage the same child profile, schedules, notifications, and ministry relationships.
+
+### How to
+
+1. Open My Profile and select Profiles.
+2. Select Link profile or, while using the child profile, select Link another guardian.
+<!-- guide-step: {"mode":"target","target":"profile-link-guardian","event":"click"} -->
+3. Enter the other guardian's existing account email address.
+<!-- guide-step: {"mode":"target","target":"profile-guardian-email","event":"input"} -->
+4. Send the link. The other guardian must accept before access is shared.
+
+## Understand what another linked guardian can access
+<!-- guide: auto -->
+
+**Purpose:** Explain the shared-management boundary before a child profile is linked to another adult.
+
+### How to
+
+1. Open My Profile and select Profiles.
+2. Open the child profile's Linked guardians area.
+3. Linked guardians can manage the child's profile, availability, memberships, schedules, and responses.
+4. They do not gain administrator access to ministries merely by becoming a guardian.
+
+## Respond to a child's ministry membership request
+<!-- guide: auto -->
+
+**Purpose:** Request the correct ministry relationship for a managed child while preserving leader approval.
+
+### How to
+
+1. Open My Profile and select Profiles.
+2. Find the active child and choose a ministry from Request ministry access.
+<!-- guide-step: {"mode":"target","target":"profile-child-ministry","event":"change"} -->
+3. Send the request.
+4. The child does not become a member until an authorized ministry administrator approves it.
+
+## Understand who confirms a child's assignments
+<!-- guide: auto -->
+
+**Purpose:** Clarify whether a guardian or an independent minor is responsible for accepting, declining, or changing an assignment.
+
+### How to
+
+1. Switch to the child's profile and open an assigned event.
+2. Review whether the profile is guardian-managed or independently confirmed.
+3. A guardian-managed response is final when submitted by a linked guardian.
+4. An independent-confirmation profile may require the child's own response according to chapel policy.
+
+## Convert a managed child into an independent account
+<!-- guide: auto -->
+
+**Purpose:** Give the child private sign-in credentials without creating a duplicate identity or losing ministry history.
+
+### How to
+
+1. Switch to the managed child's profile, then open My Profile and Profiles.
+2. In Create an independent account, enter the child's new email address.
+<!-- guide-step: {"mode":"target","target":"profile-independent-email","event":"input"} -->
+3. Send the activation email.
+4. The child completes activation from the private link before guardian management ends.
+
+## Understand what history is retained when a child becomes independent
+<!-- guide: auto -->
+
+**Purpose:** Reassure families that account independence changes access management, not the child's identity or service record.
+
+### How to
+
+1. Open My Profile and select Profiles while using the managed child.
+2. Review the explanation under Create an independent account.
+3. The same memberships, assignments, availability, confirmations, and completed-duty history remain attached to the profile.
+4. Only the sign-in and guardian-management relationship changes after activation.
+
+## Request access to one or several ministries
+<!-- guide: auto -->
+
+**Purpose:** Submit one clear access request for every ministry the active profile wants to join.
+
+### How to
+
+1. Open Ministries and select Request Access.
+<!-- guide-step: {"mode":"target","target":"action-request","event":"click"} -->
+2. Select one or more available ministries.
+<!-- guide-step: {"mode":"target","target":"ministry-request-choice","event":"change"} -->
+3. Review the selected ministries.
+4. Submit Request Access and wait for the appropriate administrators to review it.
+
+## Request ministry access for a managed child
+<!-- guide: auto -->
+
+**Purpose:** Join a child to the correct ministry without submitting the request under the guardian's identity.
+
+### How to
+
+1. Open My Profile, select Profiles, and find the child.
+2. Choose the ministry under Request ministry access.
+<!-- guide-step: {"mode":"target","target":"profile-child-ministry","event":"change"} -->
+3. Send the request.
+4. Track approval from the child's profile rather than the guardian's membership list.
+
+## Understand Active Member, Member, Admin, and Super Admin labels
+<!-- guide: auto -->
+
+**Purpose:** Explain what the access badges mean before a user assumes they grant qualifications or chapel-wide authority.
+
+### How to
+
+1. Open Ministries and review the badges on each card.
+2. Active Member identifies a direct ministry membership.
+3. Admin identifies management access for that ministry; Super Admin identifies chapel-wide administration.
+4. Serving qualifications are managed separately from these access labels.
+
+## Understand the difference between account access and eligibility to serve
+<!-- guide: auto -->
+
+**Purpose:** Prevent administrators from treating permission to open a workspace as proof that a person is qualified for every responsibility.
+
+### How to
+
+1. Open a ministry workspace and review Members.
+2. Account access controls which ministry information and actions a person may use.
+3. Groups, levels, requirements, availability, and blocks determine whether that person may be assigned.
+4. Adjust the correct setting instead of increasing administrative access.
+
+## Understand which ministries an administrator is allowed to manage
+<!-- guide: auto -->
+
+**Purpose:** Keep ministry-specific administrators inside their assigned scope while allowing global administrators to work chapel-wide.
+
+### How to
+
+1. Open Ministries and choose My Ministries.
+2. Cards marked Admin are the ministries the current profile may manage.
+3. Member-only ministries remain readable according to membership but do not expose administrator actions.
+4. Owner and Super Admin profiles may manage all configured ministries.
+
+## Understand the difference between an invitation and an access request
+<!-- guide: auto -->
+
+**Purpose:** Help administrators choose the correct process depending on who initiated the relationship.
+
+### How to
+
+1. An invitation begins when an administrator enters a person's email and selects ministries.
+2. An access request begins when a signed-in person selects ministries they want to join.
+3. Invitations require recipient acceptance; access requests require administrator approval.
+4. Use Members to review both pending processes.
+
+## Leave a ministry and understand what happens to existing history
+<!-- guide: auto -->
+
+**Purpose:** Allow a member to end active participation without erasing prior assignments or completed service.
+
+### How to
+
+1. Open the ministry workspace and go to Members.
+2. Review Your membership and locate Leave ministry.
+3. Confirm only when you intend to remove current access.
+4. Historical assignments and completed service remain recorded for audit and reporting.
+
+## Understand why a ministry may be visible when you are not a member
+<!-- guide: auto -->
+
+**Purpose:** Distinguish the chapel ministry directory from the current profile's direct memberships.
+
+### How to
+
+1. Open Ministries and compare All Ministries with My Ministries.
+2. All Ministries may include ministries available for discovery or access requests.
+3. My Ministries contains the current profile's direct memberships.
+4. Use the Active Member badge to identify direct access.
+
+## Choose between Available, Partially Available, and Unavailable
+<!-- guide: auto -->
+
+**Purpose:** Record the correct type of availability so schedulers do not treat a limited time window as an all-day commitment.
+
+### How to
+
+1. Open Availability and select Calendar.
+2. Select a future date.
+<!-- guide-step: {"mode":"target","target":"availability-date","event":"click"} -->
+3. Choose Available all day, Partially available, or Unavailable according to that date.
+4. For partial availability, enter the exact time window before saving.
+
+## Understand exact-date availability versus recurring exclusion rules
+<!-- guide: auto -->
+
+**Purpose:** Help users choose a one-time exception or a repeating rule without unintentionally blocking extra dates.
+
+### How to
+
+1. Open Availability.
+2. Use Calendar when the change applies to a particular date or date range.
+3. Use Exclusion Rules when the same unavailable occurrence repeats, such as every Tuesday evening.
+4. Review existing rules before creating another overlapping entry.
+
+## Enter a partial-day availability window
+<!-- guide: auto -->
+
+**Purpose:** Make a profile schedulable only during the portion of a date when the person can actually serve.
+
+### How to
+
+1. Open Availability, select Calendar, and choose a future date.
+<!-- guide-step: {"mode":"target","target":"availability-date","event":"click"} -->
+2. Select Partially available.
+<!-- guide-step: {"mode":"target","target":"availability-partial","event":"click"} -->
+3. Choose the Available from and Available until times.
+4. Save partial availability after checking AM/PM and the end time.
+
+## Add an unavailable range for vacation or another absence
+<!-- guide: auto -->
+
+**Purpose:** Block several consecutive dates in one action while preserving a useful reason for later review.
+
+### How to
+
+1. Open Availability and select Calendar.
+2. In Add an unavailable range, enter the first date.
+<!-- guide-step: {"mode":"target","target":"availability-range-start","event":"change"} -->
+3. Enter the last date and optionally add a label such as Vacation.
+<!-- guide-step: {"mode":"target","target":"availability-range-end","event":"change"} -->
+4. Save the range after reviewing any affected assignments.
+
+## Limit an absence to one ministry
+<!-- guide: auto -->
+
+**Purpose:** Avoid blocking a person from unrelated ministries when an absence affects only one kind of service.
+
+### How to
+
+1. Open Availability and select Exclusion Rules.
+2. Select Create New Exclusion Rule.
+<!-- guide-step: {"mode":"target","target":"availability-create-rule","event":"click"} -->
+3. Select only the ministry affected by the absence.
+4. Set the occurrence, weekday, and unavailable time, then create the rule.
+
+## Understand what happens when unavailability overlaps an assignment
+<!-- guide: auto -->
+
+**Purpose:** Preserve an existing responsibility while making the scheduling conflict visible for correction.
+
+### How to
+
+1. Add or change availability for a date that already contains an assignment.
+2. Review the overlapping assignments shown before or after saving.
+3. Unavailability does not silently remove a confirmed responsibility.
+4. Open the assignment to request a change or substitute when necessary.
+
+## Understand service preferences versus availability
+<!-- guide: auto -->
+
+**Purpose:** Separate how often or how willingly someone prefers to serve from whether they can serve at a particular time.
+
+### How to
+
+1. Use Availability for exact dates, ranges, and repeating unavailable times.
+2. Use service preferences for Prefer, Can help sometimes, Available if necessary, Cannot serve, or Not specified.
+3. A preference guides assignment choices but does not replace a date-specific conflict.
+4. Keep both areas current for accurate suggestions.
+
+## Set minimum and maximum service-frequency preferences
+<!-- guide: auto -->
+
+**Purpose:** Give automatic scheduling a reasonable monthly target without creating false availability.
+
+### How to
+
+1. Open a ministry workspace and go to Availability or Members, depending on your access.
+2. Open Service Frequency for the current profile.
+3. Enter the preferred minimum and maximum monthly assignments, or leave a limit blank.
+4. Update frequency after checking that the values match the intended ministry.
+
+## Understand which availability rule wins when several rules overlap
+<!-- guide: auto -->
+
+**Purpose:** Explain the final availability shown when exact dates, ranges, recurring exclusions, and assignments affect the same day.
+
+### How to
+
+1. Open Availability and select the affected date.
+2. An exact-date choice is the clearest statement for that date.
+3. Date ranges and exclusion rules supply broader unavailable periods when no more specific choice replaces them.
+4. Existing assignments remain visible even when the final availability becomes unavailable.
+
+## Manage availability for a child or other managed profile
+<!-- guide: auto -->
+
+**Purpose:** Ensure a guardian records availability against the correct household member.
+
+### How to
+
+1. Open the profile selector and switch to the managed profile.
+2. Confirm the child's name in the header.
+3. Open Availability and record the date, range, or exclusion rule.
+4. Switch profiles again before editing another family member's availability.
+
+## Understand availability calendar markers
+<!-- guide: auto -->
+
+**Purpose:** Explain the circles, split colors, outlines, and other calendar states without permanently occupying screen space with a legend.
+
+### How to
+
+1. Open Availability and select Calendar.
+2. Select the information icon beside the calendar.
+<!-- guide-step: {"mode":"target","target":"availability-legend","event":"click"} -->
+3. Compare the legend with the dates shown on the calendar.
+4. Close the guide when the markers are clear.
+
+## Remove or replace an existing availability rule
+<!-- guide: auto -->
+
+**Purpose:** Correct outdated availability without stacking contradictory ranges or recurring rules.
+
+### How to
+
+1. Open Availability and identify whether the entry is a date range or Exclusion Rule.
+2. For a range, locate Remove beside that range.
+3. For an exclusion, open Exclusion Rules and remove the matching weekday rule.
+4. Create the replacement only after the old rule is removed.
+
+## Understand proposed assignments versus confirmed assignments
+<!-- guide: auto -->
+
+**Purpose:** Help a volunteer recognize whether a responsibility is awaiting a decision or has become an active commitment.
+
+### How to
+
+1. Open Events and choose My Events.
+2. Open the event and review the assignment status.
+3. A proposed assignment is reserved while awaiting confirmation; a confirmed assignment is an accepted responsibility.
+4. Use the response actions shown for the current status.
+
+## Confirm all assignments without confirming conflicts
+<!-- guide: auto -->
+
+**Purpose:** Accept several compatible proposals efficiently without accidentally accepting an overlapping or otherwise conflicting duty.
+
+### How to
+
+1. Open Home or an event containing proposed assignments.
+2. Review the conflicts identified beside the proposals.
+3. Select Confirm all non-conflicting assignments when available.
+4. Review conflicting assignments individually before responding.
+
+## Understand Decline versus Can't Make It
+<!-- guide: auto -->
+
+**Purpose:** Use the correct response so the scheduler knows whether an unaccepted proposal should reopen or a confirmed commitment needs replacement.
+
+### How to
+
+1. Open the assignment from Events.
+2. Use Decline when the assignment has not been confirmed; the position returns to the open schedule.
+3. Use Can't Make It when a confirmed responsibility can no longer be fulfilled.
+4. Follow the substitute process when the confirmed assignment requires coverage.
+
+## Request a substitute for a confirmed assignment
+<!-- guide: auto -->
+
+**Purpose:** Find replacement coverage while keeping responsibility and notifications attached to the original volunteer until acceptance.
+
+### How to
+
+1. Open Events, choose My Events, and open the confirmed assignment.
+2. Select Can't Make It or Request Substitute.
+3. Add a short note that may help administrators and possible substitutes.
+4. Submit the request and monitor its status until someone accepts.
+
+## Understand why you remain responsible until a substitute accepts
+<!-- guide: auto -->
+
+**Purpose:** Prevent a coverage gap caused by treating a substitute request as an immediate release from duty.
+
+### How to
+
+1. Open the assignment after requesting a substitute.
+2. The original assignment remains active while the request is pending.
+3. When an eligible substitute accepts, the assignment transfers and both people receive the updated status.
+4. Contact an administrator if the event is near and no substitute has accepted.
+
+## Report an incorrect assignment without requesting a substitute
+<!-- guide: auto -->
+
+**Purpose:** Separate a data or allocation problem from a genuine inability to serve.
+
+### How to
+
+1. Open Events and select the affected assignment.
+2. Choose Report Assignment Error or Request Change rather than Can't Make It.
+3. Describe what is incorrect and what correction is expected.
+4. Keep the assignment visible until an administrator resolves the report.
+
+## Understand immediately confirmed volunteer roles versus expressions of interest
+<!-- guide: auto -->
+
+**Purpose:** Clarify whether selecting an opportunity creates a commitment or merely asks a leader to review the volunteer.
+
+### How to
+
+1. Open an event with public or member volunteer opportunities.
+2. Review the wording beside the available responsibility.
+3. Self-select roles become confirmed when the eligible volunteer completes the action.
+4. Interest-only roles remain pending until an administrator approves or assigns the person.
+
+## Volunteer for an open responsibility
+<!-- guide: auto -->
+
+**Purpose:** Let an eligible signed-in member fill an available need while respecting qualification and capacity rules.
+
+### How to
+
+1. Open Events and select an event with open roles.
+2. Open the available responsibilities and choose one you can fulfill.
+3. Review the event time, responsibility time, and confirmation behavior.
+4. Commit to the opportunity only after checking for conflicts.
+
+## Understand compatible and incompatible double-duty assignments
+<!-- guide: auto -->
+
+**Purpose:** Explain why some responsibilities can be held together while others remain blocked even when they belong to one event.
+
+### How to
+
+1. Open the event details and review the responsibility times and requirements.
+2. Compatible double duty must be explicitly allowed and must not create a time or qualification conflict.
+3. Incompatible duties remain blocked even if the volunteer appears otherwise available.
+4. Ask an administrator to correct the event setup rather than forcing an invalid assignment.
+
+## Understand responsibility times versus the main event time
+<!-- guide: auto -->
+
+**Purpose:** Prevent late arrival or premature departure when setup, preparation, or cleanup occurs outside the public event time.
+
+### How to
+
+1. Open the event details from Calendar or Events.
+2. Compare the main event time with the time shown for your responsibility.
+3. Follow the responsibility time when it begins earlier or ends later.
+4. Use the personal calendar feed or reminders to retain the assignment-specific time.
+
+## Understand assignment, shortage, and conflict colors
+<!-- guide: auto -->
+
+**Purpose:** Help users distinguish a personal assignment from routine open coverage and urgent issues.
+
+### How to
+
+1. Open Home, Calendar, or Events.
+2. Assigned events use the personal-assignment treatment; coverage icons show filled, open, or urgent positions.
+3. Conflict or issue indicators identify records that require review rather than ordinary vacancies.
+4. Open the event for the exact issue count and details.
+
+## Understand why an assignment may be marked confirmation overdue
+<!-- guide: auto -->
+
+**Purpose:** Explain that an unanswered proposal remains reserved while alerting the volunteer and administrators that a response is late.
+
+### How to
+
+1. Open Events and choose My Events.
+2. Open the assignment marked confirmation overdue.
+3. Review the original proposal and any scheduling conflict.
+4. Confirm or decline promptly so the position can be finalized or reopened.
+
+## Invite a new member
+<!-- guide: auto -->
+
+**Purpose:** Send a controlled invitation that creates membership only after the recipient accepts it.
+
+### How to
+
+Admin only: 1. Open an administered ministry and select Members, then Add Member.
+<!-- guide-step: {"mode":"target","target":"action-add-member","event":"click"} -->
+2. Enter the person's email address.
+<!-- guide-step: {"mode":"target","target":"member-invite-email","event":"input"} -->
+3. Select at least one administered ministry.
+<!-- guide-step: {"mode":"target","target":"member-invite-ministry","event":"change"} -->
+4. Send the invitation after checking the selected ministries.
+
+## Invite someone to several administered ministries
+<!-- guide: auto -->
+
+**Purpose:** Avoid separate invitations while keeping each requested membership explicit.
+
+### How to
+
+Admin only: 1. Open an administered ministry and select Members, then Add Member.
+2. Enter the invitee's email address.
+<!-- guide-step: {"mode":"target","target":"member-invite-email","event":"input"} -->
+3. Select every ministry the person should be invited to.
+<!-- guide-step: {"mode":"target","target":"member-invite-ministry","event":"change"} -->
+4. Send one invitation containing all selected memberships.
+
+## Understand why only administered ministries are available when inviting
+<!-- guide: auto -->
+
+**Purpose:** Prevent a ministry-specific administrator from granting access outside their authority.
+
+### How to
+
+Admin only: 1. Open Members and select Add Member.
+2. Review the ministry choices in the invitation form.
+3. Ministry administrators see only ministries where they hold Admin access.
+4. Owner and Super Admin profiles may invite across the chapel's configured ministries.
+
+## Review pending invitations in ministry-priority order
+<!-- guide: auto -->
+
+**Purpose:** Put invitations belonging to the administrator's own ministries ahead of unrelated global records.
+
+### How to
+
+Admin only: 1. Open Members and review Pending Invited Members.
+2. Invitations for ministries you administer appear first.
+3. Review the email, ministries, invitation date, and current status.
+4. Follow up, resend, or revoke only within your authorized scope.
+
+## Approve or reject a ministry access request
+<!-- guide: auto -->
+
+**Purpose:** Turn a user-initiated request into an intentional ministry membership decision.
+
+### How to
+
+Admin only: 1. Open the administered ministry and select Members, then Roster.
+2. Review Access Requests and confirm the requested profile and ministry.
+3. Approve when the person should become a member, or reject when access is not appropriate.
+4. The decision applies only to the ministry you administer.
+
+## Understand Member and Admin access versus serving qualifications
+<!-- guide: auto -->
+
+**Purpose:** Keep workspace permissions separate from the requirements used to assign responsibilities.
+
+### How to
+
+Admin only: 1. Open Members and select Member Access.
+2. Member access permits normal ministry participation; Admin access permits ministry management.
+3. Serving levels, groups, verification, and responsibility requirements determine eligibility.
+4. Do not grant Admin access merely to make someone eligible to serve.
+
+## Mark a member as verified and understand the verification shield
+<!-- guide: auto -->
+
+**Purpose:** Record an authorized verification decision without exposing private screening reasons to ordinary users.
+
+### How to
+
+Admin only: 1. Open Members and select Member Access.
+2. Select the member whose verification status is authorized for review.
+3. Mark the profile verified according to chapel policy.
+4. The shield indicates verification status but does not display private background details.
+
+## Assign a serving level to a member
+<!-- guide: auto -->
+
+**Purpose:** Record the highest approved ministry-specific capability so assignment rules can include every level below it.
+
+### How to
+
+Admin only: 1. Open Members and select Member Access.
+2. Select the member and choose the approved serving level.
+3. Review any responsibility requirements affected by the change.
+4. Save the access update after confirming the correct ministry.
+
+## Understand ministry groups versus serving levels
+<!-- guide: auto -->
+
+**Purpose:** Help administrators model teams and qualifications with the correct structure.
+
+### How to
+
+Admin only: 1. Open Members and review Levels & Capabilities and Member Access.
+2. Levels are ordered qualifications where a higher level includes lower capabilities.
+3. Groups are named collections used for organization or responsibility requirements.
+4. A member may have both a serving level and one or more groups.
+
+## Set a member's service-frequency limits
+<!-- guide: auto -->
+
+**Purpose:** Prevent automatic scheduling from repeatedly assigning one person beyond the intended workload.
+
+### How to
+
+Admin only: 1. Open Members and select Member Access.
+2. Select the member and review minimum, maximum, and cross-ministry frequency values.
+3. Enter only limits approved for that profile and ministry.
+4. Save the member update and review the next automatic schedule for the effect.
+
+## Record availability or responses for a member who does not use the app
+<!-- guide: auto -->
+
+**Purpose:** Include technology-resistant volunteers while preserving who supplied the information and who entered it.
+
+### How to
+
+Admin only: 1. Open the member from the administered ministry.
+2. Record the availability, confirmation, decline, substitution, or no-show communicated offline.
+3. Select or enter the source, such as phone or in-person conversation.
+4. Save only after confirming the volunteer and event are correct.
+
+## Understand what is recorded when acting for a member
+<!-- guide: auto -->
+
+**Purpose:** Make administrator-entered actions accountable and distinguish them from changes submitted directly by the volunteer.
+
+### How to
+
+Admin only: 1. Open the member or event record before acting on another person's behalf.
+2. The app records the affected profile, acting administrator, action, source, and time.
+3. Notes should explain only the operational fact and avoid unnecessary private information.
+4. Review recent activity or audit details when a later correction is required.
+
+## Choose between creating an event from scratch and using a template
+<!-- guide: auto -->
+
+**Purpose:** Start with the right source so responsibilities and ministry participation are neither omitted nor copied unnecessarily.
+
+### How to
+
+Admin only: 1. Open Events and select Create Event.
+<!-- guide-step: {"mode":"target","target":"action-create","event":"click"} -->
+2. Use a template when the event follows an established staffing pattern.
+3. Start without a template for a genuinely custom event, then add only the required ministries and responsibilities.
+4. Review the resulting event before saving it.
+
+## Understand cloning an event versus creating from a template
+<!-- guide: auto -->
+
+**Purpose:** Prevent accidental copying of one event's temporary details when only the reusable staffing design is needed.
+
+### How to
+
+Admin only: 1. Use Clone when the new event should begin with the selected event's current details and responsibilities.
+2. Use Create Event with a template when the new event should use the approved reusable design.
+3. Review dates, notes, assignments, privacy, and ministry ownership after cloning.
+4. Save the new event only after removing details that should not repeat.
+
+## Change one event versus this event and future events
+<!-- guide: auto -->
+
+**Purpose:** Apply recurring-event corrections without changing past occurrences or unrelated dates.
+
+### How to
+
+Admin only: 1. Open the recurring event and choose Edit.
+2. Select This event only for a one-time exception.
+3. Select This and future events when the approved pattern changes from this date forward.
+4. Review the preview before applying the effective-dated change.
+
+## Understand why editing a template does not rewrite existing events
+<!-- guide: auto -->
+
+**Purpose:** Keep already-created schedules stable while allowing the reusable design to improve for future events.
+
+### How to
+
+Admin only: 1. Open Templates and edit the reusable template.
+2. Existing events retain the responsibility snapshot copied when they were created.
+3. New events created from the updated template receive the new design.
+4. Edit a specific existing event separately when it also needs the change.
+
+## Cancel an event without deleting its history
+<!-- guide: auto -->
+
+**Purpose:** Stop an event and its active expectations while preserving audit, notification, and reporting history.
+
+### How to
+
+Admin only: 1. Open the administered ministry, select Events, and choose Cancel.
+<!-- guide-step: {"mode":"target","target":"action-cancel","event":"click"} -->
+2. Select the intended event and review affected assignments.
+3. Enter or confirm the operational cancellation details when requested.
+4. Cancel the event; do not delete historical records manually.
+
+## Understand Draft, Published, Cancelled, Completed, and Archived event states
+<!-- guide: auto -->
+
+**Purpose:** Explain what users and notifications should expect at each point in an event's lifecycle.
+
+### How to
+
+Admin only: 1. Open the event details and review its status.
+2. Draft is still being prepared; Published is active and visible to its intended audience.
+3. Cancelled preserves a stopped event; Completed represents a past event with retained outcomes.
+4. Archived keeps older records out of routine operational views without deleting them.
+
+## Understand automatic, volunteer-choice, and administrator-assigned responsibilities
+<!-- guide: auto -->
+
+**Purpose:** Match each responsibility with the correct assignment process instead of treating every opening the same way.
+
+### How to
+
+Admin only: 1. Open the event or template responsibility editor.
+2. Automatic responsibilities may be filled by the scheduler from eligible members.
+3. Volunteer-choice responsibilities allow eligible people to select or express interest.
+4. Administrator-assigned responsibilities remain under leader control.
+
+## Understand required staffing versus optional staffing targets
+<!-- guide: auto -->
+
+**Purpose:** Distinguish a true shortage from an aspirational or optional number of helpers.
+
+### How to
+
+Admin only: 1. Open the responsibility in an event or template.
+2. Required quantity contributes to coverage shortages when unfilled.
+3. An optional default target helps planning but does not create a blocking shortage.
+4. Save staffing values that reflect the actual operational requirement.
+
+## Choose between Auto Suggest, Automate, and Leave Open
+<!-- guide: auto -->
+
+**Purpose:** Give administrators the right balance between system recommendations and human control for each event.
+
+### How to
+
+Admin only: 1. Open an event with unfilled responsibilities.
+2. Use Auto Suggest to review proposed eligible people before saving assignments.
+3. Use Automate when the event may accept valid automatic assignments under configured rules.
+4. Use Leave Open when the position should remain intentionally unassigned.
+
+## Resolve shortages, conflicts, and change requests from event details
+<!-- guide: auto -->
+
+**Purpose:** Keep all corrections attached to the authoritative event instead of resolving dashboard counts without fixing assignments.
+
+### How to
+
+Admin only: 1. Open Home and select an event listed under items needing attention.
+2. Review each issue in the event details, including shortages, conflicts, substitute requests, and assignment changes.
+3. Choose an eligible assignment, use automation where appropriate, or intentionally leave the position open.
+4. Save the complete set of corrections after the issue count is resolved.
+
+## Understand who controls each section of a multi-ministry event
+<!-- guide: auto -->
+
+**Purpose:** Preserve one coordinated event while letting each participating ministry manage its own staffing section.
+
+### How to
+
+Admin only: 1. Open the shared event and review its participating ministry sections.
+2. The coordinating ministry controls shared event details according to its authority.
+3. Participating ministry administrators manage only their ministry's responsibilities and assignments.
+4. Global administrators may resolve cross-ministry configuration when necessary.
+
+## Create a public volunteer link without exposing private event information
+<!-- guide: auto -->
+
+**Purpose:** Invite outside volunteers to approved opportunities while keeping private names, assignments, notes, and counts protected.
+
+### How to
+
+Admin only: 1. Open the event details and enable the intended public volunteer opportunities.
+2. Review the public title, description, responsibilities, privacy level, and contact fields.
+3. Publish the approved event and copy the volunteer link.
+4. Test the public link before sharing it with the intended audience.
+
+## Approve a one-time volunteer without granting ministry membership
+<!-- guide: auto -->
+
+**Purpose:** Accept help for one event without creating ongoing access to the ministry workspace or roster.
+
+### How to
+
+Admin only: 1. Open the event's volunteer signups or approvals.
+2. Review the requested responsibility, contact information, consent, and event requirements.
+3. Approve the signup as a one-time volunteer rather than adding ministry membership.
+4. Confirm the person appears only on the applicable event roster.
+
+## Understand when a volunteer should become a reusable profile
+<!-- guide: auto -->
+
+**Purpose:** Reuse verified contact and consent information for repeat volunteering without automatically granting ministry access.
+
+### How to
+
+Admin only: 1. Review the volunteer's completed or repeated event registrations.
+2. Keep an isolated one-time registration when future participation is unlikely.
+3. Create or connect a reusable volunteer profile when repeat participation requires retained identity and history.
+4. Add ministry membership separately only when it is explicitly approved.
+
+## Apply a different template to an existing event
+<!-- guide: auto -->
+
+**Purpose:** Change the staffing design of an event without rebuilding its date, ownership, and other approved details.
+
+### How to
+
+Admin only: 1. Open the event and choose Edit or More Details.
+2. Select the replacement template and review the preview of responsibility changes.
+3. Confirm which event-specific responsibilities or assignments will be retained, replaced, or removed.
+4. Apply the template only after the preview matches the intended event.
+
+## Understand when a scheduling conflict can be overridden
+<!-- guide: auto -->
+
+**Purpose:** Reserve overrides for reviewed exceptions and preserve an explanation for later administrators.
+
+### How to
+
+Admin only: 1. Open the event or assignment that displays a conflict.
+2. Review the overlapping time, facility, resource, priest, or member assignment.
+3. Correct the schedule when the conflict is real; override only when the overlap is intentionally acceptable.
+4. Enter a concise reason and confirm the override so the decision remains auditable.

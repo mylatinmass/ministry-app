@@ -437,6 +437,7 @@ const MinistryMembers = ({ data, activeAction }) => {
         </div>
         <button
           type="button"
+          data-guide-id="member-leave-ministry"
           onClick={() =>
             updateMembership({ userId: data.user.id, action: "leave" })
           }
@@ -481,6 +482,7 @@ const MinistryMembers = ({ data, activeAction }) => {
               Email address
               <input
                 type="email"
+                data-guide-id="member-invite-email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 required
@@ -500,6 +502,7 @@ const MinistryMembers = ({ data, activeAction }) => {
                 >
                   <input
                     type="checkbox"
+                    data-guide-id="member-invite-ministry"
                     checked={selectedMinistryIds.includes(ministry.id)}
                     onChange={() => toggleMinistry(ministry.id)}
                     className="size-4 accent-[#896542]"

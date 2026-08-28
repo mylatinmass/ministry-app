@@ -389,7 +389,7 @@ const MinistryAvailability = ({ ministryId = "" }) => {
           <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm sm:p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h3 className="century-font text-xl text-gray-900">Existing Exclusion Rules</h3>
-              <button type="button" onClick={() => setCreatingRule(true)} className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white">
+              <button type="button" data-guide-id="availability-create-rule" onClick={() => setCreatingRule(true)} className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white">
                 <PlusIcon className="size-5" /> Create New Exclusion Rule
               </button>
             </div>
@@ -465,6 +465,7 @@ const MinistryAvailability = ({ ministryId = "" }) => {
               <button type="button" aria-label="Next month" onClick={() => setVisibleMonth((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))} className="absolute right-2 top-1 z-10 rounded-xl p-2 text-gray-400 transition hover:bg-gray-100 lg:top-1/2 lg:-translate-y-1/2 xl:-right-12"><ChevronRightIcon className="size-5" /></button>
               <button
                 type="button"
+                data-guide-id="availability-legend"
                 aria-label="Explain availability calendar markers"
                 aria-haspopup="dialog"
                 aria-expanded={legendOpen}
@@ -530,7 +531,7 @@ const MinistryAvailability = ({ ministryId = "" }) => {
                             ? { backgroundImage: "linear-gradient(to bottom, #fff 0%, #fff 50%, #f4ede6 50%, #f4ede6 100%)" }
                             : undefined
                           return (
-                            <button key={`${monthKey}-${key}`} type="button" disabled={past} onClick={() => { setSelectedDate(key); setShowPartialAvailability(false) }} aria-pressed={selected} aria-current={isToday ? "date" : undefined} aria-label={`${formatDate(key)}: ${dateSpecificLabel}`} className={`group mx-auto flex min-h-14 w-full flex-col items-center text-gray-900 sm:min-h-16 ${past ? "cursor-not-allowed opacity-40" : ""}`}>
+                            <button key={`${monthKey}-${key}`} type="button" data-guide-id={past ? undefined : "availability-date"} disabled={past} onClick={() => { setSelectedDate(key); setShowPartialAvailability(false) }} aria-pressed={selected} aria-current={isToday ? "date" : undefined} aria-label={`${formatDate(key)}: ${dateSpecificLabel}`} className={`group mx-auto flex min-h-14 w-full flex-col items-center text-gray-900 sm:min-h-16 ${past ? "cursor-not-allowed opacity-40" : ""}`}>
                               <span style={stateStyle} className={`relative flex size-8 items-center justify-center rounded-full text-sm font-semibold transition sm:size-12 md:text-base ${stateClass} ${past ? "" : stateClass ? "group-hover:brightness-95" : "group-hover:bg-gray-50"}`}>
                                 {date.getDate()}
                               </span>
@@ -561,8 +562,8 @@ const MinistryAvailability = ({ ministryId = "" }) => {
               </p>
               {selectedDate >= data.today && (
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <button type="button" disabled={saving} onClick={() => setOverride("available")} className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><CheckCircleIcon className="size-5" />Available all day</button>
-                  <button type="button" disabled={saving} onClick={() => {
+                  <button type="button" data-guide-id="availability-available" disabled={saving} onClick={() => setOverride("available")} className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><CheckCircleIcon className="size-5" />Available all day</button>
+                  <button type="button" data-guide-id="availability-partial" disabled={saving} onClick={() => {
                     const currentWindow = selectedDay?.explicit && selectedDay.status === "available"
                       ? (selectedDay.windows || []).find((window) => !window.allDay)
                       : null
@@ -574,7 +575,7 @@ const MinistryAvailability = ({ ministryId = "" }) => {
                     }
                     setShowPartialAvailability((current) => !current)
                   }} className="inline-flex items-center gap-2 rounded-xl border border-[#b68b65] bg-white px-4 py-2 text-sm font-semibold text-[#6f4f34] disabled:opacity-50"><ClockIcon className="size-5" />Partially available</button>
-                  <button type="button" disabled={saving} onClick={() => setOverride("unavailable")} className="inline-flex items-center gap-2 rounded-xl bg-rose-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><NoSymbolIcon className="size-5" />Unavailable</button>
+                  <button type="button" data-guide-id="availability-unavailable" disabled={saving} onClick={() => setOverride("unavailable")} className="inline-flex items-center gap-2 rounded-xl bg-rose-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><NoSymbolIcon className="size-5" />Unavailable</button>
                 </div>
               )}
               {showPartialAvailability && selectedDate >= data.today && (
@@ -594,9 +595,9 @@ const MinistryAvailability = ({ ministryId = "" }) => {
             <form onSubmit={addRange} className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
               <h3 className="century-font text-xl text-gray-900">Add an unavailable range</h3>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <label className="text-sm font-semibold text-gray-700">Start date<input required type="date" min={data.today} value={range.startDate} onChange={(event) => setRange((current) => ({ ...current, startDate: event.target.value }))} className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 font-normal" /></label>
-                <label className="text-sm font-semibold text-gray-700">End date<input required type="date" min={range.startDate || data.today} value={range.endDate} onChange={(event) => setRange((current) => ({ ...current, endDate: event.target.value }))} className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 font-normal" /></label>
-                <label className="text-sm font-semibold text-gray-700 sm:col-span-2">Label (optional)<input value={range.label} onChange={(event) => setRange((current) => ({ ...current, label: event.target.value }))} placeholder="Vacation, school break…" className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 font-normal" /></label>
+                <label className="text-sm font-semibold text-gray-700">Start date<input data-guide-id="availability-range-start" required type="date" min={data.today} value={range.startDate} onChange={(event) => setRange((current) => ({ ...current, startDate: event.target.value }))} className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 font-normal" /></label>
+                <label className="text-sm font-semibold text-gray-700">End date<input data-guide-id="availability-range-end" required type="date" min={range.startDate || data.today} value={range.endDate} onChange={(event) => setRange((current) => ({ ...current, endDate: event.target.value }))} className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 font-normal" /></label>
+                <label className="text-sm font-semibold text-gray-700 sm:col-span-2">Label (optional)<input data-guide-id="availability-range-label" value={range.label} onChange={(event) => setRange((current) => ({ ...current, label: event.target.value }))} placeholder="Vacation, school break…" className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 font-normal" /></label>
               </div>
               <button disabled={saving} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#896542] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><PlusIcon className="size-5" />Save range</button>
             </form>
@@ -604,7 +605,7 @@ const MinistryAvailability = ({ ministryId = "" }) => {
               <h3 className="century-font text-xl text-gray-900">Unavailable ranges</h3>
               <div className="mt-4 space-y-2">
                 {!ranges.length && <p className="text-sm text-gray-500">No unavailable ranges.</p>}
-                {ranges.map((block) => <div key={block.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 p-3"><div><p className="text-sm font-semibold text-gray-800">{block.startDate === block.endDate ? formatDate(block.startDate) : `${formatDate(block.startDate)}–${formatDate(block.endDate)}`}</p>{block.label && <p className="mt-0.5 text-xs text-gray-500">{block.label}</p>}</div><button type="button" disabled={saving} onClick={() => removeRange(block)} aria-label="Remove unavailable range" className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-700"><TrashIcon className="size-5" /></button></div>)}
+                {ranges.map((block) => <div key={block.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 p-3"><div><p className="text-sm font-semibold text-gray-800">{block.startDate === block.endDate ? formatDate(block.startDate) : `${formatDate(block.startDate)}–${formatDate(block.endDate)}`}</p>{block.label && <p className="mt-0.5 text-xs text-gray-500">{block.label}</p>}</div><button type="button" data-guide-id="availability-remove-range" disabled={saving} onClick={() => removeRange(block)} aria-label="Remove unavailable range" className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-700"><TrashIcon className="size-5" /></button></div>)}
               </div>
             </div>
           </section>

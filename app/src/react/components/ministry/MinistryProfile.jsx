@@ -101,6 +101,7 @@ const ProfileSectionHeading = ({
   saving,
   onToggleEdit,
   onSave,
+  guideId,
 }) => (
   <div className="flex flex-wrap items-center justify-between gap-3">
     <div className="flex min-w-0 items-center gap-2.5">
@@ -115,6 +116,7 @@ const ProfileSectionHeading = ({
     <div className="flex items-center gap-2">
       <button
         type="button"
+        data-guide-id={guideId}
         onClick={onToggleEdit}
         disabled={saving}
         className="inline-flex items-center gap-1.5 rounded-lg border border-[#d8c7b8] px-3 py-2 text-xs font-semibold text-[#6f4f34] disabled:opacity-50"
@@ -581,6 +583,7 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
             saving={isSaving}
             onToggleEdit={toggleSectionEditing}
             onSave={saveProfile}
+            guideId="profile-edit-account"
           />
         </div>
         <div className="grid grid-cols-2 gap-x-4 gap-y-4 sm:gap-x-6">
@@ -704,6 +707,7 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
           saving={isSaving}
           onToggleEdit={toggleSectionEditing}
           onSave={saveProfile}
+          guideId="profile-edit-notifications"
         />
           <div className="mt-4 min-w-0">
             <label className="mt-3 block max-w-sm">
@@ -907,6 +911,7 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
           saving={isSaving}
           onToggleEdit={toggleSectionEditing}
           onSave={saveProfile}
+          guideId="profile-edit-ministries"
         />
         {profile.ministries.length ? (
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -946,11 +951,13 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
             saving={isSaving}
             onToggleEdit={toggleSectionEditing}
             onSave={saveProfile}
+            guideId="profile-edit-profiles"
           />
             {!profile.isManagedProfile && isEditing && (
               <div className="mt-3 flex justify-end">
               <button
                 type="button"
+                data-guide-id="profile-add-child"
                 onClick={() => setShowAddChild((visible) => !visible)}
                 className="inline-flex items-center gap-2 rounded-lg border border-[#d8c7b8] px-3 py-2 text-sm font-semibold text-[#6f4f34]"
               >
@@ -961,8 +968,8 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
 
           {showAddChild && (
             <form onSubmit={addChild} className="mt-3 grid gap-2 sm:grid-cols-2">
-              <input required placeholder="First name" value={childForm.firstName} onChange={(event) => setChildForm((current) => ({ ...current, firstName: event.target.value }))} className="h-10 rounded-lg border border-gray-200 px-3 text-sm" />
-              <input required placeholder="Last name" value={childForm.lastName} onChange={(event) => setChildForm((current) => ({ ...current, lastName: event.target.value }))} className="h-10 rounded-lg border border-gray-200 px-3 text-sm" />
+              <input data-guide-id="profile-child-first-name" required placeholder="First name" value={childForm.firstName} onChange={(event) => setChildForm((current) => ({ ...current, firstName: event.target.value }))} className="h-10 rounded-lg border border-gray-200 px-3 text-sm" />
+              <input data-guide-id="profile-child-last-name" required placeholder="Last name" value={childForm.lastName} onChange={(event) => setChildForm((current) => ({ ...current, lastName: event.target.value }))} className="h-10 rounded-lg border border-gray-200 px-3 text-sm" />
               <button type="submit" disabled={isSaving} className="rounded-lg bg-[#896542] px-4 py-2 text-sm font-semibold text-white sm:col-span-2">Add child profile</button>
             </form>
           )}
@@ -989,7 +996,7 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
                   )}
                   {child.status === "active" && child.relationshipStatus === "active" && familyData.ministries.length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-2">
-                      <select value={requestMinistryId} onChange={(event) => setRequestMinistryId(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+                      <select data-guide-id="profile-child-ministry" value={requestMinistryId} onChange={(event) => setRequestMinistryId(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
                         <option value="">Request ministry access</option>
                         {familyData.ministries.map((ministry) => <option key={ministry.id} value={ministry.id}>{ministry.name}</option>)}
                       </select>
@@ -1000,6 +1007,7 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
+                        data-guide-id="profile-link-guardian"
                         onClick={() => {
                           setLinkingChildId((current) => current === child.id ? "" : child.id)
                           setGuardianEmail("")
@@ -1024,6 +1032,7 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
                     <form onSubmit={(event) => sendGuardianLink(event, child.id)} className="mt-3 flex flex-col gap-2 sm:flex-row">
                       <label className="sr-only" htmlFor={`guardian-email-${child.id}`}>Other guardian's account email</label>
                       <input
+                        data-guide-id="profile-guardian-email"
                         id={`guardian-email-${child.id}`}
                         type="email"
                         required
@@ -1052,6 +1061,7 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
                 </p>
                 <button
                   type="button"
+                  data-guide-id="profile-link-guardian"
                   onClick={() => {
                     setLinkingChildId((current) => current === profile.id ? "" : profile.id)
                     setGuardianEmail("")
@@ -1063,7 +1073,7 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
                 {linkingChildId === profile.id && (
                   <form onSubmit={(event) => sendGuardianLink(event, profile.id)} className="mt-3 flex flex-col gap-2 sm:flex-row">
                     <label className="sr-only" htmlFor="active-child-guardian-email">Other guardian's account email</label>
-                    <input id="active-child-guardian-email" type="email" required autoComplete="email" placeholder="Other guardian's account email" value={guardianEmail} onChange={(event) => setGuardianEmail(event.target.value)} className="h-10 flex-1 rounded-lg border border-gray-200 bg-white px-3 text-sm" />
+                    <input data-guide-id="profile-guardian-email" id="active-child-guardian-email" type="email" required autoComplete="email" placeholder="Other guardian's account email" value={guardianEmail} onChange={(event) => setGuardianEmail(event.target.value)} className="h-10 flex-1 rounded-lg border border-gray-200 bg-white px-3 text-sm" />
                     <button type="submit" disabled={!guardianEmail || isSaving} className="rounded-lg bg-[#896542] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Send link</button>
                   </form>
                 )}
@@ -1076,7 +1086,7 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
                     : "A verified activation email will add a private login while keeping every ministry, assignment, and completed duty on this profile."}
                 </p>
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                  <input type="email" required placeholder="New email address" value={separationEmail} onChange={(event) => setSeparationEmail(event.target.value)} className="h-10 flex-1 rounded-lg border border-gray-200 px-3 text-sm" />
+                  <input data-guide-id="profile-independent-email" type="email" required placeholder="New email address" value={separationEmail} onChange={(event) => setSeparationEmail(event.target.value)} className="h-10 flex-1 rounded-lg border border-gray-200 px-3 text-sm" />
                   <button type="button" disabled={!separationEmail || isSaving} onClick={() => runFamilyAction({ action: "start_separation", profileId: profile.id, email: separationEmail })} className="rounded-lg border border-[#d8c7b8] px-4 py-2 text-sm font-semibold text-[#6f4f34]">
                     {separationPending ? "Resend activation" : "Send activation"}
                   </button>

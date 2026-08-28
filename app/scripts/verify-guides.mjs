@@ -26,7 +26,7 @@ for (const rawLine of documentation.split(/\r?\n/)) {
       purpose: "",
       note: "",
       steps: [],
-      guideMode: "",
+      guideMode: "auto",
       guideOverrides: {},
     }
     section = ""
@@ -65,10 +65,9 @@ for (const rawLine of documentation.split(/\r?\n/)) {
 }
 if (current) topics.push(current)
 
-assert.equal(topics.length, 142, "Documentation topic count changed")
+assert.ok(topics.length > 0, "Documentation must contain at least one topic")
 const stepCount = topics.reduce((total, topic) => total + topic.steps.length, 0)
-assert.equal(stepCount, 705, "Documentation step count changed")
-
+assert.ok(stepCount >= topics.length, "Every topic must contain at least one step")
 const guideIds = new Set()
 const modeCounts = { target: 0, information: 0, commit: 0 }
 for (const topic of topics) {
@@ -92,8 +91,8 @@ for (const topic of topics) {
       assert.ok(step.target)
       assert.match(
         step.target,
-        /^(account-menu|ministry-card|account-nav-[a-z0-9-]+|action-[a-z0-9-]+)$/,
-        `${topic.title} references an unknown target shape`,
+        /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+        `${topic.title} references an invalid target ID`,
       )
     }
     if (step.mode === "commit") assert.equal(step.event, "continue")

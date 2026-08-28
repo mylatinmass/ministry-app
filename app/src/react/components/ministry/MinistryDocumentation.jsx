@@ -31,7 +31,7 @@ const parseDocumentation = (source) => {
         purpose: "",
         note: "",
         steps: [],
-        guideMode: "",
+        guideMode: "auto",
         guideOverrides: {},
       }
       section = ""
@@ -91,8 +91,7 @@ const parseDocumentation = (source) => {
       (topic) =>
         topic.title &&
         topic.purpose &&
-        topic.steps.length &&
-        topic.guideMode === "auto",
+        topic.steps.length,
     )
     .map((topic) => ({ ...topic, guide: buildGuide(topic) }))
     .sort((a, b) => a.title.localeCompare(b.title, "en", { sensitivity: "base" }))

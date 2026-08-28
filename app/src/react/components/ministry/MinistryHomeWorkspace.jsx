@@ -332,6 +332,7 @@ const MinistryCards = ({
           />
           <input
             type="search"
+            data-guide-id="ministry-search"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
             placeholder="Search ministries"
@@ -341,6 +342,7 @@ const MinistryCards = ({
         <label>
           <span className="sr-only">Sort ministries</span>
           <select
+            data-guide-id="ministry-sort"
             value={sortBy}
             onChange={(event) => setSortBy(event.target.value)}
             className="h-12 w-full rounded-xl border border-gray-200 bg-white px-4 text-gray-700 shadow-sm outline-none transition focus:border-[#C1A387] focus:ring-2 focus:ring-[#C1A387]/20 sm:w-auto"
@@ -442,6 +444,7 @@ const MinistryCards = ({
                       <label key={ministry.id} className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
                         <input
                           type="checkbox"
+                          data-guide-id="ministry-request-choice"
                           checked={requestedMinistryIds.includes(ministry.id)}
                           onChange={(event) => setRequestedMinistryIds((current) =>
                             event.target.checked

@@ -31,13 +31,6 @@ const OUTBOUND_ALERT_KINDS = new Set([
   "daily_admin_summary",
   "day_before_schedule_reminder",
   "final_schedule_reminder",
-  "assignment_created",
-  "substitution_available",
-  "substitution_accepted",
-  "event_published",
-  "event_changed",
-  "event_cancelled",
-  "event_substituted",
 ])
 
 const digestDelayMinutes = () => {
@@ -88,6 +81,22 @@ const conciseAssignmentMessage = (
   period: string,
 ) =>
   `Hello ${recipientName}. ${eventCountCopy(count, period)} Check the Ministry App for details.`
+
+const conciseDailyAdminMessage = (
+  recipientName: string,
+  pendingSubRequests: number,
+  unfilledPositions: number,
+) => {
+  const items = [
+    pendingSubRequests
+      ? `${pendingSubRequests} ${pendingSubRequests === 1 ? "substitute request" : "substitute requests"}`
+      : null,
+    unfilledPositions
+      ? `${unfilledPositions} ${unfilledPositions === 1 ? "unfilled position" : "unfilled positions"}`
+      : null,
+  ].filter(Boolean)
+  return `Hello ${recipientName}. You have ${items.join(" and ")} requiring admin attention. Check the Ministry App for details.`
+}
 
 const groupAssignmentDetailsByEvent = (assignments: any[]) => {
   const events = new Map<string, any>()
@@ -612,6 +621,8 @@ export const queueDailyAdminAlerts = async () => {
   const result = await getPool().query(`
     WITH admin_recipients AS (
       SELECT account.id AS recipient_user_id,
+        account.first_name AS recipient_first_name,
+        account.last_name AS recipient_last_name,
         account.global_role IN ('owner', 'super_admin') AS is_global_admin
       FROM ministry_accounts account
       WHERE account.status = 'active'
@@ -625,7 +636,8 @@ export const queueDailyAdminAlerts = async () => {
           )
         )
     )
-    SELECT admin.recipient_user_id,
+    SELECT admin.recipient_user_id, admin.recipient_first_name,
+      admin.recipient_last_name,
       (
         SELECT count(DISTINCT request.id)::INT
         FROM assignment_change_requests request
@@ -680,6 +692,11 @@ export const queueDailyAdminAlerts = async () => {
     const unfilledPositions = Number(row.unfilled_positions || 0)
     if (!pendingSubRequests && !unfilledPositions) continue
     const summary = { pendingSubRequests, unfilledPositions }
+    const conciseMessage = conciseDailyAdminMessage(
+      accountName(row),
+      pendingSubRequests,
+      unfilledPositions,
+    )
     await enqueueAlert({
       subjectUserId: row.recipient_user_id,
       recipientUserId: row.recipient_user_id,
@@ -690,7 +707,8 @@ export const queueDailyAdminAlerts = async () => {
       metadata: {
         notificationCategory: "reminders",
         notificationUrl: "/",
-        privacySafeMessage: "Your daily Ministry admin alert summary is ready.",
+        privacySafeMessage: conciseMessage,
+        conciseMessage,
         summaryType: "admin_daily",
         summary,
       },
@@ -1514,7 +1532,24 @@ const buildConciseDigest = (alerts: any[], recipientName: string) => {
       : "soon"
     return conciseAssignmentMessage(recipientName, eventIds.size, period)
   }
-  return `Hello ${recipientName}. You have ${alerts.length} Ministry App ${alerts.length === 1 ? "update" : "updates"}. Check the Ministry App for details.`
+  const alertCounts = new Map<string, number>()
+  for (const alert of alerts) {
+    const label = ({
+      assignment_created: "new assignment",
+      substitution_available: "substitute request",
+      substitution_accepted: "substitution update",
+      event_published: "published schedule",
+      event_changed: "schedule change",
+      event_cancelled: "event cancellation",
+      event_substituted: "substitution update",
+      daily_admin_summary: "admin item",
+    } as Record<string, string>)[String(alert.kind)] || "alert"
+    alertCounts.set(label, (alertCounts.get(label) || 0) + 1)
+  }
+  const items = [...alertCounts.entries()].map(([label, count]) =>
+    `${count} ${label}${count === 1 ? "" : "s"}`,
+  )
+  return `Hello ${recipientName}. You have ${items.join(" and ")}. Check the Ministry App for details.`
 }
 
 const escapeHtml = (value: unknown) =>

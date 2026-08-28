@@ -1032,7 +1032,10 @@ assert.match(chapelSettingsServer, /update_notification_test_mode/)
 assert.match(chapelSettingsServer, /notificationTestModeEnabled/)
 assert.match(chapelSettingsServer, /notificationTestAccountUserId/)
 assert.match(chapelSettingsServer, /global_role IN \('owner', 'super_admin'\)/)
-assert.match(chapelSettingsServer, /Suppressed when Notification Test Mode was enabled/)
+assert.doesNotMatch(
+  chapelSettingsServer,
+  /UPDATE ministry_message_deliveries[\s\S]*status = 'skipped'/,
+)
 assert.match(notificationTestMode, /applyNotificationTestMetadata/)
 assert.match(notificationTestMode, /notification_test_profile_missing/)
 assert.match(alertMigration, /subject_user_id/)
@@ -1045,6 +1048,7 @@ assert.match(assignmentNotifications, /processNotificationDigests/)
 assert.match(assignmentNotifications, /applyNotificationTestMetadata/)
 assert.match(assignmentNotifications, /delivery_recipient_user_id/)
 assert.match(assignmentNotifications, /notificationTestAccountUserId/)
+assert.match(assignmentNotifications, /\$2::UUID/)
 const outboundAlertKinds = assignmentNotifications.match(
   /const OUTBOUND_ALERT_KINDS = new Set\(\[([\s\S]*?)\]\)/,
 )?.[1] || ""

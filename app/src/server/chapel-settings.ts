@@ -330,29 +330,6 @@ export const handleChapelSettings = async (request: Request) => {
           `,
           [JSON.stringify(settings), context.user.id],
         )
-        if (enabled) {
-          await client.query(
-            `
-              UPDATE ministry_alerts
-              SET metadata = metadata || $1::JSONB,
-                  updated_at = now()
-              WHERE delivery_status IN ('pending', 'retry', 'processing', 'failed')
-            `,
-            [JSON.stringify({
-              notificationTestMode: true,
-              notificationTestAccountUserId: targetUserId,
-            })],
-          )
-          await client.query(
-            `
-              UPDATE ministry_message_deliveries
-              SET status = 'skipped', claimed_at = NULL, next_attempt_at = NULL,
-                  last_error = 'Suppressed when Notification Test Mode was enabled',
-                  updated_at = now()
-              WHERE status IN ('pending', 'retry', 'processing', 'failed')
-            `,
-          )
-        }
         await writeSchedulingAudit(client, context, {
           action: enabled
             ? "chapel.notification_test_mode_enabled"

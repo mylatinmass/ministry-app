@@ -3,7 +3,10 @@ import { getPool } from "../database"
 import { sendKlaviyoAlertDue } from "./klaviyo"
 import { sendTelegramMessage } from "./telegram"
 import { sendAccountPush, sendReliableEmail } from "./delivery"
-import { applyNotificationTestMetadata } from "./test-mode"
+import {
+  applyNotificationTestMetadata,
+  getNotificationTestMode,
+} from "./test-mode"
 
 const deliveryAllowed = () =>
   process.env.MINISTRY_OUTBOUND_DELIVERY_ENABLED === "true" &&
@@ -1632,6 +1635,7 @@ export const processNotificationDigests = async () => {
   const claimed = await claimDueAlerts()
   if (!claimed.length) return 0
   const ids = claimed.map((alert: any) => alert.id)
+  const notificationTestMode = await getNotificationTestMode()
   const hydrated = await getPool().query(
     `
       SELECT alert.*, subject.first_name AS subject_first_name,
@@ -1655,18 +1659,31 @@ export const processNotificationDigests = async () => {
       JOIN ministry_accounts subject ON subject.id = alert.subject_user_id
       JOIN ministry_accounts intended_recipient
         ON intended_recipient.id = alert.recipient_user_id
-      JOIN ministry_accounts recipient ON recipient.id = CASE
-        WHEN alert.metadata->>'notificationTestAccountUserId' IS NOT NULL
-          THEN (alert.metadata->>'notificationTestAccountUserId')::UUID
-        ELSE alert.recipient_user_id
-      END
+      JOIN ministry_accounts recipient ON recipient.id = COALESCE(
+        CASE
+          WHEN alert.metadata->>'notificationTestAccountUserId' IS NOT NULL
+            THEN (alert.metadata->>'notificationTestAccountUserId')::UUID
+          ELSE NULL
+        END,
+        $2::UUID,
+        alert.recipient_user_id
+      )
       LEFT JOIN telegram_connections telegram
         ON telegram.account_user_id = recipient.id AND telegram.status = 'active'
       WHERE alert.id = ANY($1)
       ORDER BY alert.created_at
     `,
-    [ids],
+    [ids, notificationTestMode.targetUserId],
   )
+  if (notificationTestMode.enabled) {
+    for (const alert of hydrated.rows) {
+      alert.metadata = {
+        ...(alert.metadata || {}),
+        notificationTestMode: true,
+        notificationTestAccountUserId: notificationTestMode.targetUserId,
+      }
+    }
+  }
   const byRecipient = new Map<string, any[]>()
   for (const alert of hydrated.rows) {
     const rows = byRecipient.get(alert.delivery_recipient_user_id) || []

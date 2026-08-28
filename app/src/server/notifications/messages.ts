@@ -883,10 +883,13 @@ export const processMinistryMessageDeliveries = async (
   await ensureLegacyMessageDeliveries()
   const claimed = await claimDueDeliveries(messageId)
   if (!claimed.length) return 0
+  const notificationTestMode = await getNotificationTestMode()
   const ids = claimed.map((delivery: any) => delivery.id)
   const result = await getPool().query(
     `
-      SELECT delivery.*, recipient.delivery_account_user_id,
+      SELECT delivery.*,
+        COALESCE($2::UUID, recipient.delivery_account_user_id)
+          AS delivery_account_user_id,
         recipient.external_email, recipient.external_phone,
         recipient.external_email_enabled, recipient.external_sms_consent_at,
         message.channel AS message_channel, message.subject, message.body,
@@ -906,13 +909,16 @@ export const processMinistryMessageDeliveries = async (
       JOIN ministry_message_recipients recipient ON recipient.id=delivery.recipient_id
       JOIN ministry_messages message ON message.id = recipient.message_id
       LEFT JOIN ministry_accounts account
-        ON account.id = recipient.delivery_account_user_id
+        ON account.id = COALESCE(
+          $2::UUID,
+          recipient.delivery_account_user_id
+        )
       LEFT JOIN telegram_connections telegram
         ON telegram.account_user_id = account.id
        AND telegram.status = 'active'
       WHERE delivery.id = ANY($1)
     `,
-    [ids],
+    [ids, notificationTestMode.targetUserId],
   )
   const origin = (process.env.SITE_URL || "https://ministry.mylatinmass.com")
     .replace(/\/$/, "")

@@ -1025,6 +1025,121 @@ export const sendAssignmentNotifications = async (
   }
 }
 
+export const sendTemplateAssignmentCancellationNotifications = async (
+  assignmentIds: string[],
+  templateId: string,
+  _requestOrigin: string,
+) => {
+  if (!assignmentIds.length) return { queued: 0 }
+  const result = await getPool().query(
+    `SELECT assignment.id AS assignment_id,
+       assignment.user_id AS subject_user_id,
+       COALESCE(guardian.guardian_user_id, assignment.user_id) AS recipient_user_id,
+       subject.first_name AS subject_first_name,
+       subject.last_name AS subject_last_name,
+       recipient.first_name AS recipient_first_name,
+       recipient.last_name AS recipient_last_name,
+       event.id AS event_id, event.title AS event_title, event.start_time,
+       responsibility.name AS responsibility_name,
+       COALESCE(responsibility.ministry_id, event.ministry_id) AS ministry_id,
+       ministry.slug AS ministry_slug
+     FROM responsibility_assignments assignment
+     JOIN events event ON event.id = assignment.event_id
+     JOIN event_responsibilities responsibility
+       ON responsibility.id = assignment.responsibility_id
+     JOIN ministries ministry
+       ON ministry.id = COALESCE(responsibility.ministry_id, event.ministry_id)
+     JOIN ministry_accounts subject ON subject.id = assignment.user_id
+     LEFT JOIN managed_profiles guardian
+       ON guardian.child_user_id = assignment.user_id
+      AND guardian.status IN ('active', 'separation_pending')
+     JOIN ministry_accounts recipient
+       ON recipient.id = COALESCE(guardian.guardian_user_id, assignment.user_id)
+     WHERE assignment.id = ANY($1::UUID[])`,
+    [assignmentIds],
+  )
+  const batchKey = crypto
+    .createHash("sha256")
+    .update([...assignmentIds].sort().join(":"))
+    .digest("hex")
+    .slice(0, 20)
+  let queued = 0
+  for (const assignment of result.rows) {
+    const subjectName = [
+      assignment.subject_first_name,
+      assignment.subject_last_name,
+    ].filter(Boolean).join(" ") || "A ministry member"
+    await enqueueAlert({
+      subjectUserId: assignment.subject_user_id,
+      recipientUserId: assignment.recipient_user_id,
+      kind: "assignment_cancelled_by_template",
+      title: `Assignment cancelled: ${assignment.event_title}`,
+      message: `${subjectName}'s ${assignment.responsibility_name} assignment for ${formatAssignmentDate(assignment.start_time)} was cancelled because the event template changed.`,
+      assignmentId: assignment.assignment_id,
+      eventId: assignment.event_id,
+      ministryId: assignment.ministry_id,
+      dedupeKey: `template-assignment-cancelled:${templateId}:${assignment.assignment_id}:${assignment.recipient_user_id}`,
+      metadata: {
+        notificationCategory: "schedule_changes",
+        notificationUrl: `/${assignment.ministry_slug}?event=${assignment.event_id}`,
+        privacySafeMessage:
+          "A household ministry assignment was cancelled because an event template changed.",
+        affectedProfileUserIds: [assignment.subject_user_id],
+      },
+      immediate: true,
+    })
+    queued += 1
+  }
+
+  const assignmentsByMinistry = new Map<string, any[]>()
+  for (const assignment of result.rows) {
+    const assignments = assignmentsByMinistry.get(assignment.ministry_id) || []
+    if (!assignments.some((item) => item.assignment_id === assignment.assignment_id)) {
+      assignments.push(assignment)
+    }
+    assignmentsByMinistry.set(assignment.ministry_id, assignments)
+  }
+  for (const [ministryId, assignments] of assignmentsByMinistry) {
+    const leaders = await getPool().query(
+      `SELECT DISTINCT leader.id
+       FROM ministry_accounts leader
+       WHERE leader.status = 'active'
+         AND (
+           leader.global_role IN ('owner', 'super_admin')
+           OR EXISTS (
+             SELECT 1 FROM ministry_members membership
+             WHERE membership.user_id = leader.id
+               AND membership.ministry_id = $1
+               AND membership.status = 'active'
+               AND membership.level IN ('owner', 'admin')
+           )
+         )`,
+      [ministryId],
+    )
+    const eventCount = new Set(assignments.map((item) => item.event_id)).size
+    for (const leader of leaders.rows) {
+      await enqueueAlert({
+        subjectUserId: leader.id,
+        recipientUserId: leader.id,
+        kind: "template_assignment_cancellations",
+        title: "Template update cancelled assignments",
+        message: `${assignments.length} assignment${assignments.length === 1 ? "" : "s"} across ${eventCount} future event${eventCount === 1 ? "" : "s"} were cancelled because the template changed.`,
+        ministryId,
+        dedupeKey: `template-assignment-cancellations:${templateId}:${ministryId}:${leader.id}:${batchKey}`,
+        metadata: {
+          notificationCategory: "schedule_changes",
+          notificationUrl: "/?section=events",
+          privacySafeMessage:
+            "A template update cancelled future ministry assignments.",
+        },
+        immediate: true,
+      })
+      queued += 1
+    }
+  }
+  return { queued }
+}
+
 export const sendAssignmentNotification = async (
   assignmentId: string,
   requestOrigin: string,

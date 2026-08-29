@@ -144,6 +144,9 @@ const saturdayPracticeBackfill = await read(
 const assignmentNotificationSource = await read(
   "src/server/notifications/assignment-notifications.ts",
 )
+const ministryTemplatesComponent = await read(
+  "src/react/components/ministry/MinistryTemplates.jsx",
+)
 const globalStyles = await read("src/styles/global.css")
 const priestMinistryMigration = await read(
   "migrations/20260813_01_add_priest_ministry_and_event_conflicts.sql",
@@ -548,6 +551,17 @@ assert.match(schedulingEvents, /friday_before_first_saturday/)
 assert.match(schedulingEvents, /previewRecurrenceChange/)
 assert.match(schedulingEvents, /event\.recurrence_rule_changed/)
 assert.match(schedulingEvents, /body\.updateScope === "this_and_future"/)
+assert.match(schedulingTemplates, /action === "preview_update"/)
+assert.match(schedulingTemplates, /start_time > now\(\)/)
+assert.match(schedulingTemplates, /propagateTemplateToFutureEvents/)
+assert.match(schedulingTemplates, /confirmedTemplateImpact/)
+assert.match(schedulingTemplates, /syncTemplateStructure/)
+assert.match(ministryTemplatesComponent, /Confirm assignment cancellations/)
+assert.match(ministryTemplatesComponent, /confirmedTemplateImpact/)
+assert.match(
+  assignmentNotificationSource,
+  /sendTemplateAssignmentCancellationNotifications/,
+)
 assert.match(
   schedulingEvents,
   /responsibilitiesToUpdate = \[\s*responsibility,\s*\.\.\.futureResult\.rows/,

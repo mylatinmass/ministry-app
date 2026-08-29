@@ -1,4 +1,5 @@
 import type { PoolClient } from "pg"
+import { createHash } from "node:crypto"
 import { getPool } from "../database"
 import { json } from "../request"
 import {
@@ -7,6 +8,8 @@ import {
   requireMinistryAccess,
   writeSchedulingAudit,
 } from "./authorization"
+import { updateEvent } from "./events"
+import { sendTemplateAssignmentCancellationNotifications } from "../notifications/assignment-notifications"
 
 const RESPONSIBILITY_TYPES = new Set(["position", "food", "task", "time_slot"])
 
@@ -69,6 +72,9 @@ const normalizeResponsibilities = (
           ? "all_available_members"
           : "standard"
       return {
+        id:
+          cleanText(responsibility.id || responsibility.clientId, 100) ||
+          undefined,
         ministryId:
           forcedMinistryId || cleanText(responsibility.ministryId, 100),
         name:
@@ -576,7 +582,7 @@ const insertTemplateResponsibility = async (
   templateMinistryId: string,
   responsibility: ResponsibilityInput,
 ) => {
-  await client.query(
+  const result = await client.query(
     supportsGroups
       ? `
         INSERT INTO template_responsibilities (
@@ -586,6 +592,7 @@ const insertTemplateResponsibility = async (
           required_group_id, relative_start_minutes, instructions, sort_order
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        RETURNING id
       `
       : `
         INSERT INTO template_responsibilities (
@@ -595,6 +602,7 @@ const insertTemplateResponsibility = async (
           relative_start_minutes, instructions, sort_order
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        RETURNING id
       `,
     supportsGroups
       ? [
@@ -631,6 +639,8 @@ const insertTemplateResponsibility = async (
           responsibility.sortOrder || 0,
         ],
   )
+  responsibility.id = result.rows[0].id
+  return result.rows[0].id
 }
 
 const insertTemplateStructure = async (
@@ -679,6 +689,368 @@ const insertTemplateStructure = async (
       templateMinistryId,
       responsibility,
     )
+  }
+}
+
+const syncTemplateStructure = async (
+  client: PoolClient,
+  templateId: string,
+  input: TemplateInput,
+  ministryScope: string | null = null,
+) => {
+  const supportsGroups = await hasTemplateGroupSchema(client)
+  const existingBlocks = await client.query(
+    `SELECT id, ministry_id FROM template_ministries WHERE template_id = $1 FOR UPDATE`,
+    [templateId],
+  )
+  const blockIds = new Map(
+    existingBlocks.rows.map((block) => [block.ministry_id, block.id]),
+  )
+  const blocks = (input.ministries || []).filter(
+    (block) => !ministryScope || block.ministryId === ministryScope,
+  )
+  for (const block of blocks) {
+    let blockId = blockIds.get(block.ministryId)
+    if (blockId) {
+      await client.query(
+        `UPDATE template_ministries
+         SET is_required = $3, instructions = $4, sort_order = $5,
+             updated_at = now()
+         WHERE template_id = $1 AND ministry_id = $2`,
+        [
+          templateId,
+          block.ministryId,
+          block.isRequired !== false,
+          block.instructions || null,
+          block.sortOrder || 0,
+        ],
+      )
+    } else {
+      const created = await client.query(
+        `INSERT INTO template_ministries (
+           template_id, ministry_id, is_required, instructions, sort_order
+         ) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        [
+          templateId,
+          block.ministryId,
+          block.isRequired !== false,
+          block.instructions || null,
+          block.sortOrder || 0,
+        ],
+      )
+      blockId = created.rows[0].id
+      blockIds.set(block.ministryId, blockId)
+    }
+    if (supportsGroups) {
+      await client.query(
+        `DELETE FROM template_ministry_groups WHERE template_ministry_id = $1`,
+        [blockId],
+      )
+      for (const groupId of block.groupIds || []) {
+        await client.query(
+          `INSERT INTO template_ministry_groups (template_ministry_id, group_id) VALUES ($1, $2)`,
+          [blockId, groupId],
+        )
+      }
+    }
+  }
+
+  const existingResponsibilities = await client.query(
+    `SELECT responsibility.id, block.ministry_id
+     FROM template_responsibilities responsibility
+     JOIN template_ministries block ON block.id = responsibility.template_ministry_id
+     WHERE responsibility.template_id = $1
+       AND ($2::UUID IS NULL OR block.ministry_id = $2)
+     FOR UPDATE`,
+    [templateId, ministryScope],
+  )
+  const existingById = new Map(
+    existingResponsibilities.rows.map((responsibility) => [
+      responsibility.id,
+      responsibility,
+    ]),
+  )
+  const retainedIds: string[] = []
+  const responsibilities = (input.responsibilities || []).filter(
+    (responsibility) =>
+      !ministryScope || responsibility.ministryId === ministryScope,
+  )
+  for (const responsibility of responsibilities) {
+    const templateMinistryId = blockIds.get(responsibility.ministryId)
+    if (!templateMinistryId) continue
+    const existing = responsibility.id
+      ? existingById.get(responsibility.id)
+      : null
+    if (!existing) {
+      responsibility.id = await insertTemplateResponsibility(
+        client,
+        supportsGroups,
+        templateId,
+        templateMinistryId,
+        responsibility,
+      )
+    } else {
+      await client.query(
+        supportsGroups
+          ? `UPDATE template_responsibilities
+             SET template_ministry_id = $2, name = $3, description = $4,
+                 responsibility_type = $5, quantity_needed = $6,
+                 approval_required = $7, substitution_allowed = $8,
+                 assignment_mode = $9, is_required = $10,
+                 required_ministry_level_id = $11, required_group_id = $12,
+                 relative_start_minutes = $13, instructions = $14,
+                 sort_order = $15, updated_at = now()
+             WHERE id = $1`
+          : `UPDATE template_responsibilities
+             SET template_ministry_id = $2, name = $3, description = $4,
+                 responsibility_type = $5, quantity_needed = $6,
+                 approval_required = $7, substitution_allowed = $8,
+                 assignment_mode = $9, is_required = $10,
+                 required_ministry_level_id = $11,
+                 relative_start_minutes = $12, instructions = $13,
+                 sort_order = $14, updated_at = now()
+             WHERE id = $1`,
+        supportsGroups
+          ? [
+              responsibility.id,
+              templateMinistryId,
+              responsibility.name,
+              responsibility.description || null,
+              responsibility.responsibilityType || "position",
+              responsibility.quantityNeeded || 1,
+              Boolean(responsibility.approvalRequired),
+              responsibility.substitutionAllowed !== false,
+              responsibility.assignmentMode || "standard",
+              responsibility.isRequired !== false,
+              responsibility.requiredLevelId || null,
+              responsibility.requiredGroupId || null,
+              responsibility.relativeStartMinutes || 0,
+              responsibility.instructions || null,
+              responsibility.sortOrder || 0,
+            ]
+          : [
+              responsibility.id,
+              templateMinistryId,
+              responsibility.name,
+              responsibility.description || null,
+              responsibility.responsibilityType || "position",
+              responsibility.quantityNeeded || 1,
+              Boolean(responsibility.approvalRequired),
+              responsibility.substitutionAllowed !== false,
+              responsibility.assignmentMode || "standard",
+              responsibility.isRequired !== false,
+              responsibility.requiredLevelId || null,
+              responsibility.relativeStartMinutes || 0,
+              responsibility.instructions || null,
+              responsibility.sortOrder || 0,
+            ],
+      )
+    }
+    retainedIds.push(responsibility.id!)
+  }
+  await client.query(
+    `DELETE FROM template_responsibilities
+     WHERE template_id = $1
+       AND ($2::UUID IS NULL OR template_ministry_id IN (
+         SELECT id FROM template_ministries WHERE template_id = $1 AND ministry_id = $2
+       ))
+       AND NOT (id = ANY($3::UUID[]))`,
+    [templateId, ministryScope, retainedIds],
+  )
+  if (!ministryScope) {
+    const retainedMinistryIds = (input.ministries || []).map(
+      (block) => block.ministryId,
+    )
+    await client.query(
+      `DELETE FROM template_ministries
+       WHERE template_id = $1 AND NOT (ministry_id = ANY($2::UUID[]))`,
+      [templateId, retainedMinistryIds],
+    )
+  }
+}
+
+type TemplatePropagationImpact = {
+  fingerprint: string
+  affectedEventCount: number
+  removedPositionCount: number
+  cancelledAssignmentCount: number
+  removedPositions: Array<{
+    eventId: string
+    eventTitle: string
+    eventStartTime: string
+    responsibilityId: string
+    responsibilityName: string
+    reason: "removed" | "assignment_mode_changed"
+    assignments: Array<{
+      assignmentId: string
+      userId: string
+      memberName: string
+    }>
+  }>
+}
+
+const previewTemplatePropagation = async (
+  client: PoolClient,
+  templateId: string,
+  input: TemplateInput,
+  ministryScope: string | null = null,
+  lockEvents = false,
+): Promise<TemplatePropagationImpact> => {
+  const events = await client.query(
+    `SELECT id FROM events
+     WHERE template_id = $1
+       AND start_time > now()
+       AND status IN ('draft', 'published')
+     ${lockEvents ? "FOR UPDATE" : ""}`,
+    [templateId],
+  )
+  const rows = await client.query(
+    `SELECT event.id AS event_id, event.title AS event_title,
+       event.start_time AS event_start_time,
+       responsibility.id AS responsibility_id,
+       responsibility.template_responsibility_id,
+       responsibility.ministry_id,
+       responsibility.name AS responsibility_name,
+       responsibility.responsibility_type,
+       responsibility.assignment_mode,
+       responsibility.sort_order,
+       assignment.id AS assignment_id,
+       assignment.user_id,
+       trim(concat(account.first_name, ' ', COALESCE(account.last_name, ''))) AS member_name
+     FROM events event
+     JOIN event_responsibilities responsibility
+       ON responsibility.event_id = event.id
+     LEFT JOIN responsibility_assignments assignment
+       ON assignment.responsibility_id = responsibility.id
+      AND assignment.status IN (
+        'interested', 'pending', 'assigned', 'confirmed', 'change_requested'
+      )
+     LEFT JOIN ministry_accounts account ON account.id = assignment.user_id
+     WHERE event.template_id = $1
+       AND event.start_time > now()
+       AND event.status IN ('draft', 'published')
+       AND responsibility.status <> 'cancelled'
+       AND responsibility.template_responsibility_id IS NOT NULL
+       AND ($2::UUID IS NULL OR responsibility.ministry_id = $2)
+     ORDER BY event.start_time, responsibility.sort_order, responsibility.id`,
+    [templateId, ministryScope],
+  )
+  const proposed = (input.responsibilities || []).filter(
+    (responsibility) =>
+      !ministryScope || responsibility.ministryId === ministryScope,
+  )
+  const proposedById = new Map(
+    proposed
+      .filter((responsibility) => responsibility.id)
+      .map((responsibility) => [responsibility.id, responsibility]),
+  )
+  const proposedByKey = new Map(
+    proposed.map((responsibility) => [
+      [
+        responsibility.ministryId,
+        responsibility.name.toLowerCase(),
+        responsibility.responsibilityType || "position",
+      ].join("|"),
+      responsibility,
+    ]),
+  )
+  const removedById = new Map<string, TemplatePropagationImpact["removedPositions"][number]>()
+  for (const row of rows.rows) {
+    const key = [
+      row.ministry_id,
+      String(row.responsibility_name || "").toLowerCase(),
+      row.responsibility_type,
+    ].join("|")
+    const matching =
+      proposedById.get(row.template_responsibility_id) ||
+      proposedByKey.get(key)
+    const nextAssignmentMode = matching?.assignmentMode || "standard"
+    if (matching && nextAssignmentMode === row.assignment_mode) {
+      continue
+    }
+    let removed = removedById.get(row.responsibility_id)
+    if (!removed) {
+      removed = {
+        eventId: row.event_id,
+        eventTitle: row.event_title,
+        eventStartTime: row.event_start_time,
+        responsibilityId: row.responsibility_id,
+        responsibilityName: row.responsibility_name,
+        reason: matching ? "assignment_mode_changed" : "removed",
+        assignments: [],
+      }
+      removedById.set(row.responsibility_id, removed)
+    }
+    if (row.assignment_id) {
+      removed.assignments.push({
+        assignmentId: row.assignment_id,
+        userId: row.user_id,
+        memberName: row.member_name || "Ministry member",
+      })
+    }
+  }
+  const removedPositions = [...removedById.values()]
+  const fingerprint = createHash("sha256")
+    .update(
+      removedPositions
+        .flatMap((position) => [
+          `position:${position.responsibilityId}:${position.reason}`,
+          ...position.assignments.map(
+            (assignment) => `assignment:${assignment.assignmentId}`,
+          ),
+        ])
+        .sort()
+        .join("|"),
+    )
+    .digest("hex")
+  return {
+    fingerprint,
+    affectedEventCount: events.rowCount || 0,
+    removedPositionCount: removedPositions.length,
+    cancelledAssignmentCount: removedPositions.reduce(
+      (count, position) => count + position.assignments.length,
+      0,
+    ),
+    removedPositions,
+  }
+}
+
+const propagateTemplateToFutureEvents = async (
+  client: PoolClient,
+  context: any,
+  templateId: string,
+) => {
+  const futureEvents = await client.query(
+    `SELECT id FROM events
+     WHERE template_id = $1
+       AND start_time > now()
+       AND status IN ('draft', 'published')
+     ORDER BY start_time, id
+     FOR UPDATE`,
+    [templateId],
+  )
+  const cancelledAssignmentIds: string[] = []
+  let removedPositionCount = 0
+  for (const event of futureEvents.rows) {
+    const result: any = await updateEvent(
+      client,
+      context,
+      {
+        action: "replace_template",
+        eventId: event.id,
+        templateId,
+        updateScope: "this_event",
+      },
+      { templatePropagation: true },
+    )
+    cancelledAssignmentIds.push(...(result?.cancelledAssignmentIds || []))
+    removedPositionCount += Number(result?.removedPositionCount || 0)
+  }
+  return {
+    affectedEventCount: futureEvents.rowCount || 0,
+    removedPositionCount,
+    cancelledAssignmentIds,
+    cancelledAssignmentCount: cancelledAssignmentIds.length,
   }
 }
 
@@ -810,11 +1182,7 @@ const updateTemplate = async (
       nextVersion,
     ],
   )
-  await client.query(
-    `DELETE FROM template_ministries WHERE template_id = $1`,
-    [templateId],
-  )
-  await insertTemplateStructure(client, templateId, input)
+  await syncTemplateStructure(client, templateId, input)
   await client.query(
     `
       INSERT INTO template_versions (
@@ -856,6 +1224,7 @@ const updateTemplateMinistryBlock = async (
         block.id,
         block.is_required,
         block.instructions,
+        block.sort_order,
         template.ministry_id AS coordinator_ministry_id,
         template.version
       FROM template_ministries block
@@ -880,6 +1249,7 @@ const updateTemplateMinistryBlock = async (
     ministryId,
     isRequired: blockBody.isRequired !== false,
     instructions: cleanText(blockBody.instructions),
+    sortOrder: Number(existing.sort_order) || 0,
     groupIds: Array.isArray(blockBody.groupIds)
       ? Array.from(
           new Set<string>(
@@ -897,44 +1267,12 @@ const updateTemplateMinistryBlock = async (
   await ensureResponsibilityLevelsExist(client, responsibilities)
   await ensureGroupsAreValid(client, responsibilities, [block])
 
-  await client.query(
-    `
-      UPDATE template_ministries
-      SET is_required = $3,
-          instructions = $4,
-          updated_at = now()
-      WHERE template_id = $1 AND ministry_id = $2
-    `,
-    [templateId, ministryId, block.isRequired !== false, block.instructions || null],
+  await syncTemplateStructure(
+    client,
+    templateId,
+    { ministries: [block], responsibilities } as TemplateInput,
+    ministryId,
   )
-
-  const supportsGroups = await hasTemplateGroupSchema(client)
-  if (supportsGroups) {
-    await client.query(
-      `DELETE FROM template_ministry_groups WHERE template_ministry_id = $1`,
-      [existing.id],
-    )
-    for (const groupId of block.groupIds || []) {
-      await client.query(
-        `INSERT INTO template_ministry_groups (template_ministry_id, group_id) VALUES ($1, $2)`,
-        [existing.id, groupId],
-      )
-    }
-  }
-
-  await client.query(
-    `DELETE FROM template_responsibilities WHERE template_ministry_id = $1`,
-    [existing.id],
-  )
-  for (const responsibility of responsibilities) {
-    await insertTemplateResponsibility(
-      client,
-      supportsGroups,
-      templateId,
-      existing.id,
-      responsibility,
-    )
-  }
 
   const nextVersion = Number(existing.version) + 1
   const snapshot = {
@@ -1009,6 +1347,38 @@ const setTemplateStatus = async (
   })
 }
 
+const normalizeTemplateUpdateProposal = (body: any) => {
+  const ministryScope = cleanText(body.ministryId, 100) || null
+  if (!ministryScope) {
+    return {
+      input: normalizeTemplateInput(body),
+      ministryScope: null,
+    }
+  }
+  const blockBody = body.block || {}
+  return {
+    input: {
+      ministries: [
+        {
+          ministryId: ministryScope,
+          isRequired: blockBody.isRequired !== false,
+          instructions: cleanText(blockBody.instructions),
+          groupIds: Array.isArray(blockBody.groupIds)
+            ? blockBody.groupIds
+                .map((id: unknown) => cleanText(id, 100))
+                .filter(Boolean)
+            : [],
+        },
+      ],
+      responsibilities: normalizeResponsibilities(
+        body.responsibilities,
+        ministryScope,
+      ),
+    } as TemplateInput,
+    ministryScope,
+  }
+}
+
 export const handleTemplates = async (request: Request) => {
   const client = await getPool().connect()
   try {
@@ -1064,6 +1434,40 @@ export const handleTemplates = async (request: Request) => {
     if (request.method === "POST") {
       await client.query("BEGIN")
       try {
+        if (body.action === "preview_update") {
+          const templateId = cleanText(body.templateId, 100)
+          if (!templateId) {
+            throw Object.assign(new Error("Template is required"), {
+              status: 400,
+            })
+          }
+          const { input, ministryScope } =
+            normalizeTemplateUpdateProposal(body)
+          const template = await client.query(
+            `SELECT ministry_id FROM templates WHERE id = $1`,
+            [templateId],
+          )
+          if (!template.rowCount) {
+            throw Object.assign(new Error("Template not found"), {
+              status: 404,
+            })
+          }
+          await requireMinistryAccess(
+            client,
+            context.user,
+            ministryScope || template.rows[0].ministry_id,
+            true,
+          )
+          const impact = await previewTemplatePropagation(
+            client,
+            templateId,
+            input,
+            ministryScope,
+            true,
+          )
+          await client.query("COMMIT")
+          return json(impact)
+        }
         const input = normalizeTemplateInput(body)
         if (body.action === "duplicate") {
           input.name = cleanText(body.name, 250) || `${input.name} Copy`
@@ -1085,6 +1489,7 @@ export const handleTemplates = async (request: Request) => {
       if (!templateId) return json({ message: "Template is required" }, 400)
       await client.query("BEGIN")
       try {
+        let propagation: any = null
         if (body.action === "set_status") {
           await setTemplateStatus(
             client,
@@ -1093,22 +1498,92 @@ export const handleTemplates = async (request: Request) => {
             cleanText(body.status, 30),
           )
         } else if (body.action === "update_ministry_block") {
+          const { input, ministryScope } =
+            normalizeTemplateUpdateProposal(body)
+          const impact = await previewTemplatePropagation(
+            client,
+            templateId,
+            input,
+            ministryScope,
+            true,
+          )
+          if (
+            impact.cancelledAssignmentCount > 0 &&
+            (body.confirmAssignmentCancellations !== true ||
+              body.confirmedTemplateImpact !== impact.fingerprint)
+          ) {
+            throw Object.assign(
+              new Error(
+                "Confirm the assigned positions that will be removed",
+              ),
+              { status: 409, templateImpact: impact },
+            )
+          }
           await updateTemplateMinistryBlock(
             client,
             context,
             templateId,
             body,
           )
+          propagation = await propagateTemplateToFutureEvents(
+            client,
+            context,
+            templateId,
+          )
         } else {
+          const input = normalizeTemplateInput(body)
+          const impact = await previewTemplatePropagation(
+            client,
+            templateId,
+            input,
+            null,
+            true,
+          )
+          if (
+            impact.cancelledAssignmentCount > 0 &&
+            (body.confirmAssignmentCancellations !== true ||
+              body.confirmedTemplateImpact !== impact.fingerprint)
+          ) {
+            throw Object.assign(
+              new Error(
+                "Confirm the assigned positions that will be removed",
+              ),
+              { status: 409, templateImpact: impact },
+            )
+          }
           await updateTemplate(
             client,
             context,
             templateId,
-            normalizeTemplateInput(body),
+            input,
+          )
+          propagation = await propagateTemplateToFutureEvents(
+            client,
+            context,
+            templateId,
           )
         }
         await client.query("COMMIT")
-        return json({ message: "Template updated", templateId })
+        if (propagation?.cancelledAssignmentIds?.length) {
+          await sendTemplateAssignmentCancellationNotifications(
+            propagation.cancelledAssignmentIds,
+            templateId,
+            request.url,
+          ).catch((notificationError) => {
+            console.error(
+              "Template updated but cancellation notifications could not be prepared:",
+              notificationError,
+            )
+          })
+        }
+        return json({
+          message: "Template updated",
+          templateId,
+          affectedEventCount: propagation?.affectedEventCount || 0,
+          removedPositionCount: propagation?.removedPositionCount || 0,
+          cancelledAssignmentCount:
+            propagation?.cancelledAssignmentCount || 0,
+        })
       } catch (error) {
         await client.query("ROLLBACK")
         throw error
@@ -1119,7 +1594,15 @@ export const handleTemplates = async (request: Request) => {
   } catch (error: any) {
     const status = error?.status || (/session|token|inactive/i.test(error?.message) ? 401 : 500)
     if (status === 500) console.error("Unable to manage templates:", error)
-    return json({ message: error?.message || "Unable to manage templates" }, status)
+    return json(
+      {
+        message: error?.message || "Unable to manage templates",
+        ...(error?.templateImpact
+          ? { templateImpact: error.templateImpact }
+          : {}),
+      },
+      status,
+    )
   } finally {
     client.release()
   }

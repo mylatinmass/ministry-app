@@ -5824,10 +5824,11 @@ const mutateEventResponsibility = async (
   return "Responsibility cancelled and retained in history"
 }
 
-const updateEvent = async (
+export const updateEvent = async (
   client: PoolClient,
   context: any,
   body: any,
+  internalOptions: { templatePropagation?: boolean } = {},
 ) => {
   const eventId = cleanText(body.eventId, 100)
   const eventResult = await client.query(
@@ -6000,17 +6001,21 @@ const updateEvent = async (
     return mutateEventResponsibility(client, context, event, body)
   }
 
-  await requireMinistryAccess(client, context.user, event.ministry_id, true)
+  if (!internalOptions.templatePropagation) {
+    await requireMinistryAccess(client, context.user, event.ministry_id, true)
+  }
 
   if (body.action === "replace_template") {
     const nextTemplateId = cleanText(body.templateId, 100)
     const structure = await loadTemplateStructure(client, nextTemplateId)
-    await requireMinistryAccess(
-      client,
-      context.user,
-      structure.template.ministry_id,
-      true,
-    )
+    if (!internalOptions.templatePropagation) {
+      await requireMinistryAccess(
+        client,
+        context.user,
+        structure.template.ministry_id,
+        true,
+      )
+    }
     const currentResponsibilities = await client.query(
       `
         SELECT *
@@ -6020,6 +6025,14 @@ const updateEvent = async (
         ORDER BY sort_order
       `,
       [eventId],
+    )
+    const currentByTemplateId = new Map(
+      currentResponsibilities.rows
+        .filter((responsibility) => responsibility.template_responsibility_id)
+        .map((responsibility) => [
+          responsibility.template_responsibility_id,
+          responsibility,
+        ]),
     )
     const currentByKey = new Map(
       currentResponsibilities.rows.map((responsibility) => [
@@ -6034,6 +6047,7 @@ const updateEvent = async (
     const retainedIds = new Set<string>()
     const added: string[] = []
     const preserved: string[] = []
+    const cancelledAssignmentIds: string[] = []
 
     for (const responsibility of structure.responsibilities) {
       const key = [
@@ -6041,34 +6055,62 @@ const updateEvent = async (
         responsibility.name.toLowerCase(),
         responsibility.responsibility_type,
       ].join("|")
-      const existing = currentByKey.get(key)
+      const existing =
+        currentByTemplateId.get(responsibility.id) || currentByKey.get(key)
       if (existing) {
+        if (
+          (existing.assignment_mode || "standard") !==
+          (responsibility.assignment_mode || "standard")
+        ) {
+          const incompatibleAssignments = await client.query(
+            `SELECT id FROM responsibility_assignments
+             WHERE responsibility_id = $1
+               AND status = ANY($2)`,
+            [existing.id, ACTIVE_ASSIGNMENT_STATUSES],
+          )
+          cancelledAssignmentIds.push(
+            ...incompatibleAssignments.rows.map((assignment) => assignment.id),
+          )
+          await client.query(
+            `UPDATE responsibility_assignments
+             SET status = 'cancelled', updated_at = now()
+             WHERE responsibility_id = $1
+               AND status = ANY($2)`,
+            [existing.id, ACTIVE_ASSIGNMENT_STATUSES],
+          )
+        }
         retainedIds.add(existing.id)
         preserved.push(existing.name)
         await client.query(
           `
             UPDATE event_responsibilities
             SET template_responsibility_id = $2,
-                description = $3,
-                quantity_needed = $4,
-                approval_required = $5,
-                substitution_allowed = $6,
-                is_required = $7,
-                required_ministry_level_id = $8,
-                required_group_id = $9,
-                relative_start_minutes = $10,
-                instructions = $11,
-                sort_order = $12,
+                name = $3,
+                description = $4,
+                responsibility_type = $5,
+                quantity_needed = $6,
+                approval_required = $7,
+                substitution_allowed = $8,
+                assignment_mode = $9,
+                is_required = $10,
+                required_ministry_level_id = $11,
+                required_group_id = $12,
+                relative_start_minutes = $13,
+                instructions = $14,
+                sort_order = $15,
                 updated_at = now()
             WHERE id = $1
           `,
           [
             existing.id,
             responsibility.id,
+            responsibility.name,
             responsibility.description || null,
+            responsibility.responsibility_type || "position",
             Number(responsibility.quantity_needed) || 1,
             Boolean(responsibility.approval_required),
             responsibility.substitution_allowed !== false,
+            responsibility.assignment_mode || "standard",
             responsibility.is_required !== false,
             responsibility.required_ministry_level_id || null,
             responsibility.required_group_id || null,
@@ -6091,6 +6133,7 @@ const updateEvent = async (
               quantity_needed,
               approval_required,
               substitution_allowed,
+              assignment_mode,
               is_required,
               required_ministry_level_id,
               required_group_id,
@@ -6100,7 +6143,7 @@ const updateEvent = async (
               status
             )
             VALUES (
-              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'open'
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'open'
             )
           `,
           [
@@ -6113,6 +6156,7 @@ const updateEvent = async (
             Number(responsibility.quantity_needed) || 1,
             Boolean(responsibility.approval_required),
             responsibility.substitution_allowed !== false,
+            responsibility.assignment_mode || "standard",
             responsibility.is_required !== false,
             responsibility.required_ministry_level_id || null,
             responsibility.required_group_id || null,
@@ -6131,6 +6175,15 @@ const updateEvent = async (
     )
     if (removed.length) {
       const removedIds = removed.map((responsibility) => responsibility.id)
+      const cancelledAssignments = await client.query(
+        `SELECT id FROM responsibility_assignments
+         WHERE responsibility_id = ANY($1::UUID[])
+           AND status = ANY($2)`,
+        [removedIds, ACTIVE_ASSIGNMENT_STATUSES],
+      )
+      cancelledAssignmentIds.push(
+        ...cancelledAssignments.rows.map((assignment) => assignment.id),
+      )
       await client.query(
         `
           UPDATE event_responsibilities
@@ -6144,9 +6197,9 @@ const updateEvent = async (
           UPDATE responsibility_assignments
           SET status = 'cancelled', updated_at = now()
           WHERE responsibility_id = ANY($1::UUID[])
-            AND status NOT IN ('cancelled', 'completed')
+            AND status = ANY($2)
         `,
-        [removedIds],
+        [removedIds, ACTIVE_ASSIGNMENT_STATUSES],
       )
     }
 
@@ -6224,6 +6277,7 @@ const updateEvent = async (
     if (["volunteers", "both"].includes(structure.template.participation_type)) {
       await ensureDefaultGeneralVolunteer(client, eventId)
     }
+    await syncAllAvailableMemberAssignments(client, context, eventId)
     await writeSchedulingAudit(client, context, {
       action: "event.template_replaced",
       entityType: "event",
@@ -6241,7 +6295,12 @@ const updateEvent = async (
         removed: removed.map((responsibility) => responsibility.name),
       },
     })
-    return
+    return {
+      message: "Template applied",
+      eventIds: [eventId],
+      cancelledAssignmentIds,
+      removedPositionCount: removed.length,
+    }
   }
 
   if (body.action === "set_status") {

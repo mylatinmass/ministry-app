@@ -70,6 +70,8 @@ const MinistryTemplates = ({ data, activeAction }) => {
   const [errorMessage, setErrorMessage] = React.useState("")
   const [levelErrors, setLevelErrors] = React.useState({})
   const [editingMinistryId, setEditingMinistryId] = React.useState("")
+  const [pendingTemplateImpact, setPendingTemplateImpact] =
+    React.useState(null)
 
   const endpoint = React.useMemo(() => {
     if (typeof window === "undefined") return ""
@@ -104,6 +106,10 @@ const MinistryTemplates = ({ data, activeAction }) => {
   React.useEffect(() => {
     loadTemplates()
   }, [loadTemplates])
+
+  React.useEffect(() => {
+    setPendingTemplateImpact(null)
+  }, [form])
 
   React.useEffect(() => {
     if (activeAction.id === "new-template" && !form.templateId) {
@@ -256,6 +262,66 @@ const MinistryTemplates = ({ data, activeAction }) => {
     })
   }
 
+  const persistTemplate = async (
+    payload,
+    confirmedTemplateImpact = "",
+  ) => {
+    setIsSaving(true)
+    setErrorMessage("")
+    try {
+      const response = await fetch(
+        getFunctionEndpoint("scheduling/templates"),
+        {
+          method: form.templateId ? "PATCH" : "POST",
+          headers: requestHeaders(),
+          body: JSON.stringify({
+            ...payload,
+            ...(confirmedTemplateImpact
+              ? {
+                  confirmAssignmentCancellations: true,
+                  confirmedTemplateImpact,
+                }
+              : {}),
+          }),
+        },
+      )
+      const result = await response.json()
+      if (!response.ok) {
+        if (result.templateImpact) {
+          setPendingTemplateImpact({
+            impact: result.templateImpact,
+            payload,
+          })
+          return
+        }
+        throw new Error(result.message || "Unable to save template")
+      }
+      const affected = Number(result.affectedEventCount || 0)
+      const cancelled = Number(result.cancelledAssignmentCount || 0)
+      setMessage(
+        form.templateId
+          ? `Template updated and applied to ${affected} future ${
+              affected === 1 ? "event" : "events"
+            }.${
+              cancelled
+                ? ` ${cancelled} ${
+                    cancelled === 1 ? "assignment was" : "assignments were"
+                  } cancelled.`
+                : ""
+            }`
+          : "Template created.",
+      )
+      setPendingTemplateImpact(null)
+      setForm(initialForm(data.ministry.id))
+      setEditingMinistryId("")
+      await loadTemplates()
+    } catch (error) {
+      setErrorMessage(error.message)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   const submitTemplate = async (event) => {
     event.preventDefault()
     setMessage("")
@@ -307,42 +373,42 @@ const MinistryTemplates = ({ data, activeAction }) => {
     }
 
     setLevelErrors({})
+    const payload = editingMinistryId
+      ? {
+          action: "update_ministry_block",
+          templateId: form.templateId,
+          ministryId: editingMinistryId,
+          block: form.ministries.find(
+            (block) => block.ministryId === editingMinistryId,
+          ),
+          responsibilities: editableResponsibilities,
+        }
+      : form
+
+    if (!form.templateId) {
+      await persistTemplate(payload)
+      return
+    }
+
     setIsSaving(true)
     try {
       const response = await fetch(
         getFunctionEndpoint("scheduling/templates"),
         {
-          method: form.templateId ? "PATCH" : "POST",
+          method: "POST",
           headers: requestHeaders(),
-          body: JSON.stringify(
-            editingMinistryId
-              ? {
-                  action: "update_ministry_block",
-                  templateId: form.templateId,
-                  ministryId: editingMinistryId,
-                  block: form.ministries.find(
-                    (block) => block.ministryId === editingMinistryId,
-                  ),
-                  responsibilities: editableResponsibilities,
-                }
-              : form,
-          ),
+          body: JSON.stringify({ ...payload, action: "preview_update" }),
         },
       )
-      const result = await response.json()
+      const impact = await response.json()
       if (!response.ok) {
-        throw new Error(result.message || "Unable to save template")
+        throw new Error(impact.message || "Unable to preview template update")
       }
-      setMessage(
-        editingMinistryId
-          ? `${ministryName(editingMinistryId)} section updated for future events.`
-          : form.templateId
-            ? "Template updated."
-            : "Template created.",
-      )
-      setForm(initialForm(data.ministry.id))
-      setEditingMinistryId("")
-      await loadTemplates()
+      if (impact.cancelledAssignmentCount > 0) {
+        setPendingTemplateImpact({ impact, payload })
+        return
+      }
+      await persistTemplate(payload)
     } catch (error) {
       setErrorMessage(error.message)
     } finally {
@@ -427,6 +493,67 @@ const MinistryTemplates = ({ data, activeAction }) => {
         >
           {errorMessage || message}
         </div>
+      )}
+
+      {pendingTemplateImpact && (
+        <section className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-950">
+          <h3 className="font-semibold">Confirm assignment cancellations</h3>
+          <p className="mt-2">
+            This update changes or removes {pendingTemplateImpact.impact.removedPositionCount}{" "}
+            position{pendingTemplateImpact.impact.removedPositionCount === 1 ? "" : "s"}{" "}
+            and will cancel {pendingTemplateImpact.impact.cancelledAssignmentCount}{" "}
+            active assignment{pendingTemplateImpact.impact.cancelledAssignmentCount === 1 ? "" : "s"}{" "}
+            across {pendingTemplateImpact.impact.affectedEventCount} future event{pendingTemplateImpact.impact.affectedEventCount === 1 ? "" : "s"}.
+          </p>
+          <div className="mt-4 max-h-64 space-y-3 overflow-y-auto rounded-xl border border-amber-200 bg-white p-3">
+            {pendingTemplateImpact.impact.removedPositions
+              .filter((position) => position.assignments.length > 0)
+              .map((position) => (
+                <div key={position.responsibilityId}>
+                  <p className="font-semibold text-gray-900">
+                    {position.eventTitle} · {new Intl.DateTimeFormat("en-US", {
+                      weekday: "short",
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    }).format(new Date(position.eventStartTime))}
+                  </p>
+                  <p className="text-gray-700">
+                    {position.responsibilityName}: {position.assignments
+                      .map((assignment) => assignment.memberName)
+                      .join(", ")}
+                  </p>
+                </div>
+              ))}
+          </div>
+          <p className="mt-3 text-xs text-amber-800">
+            The positions and assignments will be marked cancelled, their history retained, and affected members and administrators notified.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                persistTemplate(
+                  pendingTemplateImpact.payload,
+                  pendingTemplateImpact.impact.fingerprint,
+                )
+              }
+              disabled={isSaving}
+              className="rounded-lg bg-amber-700 px-4 py-2 font-semibold text-white disabled:opacity-50"
+            >
+              {isSaving ? "Updating..." : "Confirm and update template"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setPendingTemplateImpact(null)}
+              disabled={isSaving}
+              className="rounded-lg border border-amber-300 bg-white px-4 py-2 font-semibold text-amber-900"
+            >
+              Keep editing
+            </button>
+          </div>
+        </section>
       )}
 
       {actionIsLibrary ? (

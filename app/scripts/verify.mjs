@@ -114,6 +114,9 @@ const [
 const substitutionMigration = await read(
   "migrations/20260812_04_add_assignment_substitution_offers.sql",
 )
+const servingEligibilityMigration = await read(
+  "migrations/20260828_01_backfill_ministry_members_can_serve.sql",
+)
 const substitutionScheduling = await read(
   "src/server/scheduling/substitutions.ts",
 )
@@ -332,6 +335,14 @@ assert.match(massScheduleLibrary, /"Sacristan"/)
 assert.match(massScheduleLibrary, /"Master of Ceremonies"/)
 assert.match(massScheduleLibrary, /"Torchbearer 4"/)
 assert.match(massScheduleLibrary, /"Usher"/)
+assert.match(
+  massScheduleLibrary,
+  /schedule_synced_at = now\(\),[\s\S]*updated_at = CASE[\s\S]*ELSE updated_at/,
+)
+assert.match(
+  massScheduleLibrary,
+  /schedule_event_type IS DISTINCT FROM \$8/,
+)
 assert.match(massScheduleSync, /MASS_SCHEDULE_SYNC_REQUIRED/)
 
 const independentNotificationChannelsMigration = await read(
@@ -684,6 +695,10 @@ assert.match(reminders, /AS duty_start_time/)
 assert.match(reminders, /dutyStart\.getTime\(\) - Number\(candidate\.lead_minutes\)/)
 assert.match(reminders, /e\.updated_at::STRING AS event_updated_at/)
 assert.doesNotMatch(reminders, /new Date\(candidate\.event_updated_at\)\.toISOString\(\)/)
+assert.match(
+  reminders,
+  /schedule\.at\.getTime\(\) <= reconciliationStartedAt\) continue/,
+)
 assert.match(substitutionMigration, /assignment_substitution_offers/)
 assert.match(substitutionMigration, /'replaced'/)
 assert.match(substitutionScheduling, /minimum_level_rank/)
@@ -896,6 +911,14 @@ assert.match(schedulingEvents, /event_responsibility\.cancelled/)
 assert.match(schedulingEvents, /body\.action === "assign_member"/)
 assert.match(schedulingEvents, /FROM availability_blocks block/)
 assert.match(schedulingEvents, /membership\.can_serve = true/)
+assert.match(servingEligibilityMigration, /WHERE status = 'active'[\s\S]*can_serve = false/)
+assert.doesNotMatch(servingEligibilityMigration, /ALTER TABLE/)
+assert.match(invitationResponse, /VALUES \(\$1, \$2, 'member', 'active', true/)
+assert.match(invitationResponse, /can_serve = true/)
+assert.match(ministryMembers, /action === "set_can_serve"/)
+assert.match(ministryMembers, /typeof body\.canServe !== "boolean"/)
+assert.match(ministryMembersComponent, /action: "set_can_serve"/)
+assert.match(ministryMembersComponent, /Only a ministry administrator can change this setting/)
 assert.match(schedulingEvents, /responsibility_assignment\.assigned/)
 assert.match(schedulingEvents, /source:\s*"event_override"/)
 assert.match(

@@ -755,7 +755,39 @@ const updateImportedEvent = async (
           schedule_source_location = $5,
           schedule_last_seen_at = now(),
           schedule_synced_at = now(),
-          updated_at = now()
+          updated_at = CASE
+            WHEN schedule_source_key IS DISTINCT FROM $2
+              OR CASE
+                WHEN schedule_source_title IS NULL OR title = schedule_source_title
+                  THEN $3
+                ELSE title
+              END IS DISTINCT FROM title
+              OR CASE
+                WHEN description LIKE 'Generated from the MyLatinMass Mass Schedule%'
+                  THEN $4
+                ELSE description
+              END IS DISTINCT FROM description
+              OR CASE
+                WHEN schedule_source_location IS NULL OR location = schedule_source_location
+                  THEN $5
+                ELSE location
+              END IS DISTINCT FROM location
+              OR CASE
+                WHEN schedule_source_start_time IS NULL
+                  OR start_time = schedule_source_start_time
+                  THEN $6
+                ELSE start_time
+              END IS DISTINCT FROM start_time
+              OR CASE
+                WHEN schedule_source_end_time IS NULL
+                  OR end_time = schedule_source_end_time
+                  THEN $7
+                ELSE end_time
+              END IS DISTINCT FROM end_time
+              OR schedule_event_type IS DISTINCT FROM $8
+            THEN now()
+            ELSE updated_at
+          END
       WHERE id = $1
     `,
     [

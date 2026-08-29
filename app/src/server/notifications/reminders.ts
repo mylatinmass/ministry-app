@@ -28,6 +28,7 @@ const reminderKey = (...parts: unknown[]) =>
 
 const reconcileReminders = async () => {
   const pool = getPool()
+  const reconciliationStartedAt = Date.now()
   const candidates = await pool.query(
     `
       SELECT
@@ -89,6 +90,10 @@ const reconcileReminders = async () => {
       ]
 
       for (const schedule of schedules) {
+        // A reminder that already had a chance to run must not receive a new
+        // dedupe key after an event sync. Any existing due reminder remains
+        // available for the claiming step below.
+        if (schedule.at.getTime() <= reconciliationStartedAt) continue
         const dedupeKey = reminderKey(
           candidate.assignment_id,
           candidate.event_id,

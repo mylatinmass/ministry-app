@@ -338,12 +338,12 @@ const acceptInvitation = async (client, token, body, jwtSecret) => {
           INSERT INTO ministry_members (
             ministry_id, user_id, level, status, can_serve, joined_at, updated_at
           )
-          VALUES ($1, $2, 'member', 'active', false, now(), now())
+          VALUES ($1, $2, 'member', 'active', true, now(), now())
           ON CONFLICT (ministry_id, user_id)
           DO UPDATE SET
             level = 'member',
             status = 'active',
-            can_serve = false,
+            can_serve = true,
             joined_at = now(),
             updated_at = now()
         `,

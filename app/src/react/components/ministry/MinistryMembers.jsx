@@ -869,6 +869,26 @@ const MinistryMembers = ({ data, activeAction }) => {
                         </select>
                       )}
                     </label>
+                    <label className="flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700">
+                      <span>
+                        Can serve
+                        <span className="mt-1 block text-xs font-normal text-gray-500">
+                          Only a ministry administrator can change this setting.
+                        </span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={member.canServe}
+                        onChange={(event) =>
+                          updateMembership({
+                            userId: member.userId,
+                            action: "set_can_serve",
+                            canServe: event.target.checked,
+                          })
+                        }
+                        className="size-5 rounded border-gray-300 text-[#896542] focus:ring-[#896542]"
+                      />
+                    </label>
                     <label className="text-sm font-semibold text-gray-700">
                       Highest level in {data.ministry.name}
                       <select value={member.highestLevelId || ""} onChange={(event) => updateMembership({ userId: member.userId, action: "set_ministry_level", highestLevelId: event.target.value })} className="mt-2 block h-11 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal">

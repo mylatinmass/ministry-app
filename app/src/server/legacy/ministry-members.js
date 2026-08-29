@@ -2235,6 +2235,64 @@ const updateMembership = async (
     }
   }
 
+  if (action === "set_can_serve") {
+    if (typeof body.canServe !== "boolean") {
+      return jsonResponse(400, { message: "Choose whether this member can serve" })
+    }
+    await client.query("BEGIN")
+    try {
+      const existingResult = await client.query(
+        `
+          SELECT id, can_serve
+          FROM ministry_members
+          WHERE ministry_id = $1
+            AND user_id = $2
+            AND status = 'active'
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [ministryId, targetUserId]
+      )
+      const existing = existingResult.rows[0]
+      if (!existing) {
+        await client.query("ROLLBACK")
+        return jsonResponse(404, { message: "Member not found" })
+      }
+      const updatedResult = await client.query(
+        `
+          UPDATE ministry_members
+          SET can_serve = $2, updated_at = now()
+          WHERE id = $1
+          RETURNING id, can_serve
+        `,
+        [existing.id, body.canServe]
+      )
+      await writeLevelAudit(client, {
+        actor,
+        user,
+        action: "ministry_member.serving_eligibility_changed",
+        entityType: "ministry_member",
+        entityId: existing.id,
+        ministryId,
+        beforeData: { canServe: existing.can_serve, targetUserId },
+        afterData: {
+          canServe: updatedResult.rows[0].can_serve,
+          targetUserId,
+        },
+      })
+      await client.query("COMMIT")
+      return jsonResponse(200, {
+        success: true,
+        message: body.canServe
+          ? "Member can now serve"
+          : "Member is no longer eligible to serve",
+      })
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {})
+      throw error
+    }
+  }
+
   if (action === "set_role") {
     const level = body.level === "admin" ? "admin" : "member"
     await client.query("BEGIN")

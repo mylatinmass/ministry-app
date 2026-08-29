@@ -961,45 +961,111 @@ const MinistryMembers = ({ data, activeAction }) => {
             <h3 className="mb-4 century-font text-2xl text-gray-900">Active roster</h3>
             <div className="grid gap-3 sm:grid-cols-2">
               {memberData.members.map((member) => (
-                <article key={member.id} className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h4 className="font-semibold text-gray-900">
-                        {member.firstName} {member.lastName}
-                        {member.backgroundCheckVerified && (
-                          <ShieldCheckIcon className="ml-1.5 inline size-5 text-orange-500" aria-label="Background check verified" />
-                        )}
-                      </h4>
-                      <p className="mt-1 text-xs font-semibold text-[#896542]">
-                        {member.highestLevelName || "No ministry level assigned"}
-                      </p>
-                      {member.reliability?.needsFollowUp && (
-                        <div className="mt-2"><ReliabilityBadge reliability={member.reliability} compact /></div>
-                      )}
-                    </div>
-                    <span className="rounded-full bg-[#f4ede6] px-2 py-1 text-xs font-semibold text-[#896542]">{roleLabels[member.level]}</span>
-                  </div>
-                  {member.level !== "owner" && member.userId !== data.user.id && (
-                    <button
-                      type="button"
-                      onClick={() => updateMembership({ userId: member.userId, action: "remove" })}
-                      className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-red-700 hover:underline"
-                    >
-                      <UserMinusIcon className="size-4" /> Remove
-                    </button>
-                  )}
-                  {member.userId === data.user.id && member.level !== "owner" && (
-                    <button
-                      type="button"
-                      onClick={() => updateMembership({ userId: member.userId, action: "leave" })}
-                      className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-red-700 hover:underline"
-                    >
-                      <UserMinusIcon className="size-4" /> Leave ministry
-                    </button>
-                  )}
-                </article>
+                <button
+                  key={member.id}
+                  type="button"
+                  onClick={() => setSelectedMemberId(member.id)}
+                  aria-pressed={selectedMemberId === member.id}
+                  className={`flex w-full items-center gap-2 rounded-2xl border bg-white px-4 py-4 text-left shadow-sm transition hover:border-[#C1A387] hover:shadow-md ${
+                    selectedMemberId === member.id
+                      ? "border-[#896542] ring-2 ring-[#f4ede6]"
+                      : "border-gray-100"
+                  }`}
+                >
+                  <span className="min-w-0 flex-1 truncate font-semibold text-gray-900">
+                    {member.firstName} {member.lastName}
+                  </span>
+                  <span className="shrink-0 rounded-full bg-[#f4ede6] px-2.5 py-1 text-xs font-semibold text-[#896542]">
+                    {roleLabels[member.level]}
+                  </span>
+                  <span className="max-w-36 shrink-0 truncate rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
+                    {member.highestLevelName || "No level"}
+                  </span>
+                </button>
               ))}
             </div>
+            {selectedMemberId && (() => {
+              const member = memberData.members.find(
+                (candidate) => candidate.id === selectedMemberId,
+              )
+              if (!member) return null
+              return (
+                <div className="mt-5 rounded-2xl border border-[#d8c7b8] bg-[#fcfaf8] p-5 shadow-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-[#896542]">Ministry member details</p>
+                      <h4 className="mt-1 century-font text-2xl text-gray-900">
+                        {member.firstName} {member.lastName}
+                      </h4>
+                    </div>
+                    <button type="button" onClick={() => setSelectedMemberId("")} className="text-sm font-semibold text-[#6f4f34] hover:underline">Close</button>
+                  </div>
+                  <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                    <fieldset className="rounded-xl border border-blue-100 bg-blue-50 p-4 sm:col-span-2">
+                      <legend className="px-1 text-sm font-semibold text-blue-900">Groups</legend>
+                      <div className="mt-2 flex flex-wrap gap-4">
+                        {(memberData.groups || []).map((group) => (
+                          <label key={group.id} className="flex items-center gap-2 text-sm font-semibold text-blue-900">
+                            <input
+                              type="checkbox"
+                              checked={(member.groupIds || []).includes(group.id)}
+                              disabled={group.automaticMembership}
+                              onChange={(event) => {
+                                const groupIds = event.target.checked
+                                  ? [...(member.groupIds || []), group.id]
+                                  : (member.groupIds || []).filter((id) => id !== group.id)
+                                updateMembership({ userId: member.userId, action: "set_member_groups", groupIds })
+                              }}
+                              className="size-4 rounded border-blue-300"
+                            />
+                            {group.name}{group.automaticMembership ? " (automatic)" : ""}
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                    <label className="text-sm font-semibold text-gray-700">
+                      Access role
+                      {member.level === "owner" ? (
+                        <span className="mt-2 block rounded-lg bg-[#f4ede6] px-3 py-2 text-[#896542]">Owner</span>
+                      ) : (
+                        <select value={member.level} onChange={(event) => updateMembership({ userId: member.userId, action: "set_role", level: event.target.value })} className="mt-2 block h-11 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal">
+                          <option value="member">Member</option>
+                          <option value="admin">Ministry Admin</option>
+                        </select>
+                      )}
+                    </label>
+                    <label className="text-sm font-semibold text-gray-700">
+                      Highest level in {data.ministry.name}
+                      <select value={member.highestLevelId || ""} onChange={(event) => updateMembership({ userId: member.userId, action: "set_ministry_level", highestLevelId: event.target.value })} className="mt-2 block h-11 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal">
+                        <option value="">Not assigned</option>
+                        {memberData.levels.map((level) => <option key={level.id} value={level.id}>Level {level.rankOrder} · {level.name}</option>)}
+                      </select>
+                    </label>
+                    <label className="flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 sm:col-span-2">
+                      <span>
+                        Can serve
+                        <span className="mt-1 block text-xs font-normal text-gray-500">Only a ministry administrator can change this setting.</span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={member.canServe}
+                        onChange={(event) => updateMembership({ userId: member.userId, action: "set_can_serve", canServe: event.target.checked })}
+                        className="size-5 rounded border-gray-300 text-[#896542] focus:ring-[#896542]"
+                      />
+                    </label>
+                  </div>
+                  {member.level !== "owner" && (
+                    <button
+                      type="button"
+                      onClick={() => updateMembership({ userId: member.userId, action: member.userId === data.user.id ? "leave" : "remove" })}
+                      className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-red-700 hover:underline"
+                    >
+                      <UserMinusIcon className="size-4" /> {member.userId === data.user.id ? "Leave ministry" : "Remove from ministry"}
+                    </button>
+                  )}
+                </div>
+              )
+            })()}
           </div>
           <aside>
             {memberData.canManageAll && (

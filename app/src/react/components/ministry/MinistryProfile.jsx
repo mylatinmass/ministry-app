@@ -3,6 +3,7 @@ import { Link } from "../../compat/gatsby"
 import {
   BellAlertIcon,
   ChatBubbleOvalLeftEllipsisIcon,
+  CheckIcon,
   CheckCircleIcon,
   DevicePhoneMobileIcon,
   EnvelopeIcon,
@@ -24,6 +25,10 @@ import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 import PushNotifications from "./PushNotifications"
 import TelegramNotifications from "./TelegramNotifications"
 import { applyMinistryTheme } from "../../utils/ministryTheme"
+import {
+  buildHouseholdProfileColors,
+  CHILD_PROFILE_COLOR_SWATCHES,
+} from "../../utils/householdCalendar"
 import MinistrySectionActions from "./MinistrySectionActions"
 
 const reminderOptions = [
@@ -200,6 +205,10 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
   const [channelTestMessage, setChannelTestMessage] = React.useState("")
   const pushNotificationsRef = React.useRef(null)
   const telegramNotificationsRef = React.useRef(null)
+  const familyProfileColors = React.useMemo(
+    () => buildHouseholdProfileColors(familyData?.profiles || []),
+    [familyData?.profiles],
+  )
 
   const handleTelegramConnectionChange = React.useCallback((connected) => {
     const updateTelegramState = (current) =>
@@ -367,6 +376,31 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
     )
     if (!confirmed) return
     await runFamilyAction({ action: "remove_pending_child", profileId: child.id })
+  }
+
+  const setChildCalendarColor = async (child, calendarColor) => {
+    if (familyProfileColors.get(child.id) === calendarColor) return
+    setFamilyData((current) => current && ({
+      ...current,
+      profiles: current.profiles.map((item) =>
+        item.id === child.id ? { ...item, calendarColor } : item,
+      ),
+    }))
+    const saved = await runFamilyAction({
+      action: "set_calendar_color",
+      profileId: child.id,
+      calendarColor,
+    })
+    if (!saved) {
+      setFamilyData((current) => current && ({
+        ...current,
+        profiles: current.profiles.map((item) =>
+          item.id === child.id
+            ? { ...item, calendarColor: child.calendarColor || null }
+            : item,
+        ),
+      }))
+    }
   }
 
   const handleChange = (event) => {
@@ -984,6 +1018,67 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
                     {child.guardianCount} linked {child.guardianCount === 1 ? "guardian" : "guardians"}
                     {child.hasPendingGuardianInvitation ? " · Link invitation pending" : ""}
                   </p>
+                  <fieldset
+                    data-guide-id="profile-child-calendar-color"
+                    disabled={!isEditing || isSaving}
+                    className="mt-3"
+                  >
+                    <legend className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                      <span
+                        className="size-3 rounded-full ring-1 ring-black/10"
+                        style={{ backgroundColor: familyProfileColors.get(child.id) }}
+                        aria-hidden="true"
+                      />
+                      Calendar dot color
+                    </legend>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {isEditing
+                        ? "Choose a swatch. Changes save automatically."
+                        : `${CHILD_PROFILE_COLOR_SWATCHES.find((swatch) => swatch.value === familyProfileColors.get(child.id))?.name || "Selected color"}. Select Edit to change it.`}
+                    </p>
+                    {isEditing && (
+                      <div className="mt-2 grid max-w-md grid-cols-4 gap-2 sm:grid-cols-8">
+                        {CHILD_PROFILE_COLOR_SWATCHES.map((swatch) => {
+                          const selected =
+                            familyProfileColors.get(child.id) === swatch.value
+                          return (
+                            <label
+                              key={swatch.value}
+                              title={swatch.name}
+                              className="relative grid aspect-square min-h-11 cursor-pointer place-items-center rounded-lg outline-none transition hover:bg-white focus-within:ring-2 focus-within:ring-[#896542] focus-within:ring-offset-2 has-[:disabled]:cursor-wait has-[:disabled]:opacity-60"
+                            >
+                              <input
+                                type="radio"
+                                name={`calendar-color-${child.id}`}
+                                value={swatch.value}
+                                checked={selected}
+                                disabled={isSaving}
+                                onChange={() =>
+                                  setChildCalendarColor(child, swatch.value)
+                                }
+                                className="sr-only"
+                              />
+                              <span
+                                className={`grid size-9 place-items-center rounded-full border-2 shadow-sm transition ${
+                                  selected
+                                    ? "scale-110 border-white ring-2 ring-[#6f4f34] ring-offset-1"
+                                    : "border-white/80 ring-1 ring-black/15"
+                                }`}
+                                style={{
+                                  backgroundColor: swatch.value,
+                                  color: swatch.foreground,
+                                }}
+                                aria-hidden="true"
+                              >
+                                {selected && <CheckIcon className="size-5 stroke-[3]" />}
+                              </span>
+                              <span className="sr-only">{swatch.name}</span>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </fieldset>
                   {child.status === "pending" && (
                     <button
                       type="button"

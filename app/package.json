@@ -17,6 +17,7 @@
     "sync:mass-schedule": "node --env-file-if-exists=.env.local scripts/sync-mass-schedule.mjs --required",
     "check:mass-schedule-sync": "node --env-file-if-exists=.env.local scripts/check-mass-schedule-sync.mjs",
     "test:mass-schedule": "node scripts/test-mass-schedule.mjs",
+    "test:household-calendar": "node scripts/test-household-calendar.mjs",
     "verify": "node scripts/verify.mjs && node scripts/verify-guides.mjs",
     "verify:guides": "node scripts/verify-guides.mjs",
     "smoke:new-features": "node --env-file-if-exists=.env.local scripts/smoke-new-features.mjs"

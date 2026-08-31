@@ -266,7 +266,7 @@ const MinistryEventAgenda = ({
                             {assignmentProfiles.length > 0 && (
                               <span
                                 className="inline-flex items-center gap-1"
-                                aria-label={`${assignmentProfiles.length} household ${assignmentProfiles.length === 1 ? "member is" : "members are"} assigned`}
+                                aria-label={`${assignmentProfiles.map((assignment) => `${assignment.firstName} ${assignment.lastName}`).join(", ")} ${assignmentProfiles.length === 1 ? "is" : "are"} assigned`}
                               >
                                 {assignmentProfiles.map((assignment) => (
                                   <span
@@ -274,6 +274,7 @@ const MinistryEventAgenda = ({
                                     title={`${assignment.firstName} ${assignment.lastName}`}
                                     className="size-2.5 rounded-full ring-1 ring-black/10"
                                     style={{ backgroundColor: assignment.profileColor }}
+                                    aria-hidden="true"
                                   />
                                 ))}
                               </span>

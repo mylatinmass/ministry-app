@@ -157,6 +157,9 @@ const priestMinistryMigration = await read(
 const appearanceMigration = await read(
   "migrations/20260813_03_add_profile_appearance_theme.sql",
 )
+const childCalendarColorMigration = await read(
+  "migrations/20260828_02_add_managed_profile_calendar_colors.sql",
+)
 const ministryTheme = await read("src/react/utils/ministryTheme.js")
 const householdCalendar = await read("src/react/utils/householdCalendar.js")
 const dayBeforeReminderMigration = await read(
@@ -276,9 +279,26 @@ assert.match(ministrySectionActions, /hidden shrink-0 justify-center lg:flex/)
 assert.match(ministrySectionActions, /ministry-mobile-actions fixed inset-x-0 bottom-0/)
 assert.match(ministrySectionActions, /action\.hidden/)
 assert.match(profile, /MinistrySectionActions/)
-assert.match(householdCalendar, /#f97316/)
-assert.match(householdCalendar, /#22c55e/)
-assert.match(householdCalendar, /#a855f7/)
+const childCalendarColors = [
+  ...householdCalendar.matchAll(/value: "(#[A-F0-9]{6})"/g),
+].map((match) => match[1])
+const migrationCalendarColors = [
+  ...childCalendarColorMigration.matchAll(/'(#[A-F0-9]{6})'/g),
+].map((match) => match[1])
+assert.equal(childCalendarColors.length, 16)
+assert.equal(new Set(childCalendarColors).size, 16)
+assert.deepEqual(
+  [...new Set(migrationCalendarColors)].sort(),
+  [...childCalendarColors].sort(),
+)
+assert.match(householdCalendar, /GUARDIAN_PROFILE_COLOR = "#f97316"/)
+assert.match(householdCalendar, /profile\.calendarColor/)
+assert.match(childCalendarColorMigration, /ADD COLUMN IF NOT EXISTS calendar_color/)
+assert.match(familyProfiles, /mp\.calendar_color/)
+assert.match(familyProfiles, /action === "set_calendar_color"/)
+assert.match(familyProfiles, /managed_profile\.calendar_color_updated/)
+assert.match(profile, /CHILD_PROFILE_COLOR_SWATCHES/)
+assert.match(profile, /data-guide-id="profile-child-calendar-color"/)
 assert.match(ministryWorkspace, /ministry_visible_profile_ids:\$\{actorId\}/)
 assert.match(ministryWorkspace, /profileColor:/)
 assert.match(homeWorkspace, /ministry_visible_profile_ids:\$\{actorId\}/)
@@ -295,6 +315,7 @@ assert.match(ministryList, /managed\.guardian_user_id = \$1/)
 assert.match(ministryList, /profileId: assignment\.user_id/)
 assert.match(eventAgenda, /assignmentProfiles/)
 assert.match(eventAgenda, /backgroundColor: assignment\.profileColor/)
+assert.match(eventAgenda, /assignment\.firstName.*assignment\.lastName/)
 assert.match(globalStyles, /data-ministry-theme="dark"/)
 assert.match(globalStyles, /#047857/)
 assert.match(globalStyles, /#6ee7b7/)

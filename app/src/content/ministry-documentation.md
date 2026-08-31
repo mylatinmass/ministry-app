@@ -2754,3 +2754,19 @@ Admin only: 1. Open the event or assignment that displays a conflict.
 2. Review the overlapping time, facility, resource, priest, or member assignment.
 3. Correct the schedule when the conflict is real; override only when the overlap is intentionally acceptable.
 4. Enter a concise reason and confirm the override so the decision remains auditable.
+
+## Choose a calendar dot color for a child
+<!-- guide: auto -->
+
+**Purpose:** Make each child's assignments easy to recognize when a parent or guardian views several household schedules together.
+
+### How to
+
+1. Open My Profile.
+2. Select Profiles.
+<!-- guide-step: {"mode":"target","target":"action-profiles","event":"click"} -->
+3. Select Edit.
+<!-- guide-step: {"mode":"target","target":"profile-edit-profiles","event":"click"} -->
+4. Under the child you want to identify, choose one of the 16 Calendar dot color swatches.
+<!-- guide-step: {"mode":"target","target":"profile-child-calendar-color","event":"change"} -->
+5. The choice saves automatically and appears on that child's event dots. A linked guardian may choose a different color in their own household view.

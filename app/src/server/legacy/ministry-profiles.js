@@ -45,6 +45,13 @@ const parseBody = (event) => {
 
 const cleanName = (value) => value?.toString().trim().replace(/\s+/g, " ") || ""
 
+const CHILD_PROFILE_CALENDAR_COLORS = new Set([
+  "#D32F2F", "#EC407A", "#8E24AA", "#3949AB",
+  "#1E88E5", "#00BCD4", "#00897B", "#43A047",
+  "#C0CA33", "#FDD835", "#C49A00", "#827717",
+  "#6D4C41", "#9E9E9E", "#455A64", "#000000",
+])
+
 const audit = (client, actorId, subjectId, action, entityType, entityId, metadata = {}) =>
   client.query(
     `
@@ -92,6 +99,7 @@ const listProfiles = async (client, context) => {
         SELECT
           mp.id AS relationship_id,
           mp.status AS relationship_status,
+          mp.calendar_color,
           child.id,
           child.first_name,
           child.last_name,
@@ -207,6 +215,7 @@ const listProfiles = async (client, context) => {
         isGuardian: false,
         relationshipId: row.relationship_id,
         relationshipStatus: row.relationship_status,
+        calendarColor: row.calendar_color || null,
         guardianCount: Number(row.guardian_count || 1),
         hasPendingGuardianInvitation: Boolean(row.has_pending_guardian_invitation),
         separationEmail: row.separation_email || "",
@@ -311,6 +320,45 @@ const createChild = async (client, actor, body) => {
     await client.query("ROLLBACK").catch(() => {})
     throw error
   }
+}
+
+const updateCalendarColor = async (client, actor, body) => {
+  const childId = body.profileId?.toString()
+  const calendarColor = body.calendarColor?.toString().toUpperCase()
+  if (!childId || !CHILD_PROFILE_CALENDAR_COLORS.has(calendarColor)) {
+    return jsonResponse(400, {
+      message: "Choose one of the available calendar colors",
+    })
+  }
+
+  const result = await client.query(
+    `
+      UPDATE managed_profiles
+      SET calendar_color = $3, updated_at = now()
+      WHERE guardian_user_id = $1
+        AND child_user_id = $2
+        AND status IN ('active', 'separation_pending')
+      RETURNING id
+    `,
+    [actor.id, childId, calendarColor]
+  )
+  if (!result.rowCount) {
+    return jsonResponse(403, { message: "Child profile access denied" })
+  }
+  await audit(
+    client,
+    actor.id,
+    childId,
+    "managed_profile.calendar_color_updated",
+    "managed_profile",
+    result.rows[0].id,
+    { calendarColor }
+  )
+  return jsonResponse(200, {
+    success: true,
+    message: "Calendar color updated",
+    calendarColor,
+  })
 }
 
 const inviteGuardian = async (client, event, actor, body) => {
@@ -1041,6 +1089,9 @@ const handler = async (event) => {
     }
     if (event.httpMethod === "POST" && body.action === "create_child") {
       return await createChild(client, context.actor, body)
+    }
+    if (event.httpMethod === "POST" && body.action === "set_calendar_color") {
+      return await updateCalendarColor(client, context.actor, body)
     }
     if (event.httpMethod === "POST" && body.action === "request_membership") {
       return await requestMembership(client, event, context.actor, body)

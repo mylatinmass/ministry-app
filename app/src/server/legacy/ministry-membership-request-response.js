@@ -5,6 +5,9 @@ const {
   getMinistryIdentityContext,
   getMinistryTokenPayload,
 } = require("./helper/ministry-auth")
+const {
+  restoreMinistryLeaveAssignments,
+} = require("./helper/ministry-leave-assignments")
 
 const jsonResponse = (statusCode, body) => ({
   statusCode,
@@ -139,6 +142,11 @@ const handler = async (event) => {
             DO UPDATE SET level = 'member', status = 'active', can_serve = true, updated_at = now()
           `,
           [request.ministry_id, request.child_user_id]
+        )
+        await restoreMinistryLeaveAssignments(
+          client,
+          request.child_user_id,
+          request.ministry_id
         )
         await client.query(
           `

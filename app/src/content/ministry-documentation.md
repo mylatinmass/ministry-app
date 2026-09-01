@@ -1896,15 +1896,13 @@ Operational setup:
 1. Open My Profile.
 2. Select Profiles.
 <!-- guide-step: {"mode":"target","target":"action-profiles","event":"click"} -->
-3. Select Edit.
-<!-- guide-step: {"mode":"target","target":"profile-edit-profiles","event":"click"} -->
-4. Select Add Child.
+3. Select Add Child.
 <!-- guide-step: {"mode":"target","target":"profile-add-child","event":"click"} -->
-5. Enter the child's first name.
+4. Enter the child's first name.
 <!-- guide-step: {"mode":"target","target":"profile-child-first-name","event":"input"} -->
-6. Enter the child's last name.
+5. Enter the child's last name.
 <!-- guide-step: {"mode":"target","target":"profile-child-last-name","event":"input"} -->
-7. Add the child profile. The child remains managed by the guardian until an independent account is activated.
+6. Add the child profile. The child remains managed by the guardian until an independent account is activated.
 
 ## Switch between your profile and a child's profile
 <!-- guide: auto -->
@@ -1950,11 +1948,13 @@ Operational setup:
 ### How to
 
 1. Open My Profile and select Profiles.
-2. Select Link profile or, while using the child profile, select Link another guardian.
-<!-- guide-step: {"mode":"target","target":"profile-link-guardian","event":"click"} -->
-3. Enter the other guardian's existing account email address.
+2. Select Edit on the child you want to link.
+<!-- guide-step: {"mode":"target","target":"profile-child-edit","event":"click"} -->
+3. Select the chain-link icon beside Linked to.
+<!-- guide-step: {"mode":"target","target":"profile-child-guardian-toggle","event":"click"} -->
+4. Under Link to another parent or guardian, enter the other guardian's existing account email address.
 <!-- guide-step: {"mode":"target","target":"profile-guardian-email","event":"input"} -->
-4. Send the link. The other guardian must accept before access is shared.
+5. Select Save. The other guardian must accept the emailed invitation before access is shared.
 
 ## Understand what another linked guardian can access
 <!-- guide: auto -->
@@ -1968,6 +1968,20 @@ Operational setup:
 3. Linked guardians can manage the child's profile, availability, memberships, schedules, and responses.
 4. They do not gain administrator access to ministries merely by becoming a guardian.
 
+## Remove a parent or guardian from a child profile
+<!-- guide: auto -->
+
+**Purpose:** End one adult's access to a child profile while ensuring the child remains linked to at least one responsible parent or guardian.
+
+### How to
+
+1. Open My Profile and select Profiles.
+2. Select Edit on the child whose parent links need to change.
+<!-- guide-step: {"mode":"target","target":"profile-child-edit","event":"click"} -->
+3. Under Remove a parent link, select the one parent or guardian to remove.
+<!-- guide-step: {"mode":"target","target":"profile-remove-guardian","event":"change"} -->
+4. Select Save and confirm the removal. The app will not allow the child's final parent or guardian link to be removed.
+
 ## Respond to a child's ministry membership request
 <!-- guide: auto -->
 
@@ -1980,6 +1994,23 @@ Operational setup:
 <!-- guide-step: {"mode":"target","target":"profile-child-ministry","event":"change"} -->
 3. Send the request.
 4. The child does not become a member until an authorized ministry administrator approves it.
+
+## Remove a managed child from a ministry
+<!-- guide: auto -->
+
+**Purpose:** End a child's active ministry membership while alerting leaders and ensuring every upcoming duty is offered for substitution instead of silently becoming uncovered.
+
+### How to
+
+1. Open My Profile and select Profiles.
+2. Select Edit on the child whose ministry access needs to change.
+<!-- guide-step: {"mode":"target","target":"profile-child-edit","event":"click"} -->
+3. Open the Ministry access selector. A checkmark identifies every ministry the child currently belongs to.
+<!-- guide-step: {"mode":"target","target":"profile-child-ministry","event":"change"} -->
+4. Select a checked ministry, then select Leave Ministry.
+<!-- guide-step: {"mode":"target","target":"profile-child-leave-ministry","event":"click"} -->
+5. Read the warning carefully. Leaving sends an inbox message to ministry administrators and changes upcoming assignments to Request Sub.
+6. Select Leave only when the membership should end. Select Don't Leave, tap outside the warning, or press Escape to cancel without changing anything.
 
 ## Understand who confirms a child's assignments
 <!-- guide: auto -->
@@ -2256,17 +2287,21 @@ Operational setup:
 3. Compare the legend with the dates shown on the calendar.
 4. Close the guide when the markers are clear.
 
-## Remove or replace an existing availability rule
+## Edit or remove an unavailable date, date range, or exclusion rule
 <!-- guide: auto -->
 
-**Purpose:** Correct outdated availability without stacking contradictory ranges or recurring rules.
+**Purpose:** Keep saved availability accurate without stacking contradictory dates, ranges, or recurring rules.
 
 ### How to
 
-1. Open Availability and identify whether the entry is a date range or Exclusion Rule.
-2. For a range, locate Remove beside that range.
-3. For an exclusion, open Exclusion Rules and remove the matching weekday rule.
-4. Create the replacement only after the old rule is removed.
+1. Open Availability and identify whether the saved entry is under Unavailable Dates, Unavailable Date Ranges, or Exclusion Rules.
+2. To change one unavailable date, select its Edit button and update the date in the calendar editor.
+<!-- guide-step: {"mode":"target","target":"availability-edit-date","event":"click"} -->
+3. To change a date range, select its Edit button, update the dates or label, and save the changes.
+<!-- guide-step: {"mode":"target","target":"availability-edit-range","event":"click"} -->
+4. To change a repeating rule, open Exclusion Rules, select its Edit button, update the rule, and save the changes.
+<!-- guide-step: {"mode":"target","target":"availability-edit-rule","event":"click"} -->
+5. Use Remove only when the saved entry should no longer apply; confirm the intended entry before removing it.
 
 ## Understand proposed assignments versus confirmed assignments
 <!-- guide: auto -->
@@ -2765,8 +2800,10 @@ Admin only: 1. Open the event or assignment that displays a conflict.
 1. Open My Profile.
 2. Select Profiles.
 <!-- guide-step: {"mode":"target","target":"action-profiles","event":"click"} -->
-3. Select Edit.
-<!-- guide-step: {"mode":"target","target":"profile-edit-profiles","event":"click"} -->
-4. Under the child you want to identify, choose one of the 16 Calendar dot color swatches.
+3. Select Edit on the child you want to identify.
+<!-- guide-step: {"mode":"target","target":"profile-child-edit","event":"click"} -->
+4. Select the color circle beside the child's name to open the color grid.
+<!-- guide-step: {"mode":"target","target":"profile-child-calendar-color-toggle","event":"click"} -->
+5. Choose one of the 16 square Calendar color swatches. The circle beside the child's name previews your choice.
 <!-- guide-step: {"mode":"target","target":"profile-child-calendar-color","event":"change"} -->
-5. The choice saves automatically and appears on that child's event dots. A linked guardian may choose a different color in their own household view.
+6. Select Save. The color appears on that child's event dots. A linked guardian may choose a different color in their own household view.

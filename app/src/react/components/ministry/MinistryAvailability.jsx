@@ -7,6 +7,7 @@ import {
   ClockIcon,
   InformationCircleIcon,
   NoSymbolIcon,
+  PencilSquareIcon,
   PlusIcon,
   TrashIcon,
   XMarkIcon,
@@ -145,6 +146,7 @@ const MinistryAvailability = ({ ministryId = "" }) => {
   })
   const [ruleMinistryIds, setRuleMinistryIds] = React.useState([])
   const [creatingRule, setCreatingRule] = React.useState(false)
+  const [editingRule, setEditingRule] = React.useState(null)
   const [newRule, setNewRule] = React.useState({
     occurrence: "every",
     dayOfWeek: 6,
@@ -153,6 +155,7 @@ const MinistryAvailability = ({ ministryId = "" }) => {
     allDay: false,
   })
   const [range, setRange] = React.useState({ startDate: "", endDate: "", label: "" })
+  const [editingRangeId, setEditingRangeId] = React.useState("")
   const [loading, setLoading] = React.useState(true)
   const [saving, setSaving] = React.useState(false)
   const [message, setMessage] = React.useState("")
@@ -255,14 +258,18 @@ const MinistryAvailability = ({ ministryId = "" }) => {
     }
     const saved = await post(
       {
-        action: "create_availability_rule",
+        action: editingRule
+          ? "update_availability_rule"
+          : "create_availability_rule",
+        ...(editingRule ? { ruleIds: editingRule.ruleIds } : {}),
         ministryIds: ruleMinistryIds,
         ...newRule,
       },
-      "Exclusion rule created",
+      editingRule ? "Exclusion rule updated" : "Exclusion rule created",
     )
     if (saved) {
       setCreatingRule(false)
+      setEditingRule(null)
       setNewRule({
         occurrence: "every",
         dayOfWeek: 6,
@@ -282,6 +289,35 @@ const MinistryAvailability = ({ ministryId = "" }) => {
     { action: "delete_availability_rule", ruleIds: rule.ruleIds },
     "Exclusion rule removed",
   )
+
+  const editRule = (rule) => {
+    setEditingRule(rule)
+    setCreatingRule(true)
+    setRuleMinistryIds(
+      (data?.ministries || [])
+        .filter((ministry) => rule.ministryIds.includes(ministry.id))
+        .map((ministry) => ministry.id),
+    )
+    setNewRule({
+      occurrence: rule.occurrence,
+      dayOfWeek: rule.dayOfWeek,
+      startTime: rule.startTime || "16:00",
+      endTime: rule.endTime || "17:00",
+      allDay: rule.allDay,
+    })
+  }
+
+  const cancelRuleForm = () => {
+    setCreatingRule(false)
+    setEditingRule(null)
+    setNewRule({
+      occurrence: "every",
+      dayOfWeek: 6,
+      startTime: "16:00",
+      endTime: "17:00",
+      allDay: false,
+    })
+  }
 
   const setOverride = async (preference, times = null) => {
     const saved = await post(
@@ -307,22 +343,46 @@ const MinistryAvailability = ({ ministryId = "" }) => {
     event.preventDefault()
     const saved = await post(
       {
-        action: "create_block",
+        action: editingRangeId ? "update_block" : "create_block",
+        ...(editingRangeId ? { blockId: editingRangeId } : {}),
         ministryId: "",
         startDate: range.startDate,
         endDate: range.endDate,
         label: range.label,
         requestChanges: true,
       },
-      "Unavailable range saved",
+      editingRangeId ? "Unavailable date range updated" : "Unavailable date range saved",
     )
-    if (saved) setRange({ startDate: "", endDate: "", label: "" })
+    if (saved) {
+      setRange({ startDate: "", endDate: "", label: "" })
+      setEditingRangeId("")
+    }
   }
 
   const removeRange = (block) => post(
     { action: "cancel_block", blockId: block.id },
     "Unavailable range removed",
   )
+
+  const removeDateOverride = (date) => post(
+    {
+      action: "reset_date_override",
+      ministryIds: (data?.ministries || []).map((ministry) => ministry.id),
+      date,
+    },
+    "Unavailable date removed",
+  )
+
+  const editDateOverride = (date) => {
+    const parsed = new Date(`${date}T12:00:00`)
+    setVisibleMonth(new Date(parsed.getFullYear(), parsed.getMonth(), 1))
+    setSelectedDate(date)
+    setShowPartialAvailability(false)
+    window.requestAnimationFrame(() => {
+      document.querySelector(`[data-availability-editor="${date}"]`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" })
+    })
+  }
 
   const dayMap = React.useMemo(
     () => new Map((data?.effectiveDays || []).map((day) => [day.date, day])),
@@ -344,9 +404,11 @@ const MinistryAvailability = ({ ministryId = "" }) => {
         endTime: rule.endTime,
         allDay: rule.allDay,
         ruleIds: [],
+        ministryIds: [],
         ministries: [],
       }
       current.ruleIds.push(rule.id)
+      current.ministryIds.push(rule.ministryId)
       current.ministries.push(rule.ministryName)
       groups.set(key, current)
     }
@@ -363,6 +425,14 @@ const MinistryAvailability = ({ ministryId = "" }) => {
   )
   const selectedDay = selectedDate ? dayMap.get(selectedDate) : null
   const ranges = data?.blocks || []
+  const unavailableDates = React.useMemo(
+    () => (data?.dateOverrides || [])
+      .filter((override) =>
+        override.preference === "unavailable" && override.date >= (data?.today || ""),
+      )
+      .sort((left, right) => left.date.localeCompare(right.date)),
+    [data?.dateOverrides, data?.today],
+  )
 
   return (
     <div className="w-full space-y-5 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] lg:pb-10">
@@ -389,7 +459,7 @@ const MinistryAvailability = ({ ministryId = "" }) => {
           <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm sm:p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h3 className="century-font text-xl text-gray-900">Existing Exclusion Rules</h3>
-              <button type="button" data-guide-id="availability-create-rule" onClick={() => setCreatingRule(true)} className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white">
+              <button type="button" data-guide-id="availability-create-rule" onClick={() => { cancelRuleForm(); setCreatingRule(true) }} className="inline-flex items-center gap-2 rounded-xl bg-[#896542] px-4 py-2.5 text-sm font-semibold text-white">
                 <PlusIcon className="size-5" /> Create New Exclusion Rule
               </button>
             </div>
@@ -409,7 +479,10 @@ const MinistryAvailability = ({ ministryId = "" }) => {
                     </p>
                     <p className="mt-1 text-xs text-gray-500">{rule.ministries.join(", ")}</p>
                   </div>
-                  <button type="button" disabled={saving} onClick={() => removeRule(rule)} aria-label={`Remove ${WEEKDAYS[rule.dayOfWeek]} exclusion rule`} className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-700 disabled:opacity-50"><TrashIcon className="size-5" /></button>
+                  <div className="flex items-center gap-1">
+                    <button type="button" data-guide-id="availability-edit-rule" disabled={saving} onClick={() => editRule(rule)} aria-label={`Edit ${WEEKDAYS[rule.dayOfWeek]} exclusion rule`} className="rounded-lg p-2 text-gray-400 hover:bg-[#f4ede6] hover:text-[#6f4f34] disabled:opacity-50"><PencilSquareIcon className="size-5" /></button>
+                    <button type="button" disabled={saving} onClick={() => removeRule(rule)} aria-label={`Remove ${WEEKDAYS[rule.dayOfWeek]} exclusion rule`} className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-700 disabled:opacity-50"><TrashIcon className="size-5" /></button>
+                  </div>
                 </article>
               ))}
             </div>
@@ -419,10 +492,10 @@ const MinistryAvailability = ({ ministryId = "" }) => {
             <form onSubmit={createRule} className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm sm:p-6">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h3 className="century-font text-xl text-gray-900">Create Exclusion Rule</h3>
+                  <h3 className="century-font text-xl text-gray-900">{editingRule ? "Edit Exclusion Rule" : "Create Exclusion Rule"}</h3>
                   <p className="mt-1 text-sm text-gray-500">You are available by default. An exclusion rule marks only the selected occurrence and time as unavailable.</p>
                 </div>
-                <button type="button" onClick={() => setCreatingRule(false)} className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-600">Cancel</button>
+                <button type="button" onClick={cancelRuleForm} className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-600">Cancel</button>
               </div>
               <fieldset className="mt-5">
                 <legend className="text-sm font-semibold text-gray-700">Ministries</legend>
@@ -453,7 +526,7 @@ const MinistryAvailability = ({ ministryId = "" }) => {
                   <TimeSelect label="Unavailable until" value={newRule.endTime} disabled={newRule.allDay} onChange={(endTime) => setNewRule((current) => ({ ...current, endTime }))} />
                   <label className="flex items-center gap-2 pb-2 text-sm text-gray-600"><input type="checkbox" checked={newRule.allDay} onChange={(event) => setNewRule((current) => ({ ...current, allDay: event.target.checked }))} /> All day</label>
               </div>
-              <button disabled={saving} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#896542] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"><PlusIcon className="size-5" />{saving ? "Creating…" : "Create Exclusion Rule"}</button>
+              <button disabled={saving} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#896542] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{editingRule ? <PencilSquareIcon className="size-5" /> : <PlusIcon className="size-5" />}{saving ? "Saving…" : editingRule ? "Save Rule Changes" : "Create Exclusion Rule"}</button>
             </form>
           )}
         </div>
@@ -547,7 +620,7 @@ const MinistryAvailability = ({ ministryId = "" }) => {
           </section>
 
           {selectedDate && (
-            <section className="rounded-2xl border border-[#dfd1c4] bg-[#faf7f4] p-5">
+            <section data-availability-editor={selectedDate} className="rounded-2xl border border-[#dfd1c4] bg-[#faf7f4] p-5">
               <h3 className="century-font text-xl text-gray-900">{formatDate(selectedDate)}</h3>
               <p className="mt-1 text-sm text-gray-600">
                 {selectedDay?.explicit
@@ -592,20 +665,57 @@ const MinistryAvailability = ({ ministryId = "" }) => {
           )}
 
           <section className="grid gap-5 lg:grid-cols-2">
-            <form onSubmit={addRange} className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
-              <h3 className="century-font text-xl text-gray-900">Add an unavailable range</h3>
+            <form data-availability-range-form onSubmit={addRange} className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <h3 className="century-font text-xl text-gray-900">{editingRangeId ? "Edit unavailable date range" : "Add an unavailable date range"}</h3>
+                {editingRangeId && (
+                  <button type="button" onClick={() => { setEditingRangeId(""); setRange({ startDate: "", endDate: "", label: "" }) }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600">Cancel</button>
+                )}
+              </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <label className="text-sm font-semibold text-gray-700">Start date<input data-guide-id="availability-range-start" required type="date" min={data.today} value={range.startDate} onChange={(event) => setRange((current) => ({ ...current, startDate: event.target.value }))} className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 font-normal" /></label>
                 <label className="text-sm font-semibold text-gray-700">End date<input data-guide-id="availability-range-end" required type="date" min={range.startDate || data.today} value={range.endDate} onChange={(event) => setRange((current) => ({ ...current, endDate: event.target.value }))} className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 font-normal" /></label>
                 <label className="text-sm font-semibold text-gray-700 sm:col-span-2">Label (optional)<input data-guide-id="availability-range-label" value={range.label} onChange={(event) => setRange((current) => ({ ...current, label: event.target.value }))} placeholder="Vacation, school break…" className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 font-normal" /></label>
               </div>
-              <button disabled={saving} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#896542] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><PlusIcon className="size-5" />Save range</button>
+              <button disabled={saving} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#896542] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{editingRangeId ? <PencilSquareIcon className="size-5" /> : <PlusIcon className="size-5" />}{editingRangeId ? "Save range changes" : "Save range"}</button>
             </form>
-            <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
-              <h3 className="century-font text-xl text-gray-900">Unavailable ranges</h3>
-              <div className="mt-4 space-y-2">
-                {!ranges.length && <p className="text-sm text-gray-500">No unavailable ranges.</p>}
-                {ranges.map((block) => <div key={block.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 p-3"><div><p className="text-sm font-semibold text-gray-800">{block.startDate === block.endDate ? formatDate(block.startDate) : `${formatDate(block.startDate)}–${formatDate(block.endDate)}`}</p>{block.label && <p className="mt-0.5 text-xs text-gray-500">{block.label}</p>}</div><button type="button" data-guide-id="availability-remove-range" disabled={saving} onClick={() => removeRange(block)} aria-label="Remove unavailable range" className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-700"><TrashIcon className="size-5" /></button></div>)}
+            <div className="space-y-5">
+              <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                <h3 className="century-font text-xl text-gray-900">Unavailable Dates</h3>
+                <div className="mt-4 space-y-2">
+                  {!unavailableDates.length && <p className="text-sm text-gray-500">No individual unavailable dates.</p>}
+                  {unavailableDates.map((override) => (
+                    <div key={override.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 p-3">
+                      <p className="text-sm font-semibold text-gray-800">{formatDate(override.date)}</p>
+                      <div className="flex items-center gap-1">
+                        <button type="button" data-guide-id="availability-edit-date" disabled={saving} onClick={() => editDateOverride(override.date)} aria-label={`Edit ${formatDate(override.date)}`} className="rounded-lg p-2 text-gray-400 hover:bg-[#f4ede6] hover:text-[#6f4f34] disabled:opacity-50"><PencilSquareIcon className="size-5" /></button>
+                        <button type="button" data-guide-id="availability-remove-date" disabled={saving} onClick={() => removeDateOverride(override.date)} aria-label={`Remove ${formatDate(override.date)}`} className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-700 disabled:opacity-50"><TrashIcon className="size-5" /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                <h3 className="century-font text-xl text-gray-900">Unavailable Date Ranges</h3>
+                <div className="mt-4 space-y-2">
+                  {!ranges.length && <p className="text-sm text-gray-500">No unavailable date ranges.</p>}
+                  {ranges.map((block) => (
+                    <div key={block.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 p-3">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-800">{block.startDate === block.endDate ? formatDate(block.startDate) : `${formatDate(block.startDate)}–${formatDate(block.endDate)}`}</p>
+                        {block.label && <p className="mt-0.5 text-xs text-gray-500">{block.label}</p>}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button type="button" data-guide-id="availability-edit-range" disabled={saving} onClick={() => {
+                          setEditingRangeId(block.id)
+                          setRange({ startDate: block.startDate, endDate: block.endDate, label: block.label || "" })
+                          window.requestAnimationFrame(() => document.querySelector("[data-availability-range-form]")?.scrollIntoView({ behavior: "smooth", block: "center" }))
+                        }} aria-label="Edit unavailable date range" className="rounded-lg p-2 text-gray-400 hover:bg-[#f4ede6] hover:text-[#6f4f34] disabled:opacity-50"><PencilSquareIcon className="size-5" /></button>
+                        <button type="button" data-guide-id="availability-remove-range" disabled={saving} onClick={() => removeRange(block)} aria-label="Remove unavailable date range" className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-700 disabled:opacity-50"><TrashIcon className="size-5" /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </section>

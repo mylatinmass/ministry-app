@@ -18,6 +18,9 @@ const {
 const {
   queueKlaviyoProfileSync,
 } = require("./helper/klaviyo-profile-sync")
+const {
+  restoreMinistryLeaveAssignments,
+} = require("./helper/ministry-leave-assignments")
 
 const jsonResponse = (statusCode, body) => ({
   statusCode,
@@ -1097,6 +1100,11 @@ const updateMembership = async (
             targetUserId,
             actor.id
           )
+          await restoreMinistryLeaveAssignments(
+            client,
+            targetUserId,
+            selectedMinistryId
+          )
         }
       }
 
@@ -2044,6 +2052,11 @@ const updateMembership = async (
           ministryId,
           request.child_user_id,
           actor.id
+        )
+        await restoreMinistryLeaveAssignments(
+          client,
+          request.child_user_id,
+          ministryId
         )
       }
       await client.query(

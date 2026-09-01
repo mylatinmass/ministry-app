@@ -10,6 +10,7 @@ import {
   PaperAirplaneIcon,
   PencilSquareIcon,
   PlusIcon,
+  LinkIcon,
   ShieldCheckIcon,
   MoonIcon,
   Squares2X2Icon,
@@ -97,6 +98,16 @@ const sectionHasChanges = (section, saved, draft) =>
   JSON.stringify(sectionDraft(section, saved)) !==
   JSON.stringify(sectionDraft(section, draft))
 
+const formatGuardianNames = (guardians = []) => {
+  const names = guardians
+    .map((guardian) => [guardian.firstName, guardian.lastName].filter(Boolean).join(" "))
+    .filter(Boolean)
+  if (!names.length) return "your account"
+  if (names.length === 1) return names[0]
+  if (names.length === 2) return `${names[0]} and ${names[1]}`
+  return `${names.slice(0, -1).join(", ")}, and ${names.at(-1)}`
+}
+
 const ProfileSectionHeading = ({
   icon: Icon,
   title,
@@ -107,6 +118,7 @@ const ProfileSectionHeading = ({
   onToggleEdit,
   onSave,
   guideId,
+  showActions = true,
 }) => (
   <div className="flex flex-wrap items-center justify-between gap-3">
     <div className="flex min-w-0 items-center gap-2.5">
@@ -118,7 +130,7 @@ const ProfileSectionHeading = ({
         {subtitle && <p className="text-xs text-gray-500">{subtitle}</p>}
       </div>
     </div>
-    <div className="flex items-center gap-2">
+    {showActions && <div className="flex items-center gap-2">
       <button
         type="button"
         data-guide-id={guideId}
@@ -137,7 +149,7 @@ const ProfileSectionHeading = ({
       >
         {saving ? "Saving…" : "Save"}
       </button>
-    </div>
+    </div>}
   </div>
 )
 
@@ -200,6 +212,11 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
   const [separationEmail, setSeparationEmail] = React.useState("")
   const [linkingChildId, setLinkingChildId] = React.useState("")
   const [guardianEmail, setGuardianEmail] = React.useState("")
+  const [editingChildId, setEditingChildId] = React.useState("")
+  const [childEditDraft, setChildEditDraft] = React.useState(null)
+  const [colorPickerChildId, setColorPickerChildId] = React.useState("")
+  const [guardianEditorChildId, setGuardianEditorChildId] = React.useState("")
+  const [leaveMinistryDialog, setLeaveMinistryDialog] = React.useState(null)
   const [activeProfileSection, setActiveProfileSection] = React.useState("account")
   const [testingChannel, setTestingChannel] = React.useState("")
   const [channelTestMessage, setChannelTestMessage] = React.useState("")
@@ -209,6 +226,20 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
     () => buildHouseholdProfileColors(familyData?.profiles || []),
     [familyData?.profiles],
   )
+
+  React.useEffect(() => {
+    if (!leaveMinistryDialog) return undefined
+    const previousOverflow = document.body.style.overflow
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape" && !isSaving) setLeaveMinistryDialog(null)
+    }
+    document.body.style.overflow = "hidden"
+    document.addEventListener("keydown", handleKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [isSaving, leaveMinistryDialog])
 
   const handleTelegramConnectionChange = React.useCallback((connected) => {
     const updateTelegramState = (current) =>
@@ -327,6 +358,125 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
     }
   }
 
+  const childDraftHasChanges = (child) => Boolean(
+    childEditDraft && (
+      childEditDraft.calendarColor !== familyProfileColors.get(child.id) ||
+      childEditDraft.guardianEmail.trim() ||
+      childEditDraft.guardianIdToRemove
+    )
+  )
+
+  const beginChildEdit = (child) => {
+    setEditingChildId(child.id)
+    setColorPickerChildId("")
+    setGuardianEditorChildId("")
+    setChildEditDraft({
+      calendarColor: familyProfileColors.get(child.id),
+      guardianEmail: "",
+      guardianIdToRemove: "",
+    })
+    setLinkingChildId("")
+    setGuardianEmail("")
+    setMessage("")
+    setErrorMessage("")
+  }
+
+  const cancelChildEdit = () => {
+    setEditingChildId("")
+    setChildEditDraft(null)
+    setColorPickerChildId("")
+    setGuardianEditorChildId("")
+    setRequestMinistryId("")
+    setMessage("")
+    setErrorMessage("")
+  }
+
+  const saveChildEdit = async (child) => {
+    if (!childDraftHasChanges(child)) {
+      cancelChildEdit()
+      return
+    }
+    if (childEditDraft.guardianIdToRemove) {
+      const guardian = child.guardians.find(
+        (item) => item.id === childEditDraft.guardianIdToRemove,
+      )
+      const guardianName = guardian
+        ? [guardian.firstName, guardian.lastName].filter(Boolean).join(" ")
+        : "this parent or guardian"
+      const confirmed = window.confirm(
+        `Remove ${guardianName}'s link to ${child.firstName} ${child.lastName}? The remaining linked parent or guardian will keep access.`,
+      )
+      if (!confirmed) return
+    }
+
+    setIsSaving(true)
+    setMessage("")
+    setErrorMessage("")
+    try {
+      const token = window.sessionStorage.getItem(MINISTRY_SESSION_KEY)
+      const actions = []
+      if (childEditDraft.calendarColor !== familyProfileColors.get(child.id)) {
+        actions.push({
+          action: "set_calendar_color",
+          profileId: child.id,
+          calendarColor: childEditDraft.calendarColor,
+        })
+      }
+      if (childEditDraft.guardianEmail.trim()) {
+        actions.push({
+          action: "invite_guardian",
+          profileId: child.id,
+          email: childEditDraft.guardianEmail.trim(),
+        })
+      }
+      if (childEditDraft.guardianIdToRemove) {
+        actions.push({
+          action: "unlink_guardian",
+          profileId: child.id,
+          guardianId: childEditDraft.guardianIdToRemove,
+        })
+      }
+
+      let result = null
+      for (const action of actions) {
+        const response = await fetch(getFunctionEndpoint("ministry-profiles"), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(action),
+        })
+        result = await response.json()
+        if (!response.ok) throw new Error(result.message || "Unable to update profile")
+      }
+      setMessage(result?.message || "Child profile updated.")
+      setEditingChildId("")
+      setChildEditDraft(null)
+      setColorPickerChildId("")
+      setGuardianEditorChildId("")
+      setRequestMinistryId("")
+      await loadFamily()
+      window.dispatchEvent(new Event("ministry-profiles-updated"))
+    } catch (error) {
+      setErrorMessage(error.message)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const confirmLeaveMinistry = async () => {
+    if (!leaveMinistryDialog) return
+    const { child, ministry } = leaveMinistryDialog
+    const saved = await runFamilyAction({
+      action: "leave_ministry",
+      profileId: child.id,
+      ministryId: ministry.id,
+    })
+    if (saved) setRequestMinistryId("")
+    setLeaveMinistryDialog(null)
+  }
+
   const addChild = async (event) => {
     event.preventDefault()
     const saved = await runFamilyAction({ action: "create_child", ...childForm })
@@ -361,14 +511,6 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
     }
   }
 
-  const unlinkChild = async (child) => {
-    const confirmed = window.confirm(
-      `Unlink ${child.firstName} ${child.lastName} from your account? The other linked guardian will keep access.`,
-    )
-    if (!confirmed) return
-    await runFamilyAction({ action: "unlink_guardian", profileId: child.id })
-  }
-
   const removePendingChild = async (child) => {
     const childName = [child.firstName, child.lastName].filter(Boolean).join(" ")
     const confirmed = window.confirm(
@@ -376,31 +518,6 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
     )
     if (!confirmed) return
     await runFamilyAction({ action: "remove_pending_child", profileId: child.id })
-  }
-
-  const setChildCalendarColor = async (child, calendarColor) => {
-    if (familyProfileColors.get(child.id) === calendarColor) return
-    setFamilyData((current) => current && ({
-      ...current,
-      profiles: current.profiles.map((item) =>
-        item.id === child.id ? { ...item, calendarColor } : item,
-      ),
-    }))
-    const saved = await runFamilyAction({
-      action: "set_calendar_color",
-      profileId: child.id,
-      calendarColor,
-    })
-    if (!saved) {
-      setFamilyData((current) => current && ({
-        ...current,
-        profiles: current.profiles.map((item) =>
-          item.id === child.id
-            ? { ...item, calendarColor: child.calendarColor || null }
-            : item,
-        ),
-      }))
-    }
   }
 
   const handleChange = (event) => {
@@ -502,6 +619,10 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
   const cancelEditing = () => {
     setDraft(profile)
     setIsEditing(false)
+    setEditingChildId("")
+    setChildEditDraft(null)
+    setLinkingChildId("")
+    setGuardianEmail("")
     setMessage("")
     setErrorMessage("")
   }
@@ -517,6 +638,10 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
     }
     setDraft(profile)
     setIsEditing(false)
+    setEditingChildId("")
+    setChildEditDraft(null)
+    setColorPickerChildId("")
+    setGuardianEditorChildId("")
     setMessage("")
     setErrorMessage("")
     setActiveProfileSection(section)
@@ -985,17 +1110,21 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
             saving={isSaving}
             onToggleEdit={toggleSectionEditing}
             onSave={saveProfile}
-            guideId="profile-edit-profiles"
+            showActions={false}
           />
-            {!profile.isManagedProfile && isEditing && (
+            {!profile.isManagedProfile && (
               <div className="mt-3 flex justify-end">
               <button
                 type="button"
                 data-guide-id="profile-add-child"
-                onClick={() => setShowAddChild((visible) => !visible)}
+                onClick={() => {
+                  cancelChildEdit()
+                  setShowAddChild((visible) => !visible)
+                }}
                 className="inline-flex items-center gap-2 rounded-lg border border-[#d8c7b8] px-3 py-2 text-sm font-semibold text-[#6f4f34]"
               >
-                <PlusIcon className="size-4" /> Add Child
+                {showAddChild ? <XMarkIcon className="size-4" /> : <PlusIcon className="size-4" />}
+                {showAddChild ? "Cancel" : "Add Child"}
               </button>
               </div>
             )}
@@ -1010,140 +1139,242 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
 
           {!profile.isManagedProfile && familyData.profiles.filter((item) => !item.isGuardian).length > 0 && (
             <div className="mt-3 space-y-2">
-              {familyData.profiles.filter((item) => !item.isGuardian).map((child) => (
-                <div key={child.id} className="rounded-lg bg-gray-50 p-3">
-                  <p className="font-semibold text-gray-900">{child.firstName} {child.lastName}</p>
-                  <p className="mt-1 text-sm text-gray-500">{child.status === "pending" ? "Pending app approval" : child.relationshipStatus === "separation_pending" ? "Independent account activation pending" : "Managed child profile"}</p>
-                  <p className="mt-1 text-xs text-gray-400">
-                    {child.guardianCount} linked {child.guardianCount === 1 ? "guardian" : "guardians"}
-                    {child.hasPendingGuardianInvitation ? " · Link invitation pending" : ""}
-                  </p>
-                  <fieldset
-                    data-guide-id="profile-child-calendar-color"
-                    disabled={!isEditing || isSaving}
-                    className="mt-3"
-                  >
-                    <legend className="flex items-center gap-2 text-sm font-semibold text-gray-700">
-                      <span
-                        className="size-3 rounded-full ring-1 ring-black/10"
-                        style={{ backgroundColor: familyProfileColors.get(child.id) }}
-                        aria-hidden="true"
-                      />
-                      Calendar dot color
-                    </legend>
-                    <p className="mt-1 text-xs text-gray-500">
-                      {isEditing
-                        ? "Choose a swatch. Changes save automatically."
-                        : `${CHILD_PROFILE_COLOR_SWATCHES.find((swatch) => swatch.value === familyProfileColors.get(child.id))?.name || "Selected color"}. Select Edit to change it.`}
-                    </p>
-                    {isEditing && (
-                      <div className="mt-2 grid max-w-md grid-cols-4 gap-2 sm:grid-cols-8">
-                        {CHILD_PROFILE_COLOR_SWATCHES.map((swatch) => {
-                          const selected =
-                            familyProfileColors.get(child.id) === swatch.value
-                          return (
-                            <label
-                              key={swatch.value}
-                              title={swatch.name}
-                              className="relative grid aspect-square min-h-11 cursor-pointer place-items-center rounded-lg outline-none transition hover:bg-white focus-within:ring-2 focus-within:ring-[#896542] focus-within:ring-offset-2 has-[:disabled]:cursor-wait has-[:disabled]:opacity-60"
-                            >
-                              <input
-                                type="radio"
-                                name={`calendar-color-${child.id}`}
-                                value={swatch.value}
-                                checked={selected}
-                                disabled={isSaving}
-                                onChange={() =>
-                                  setChildCalendarColor(child, swatch.value)
-                                }
-                                className="sr-only"
+              {familyData.profiles.filter((item) => !item.isGuardian).map((child) => {
+                const editingChild = editingChildId === child.id
+                const changed = editingChild && childDraftHasChanges(child)
+                const displayedColor = editingChild
+                  ? childEditDraft.calendarColor
+                  : familyProfileColors.get(child.id)
+                const selectedMinistry = familyData.ministries.find(
+                  (ministry) => ministry.id === requestMinistryId,
+                )
+                const hasSelectedMinistry = Boolean(
+                  selectedMinistry && child.activeMinistryIds?.includes(selectedMinistry.id),
+                )
+                const selectedMinistryPending = Boolean(
+                  selectedMinistry && familyData.membershipRequests.some(
+                    (request) => request.profileId === child.id &&
+                      request.ministryId === selectedMinistry.id,
+                  ),
+                )
+                return (
+                  <article key={child.id} className="rounded-xl border border-gray-100 bg-gray-50 p-3 sm:p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <div className="relative shrink-0">
+                            {editingChild ? (
+                              <button
+                                type="button"
+                                data-guide-id="profile-child-calendar-color-toggle"
+                                aria-label="Choose calendar color"
+                                aria-expanded={colorPickerChildId === child.id}
+                                disabled={isSaving || childEditDraft?.guardianIdToRemove}
+                                onClick={() => setColorPickerChildId((current) => current === child.id ? "" : child.id)}
+                                className="block size-4 rounded-full ring-2 ring-white outline-none shadow-sm ring-offset-1 ring-offset-gray-50 focus:ring-[#896542] disabled:opacity-40"
+                                style={{ backgroundColor: displayedColor }}
                               />
+                            ) : (
                               <span
-                                className={`grid size-9 place-items-center rounded-full border-2 shadow-sm transition ${
-                                  selected
-                                    ? "scale-110 border-white ring-2 ring-[#6f4f34] ring-offset-1"
-                                    : "border-white/80 ring-1 ring-black/15"
-                                }`}
-                                style={{
-                                  backgroundColor: swatch.value,
-                                  color: swatch.foreground,
-                                }}
+                                className="block size-3.5 rounded-full ring-1 ring-black/15"
+                                style={{ backgroundColor: displayedColor }}
                                 aria-hidden="true"
+                              />
+                            )}
+                            {editingChild && childEditDraft && colorPickerChildId === child.id && (
+                              <fieldset
+                                data-guide-id="profile-child-calendar-color"
+                                disabled={isSaving || childEditDraft.guardianIdToRemove}
+                                className="absolute left-0 top-full z-30 mt-2 grid w-52 grid-cols-4 gap-2 rounded-xl border border-gray-200 bg-white p-3 shadow-xl"
                               >
-                                {selected && <CheckIcon className="size-5 stroke-[3]" />}
-                              </span>
-                              <span className="sr-only">{swatch.name}</span>
-                            </label>
-                          )
-                        })}
+                                <legend className="sr-only">Choose a calendar dot color</legend>
+                                {CHILD_PROFILE_COLOR_SWATCHES.map((swatch) => {
+                                  const selected = childEditDraft.calendarColor === swatch.value
+                                  return (
+                                    <label
+                                      key={swatch.value}
+                                      title={swatch.name}
+                                      className="relative aspect-square cursor-pointer outline-none focus-within:ring-2 focus-within:ring-[#896542] focus-within:ring-offset-2 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-40"
+                                    >
+                                      <input
+                                        type="radio"
+                                        name={`calendar-color-${child.id}`}
+                                        value={swatch.value}
+                                        checked={selected}
+                                        onChange={() => {
+                                          setChildEditDraft((current) => ({
+                                            ...current,
+                                            calendarColor: swatch.value,
+                                          }))
+                                          setColorPickerChildId("")
+                                        }}
+                                        className="sr-only"
+                                      />
+                                      <span
+                                        className={`grid size-full place-items-center border-2 shadow-sm ${
+                                          selected ? "border-white ring-2 ring-[#6f4f34]" : "border-white ring-1 ring-black/15"
+                                        }`}
+                                        style={{ backgroundColor: swatch.value, color: swatch.foreground }}
+                                        aria-hidden="true"
+                                      >
+                                        {selected && <CheckIcon className="size-5 stroke-[3]" />}
+                                      </span>
+                                      <span className="sr-only">{swatch.name}</span>
+                                    </label>
+                                  )
+                                })}
+                              </fieldset>
+                            )}
+                          </div>
+                          <h4 className="truncate font-semibold text-gray-900">
+                            {child.firstName} {child.lastName}
+                          </h4>
+                        </div>
+                        <div className="mt-1 flex min-w-0 items-center gap-1.5">
+                          <p className="truncate text-xs text-gray-500">
+                            Linked to {formatGuardianNames(child.guardians)}
+                          </p>
+                          {editingChild && (
+                            <button
+                              type="button"
+                              data-guide-id="profile-child-guardian-toggle"
+                              aria-label="Edit linked parents and guardians"
+                              aria-expanded={guardianEditorChildId === child.id}
+                              onClick={() => setGuardianEditorChildId((current) => current === child.id ? "" : child.id)}
+                              className={`grid size-8 shrink-0 place-items-center rounded-lg transition ${guardianEditorChildId === child.id ? "bg-[#efe4d9] text-[#6f4f34]" : "text-gray-400 hover:bg-white hover:text-[#6f4f34]"}`}
+                            >
+                              <LinkIcon className="size-4" />
+                            </button>
+                          )}
+                        </div>
+                        {child.hasPendingGuardianInvitation && (
+                          <p className="mt-0.5 text-xs text-amber-700">Parent link invitation pending</p>
+                        )}
                       </div>
-                    )}
-                  </fieldset>
-                  {child.status === "pending" && (
-                    <button
-                      type="button"
-                      disabled={isSaving}
-                      onClick={() => removePendingChild(child)}
-                      className="mt-3 inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-50"
-                    >
-                      <TrashIcon className="size-4" /> Remove child
-                    </button>
-                  )}
-                  {child.status === "active" && child.relationshipStatus === "active" && familyData.ministries.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <select data-guide-id="profile-child-ministry" value={requestMinistryId} onChange={(event) => setRequestMinistryId(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
-                        <option value="">Request ministry access</option>
-                        {familyData.ministries.map((ministry) => <option key={ministry.id} value={ministry.id}>{ministry.name}</option>)}
-                      </select>
-                      <button type="button" disabled={!requestMinistryId || isSaving} onClick={() => runFamilyAction({ action: "request_membership", profileId: child.id, ministryId: requestMinistryId })} className="rounded-lg border border-[#d8c7b8] px-3 py-2 text-sm font-semibold text-[#6f4f34]">Send request</button>
-                    </div>
-                  )}
-                  {child.status === "active" && child.relationshipStatus === "active" && (
-                    <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
-                        data-guide-id="profile-link-guardian"
+                        data-guide-id="profile-child-edit"
+                        disabled={isSaving}
                         onClick={() => {
-                          setLinkingChildId((current) => current === child.id ? "" : child.id)
-                          setGuardianEmail("")
+                          if (!editingChild) beginChildEdit(child)
+                          else if (changed) saveChildEdit(child)
+                          else cancelChildEdit()
                         }}
-                        className="inline-flex items-center gap-2 rounded-lg border border-[#d8c7b8] px-3 py-2 text-sm font-semibold text-[#6f4f34]"
+                        className={`shrink-0 rounded-lg px-3 py-2 text-xs font-bold transition disabled:opacity-50 ${
+                          changed
+                            ? "bg-[#896542] text-white"
+                            : "border border-[#d8c7b8] bg-white text-[#6f4f34]"
+                        }`}
                       >
-                        <UserPlusIcon className="size-4" /> Link profile
+                        {isSaving && editingChild ? "SAVING…" : changed ? "SAVE" : editingChild ? "CANCEL" : "EDIT"}
                       </button>
-                      {child.guardianCount > 1 && (
-                        <button
-                          type="button"
-                          disabled={isSaving}
-                          onClick={() => unlinkChild(child)}
-                          className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-600"
-                        >
-                          Unlink from my account
-                        </button>
-                      )}
                     </div>
-                  )}
-                  {linkingChildId === child.id && (
-                    <form onSubmit={(event) => sendGuardianLink(event, child.id)} className="mt-3 flex flex-col gap-2 sm:flex-row">
-                      <label className="sr-only" htmlFor={`guardian-email-${child.id}`}>Other guardian's account email</label>
-                      <input
-                        data-guide-id="profile-guardian-email"
-                        id={`guardian-email-${child.id}`}
-                        type="email"
-                        required
-                        autoComplete="email"
-                        placeholder="Other guardian's account email"
-                        value={guardianEmail}
-                        onChange={(event) => setGuardianEmail(event.target.value)}
-                        className="h-10 flex-1 rounded-lg border border-gray-200 bg-white px-3 text-sm"
-                      />
-                      <button type="submit" disabled={!guardianEmail || isSaving} className="rounded-lg bg-[#896542] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-                        Send link
-                      </button>
-                    </form>
-                  )}
-                </div>
-              ))}
+
+                    {editingChild && childEditDraft && (
+                      <div className="mt-3">
+                        {guardianEditorChildId === child.id && (
+                          <div className="rounded-lg border border-gray-200 bg-white p-3">
+                        {child.status === "active" && child.relationshipStatus === "active" && (
+                          <label className="block">
+                            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Link to another parent or guardian</span>
+                            <input
+                              data-guide-id="profile-guardian-email"
+                              type="email"
+                              autoComplete="email"
+                              placeholder="Their existing account email"
+                              value={childEditDraft.guardianEmail}
+                              disabled={isSaving || childEditDraft.guardianIdToRemove}
+                              onChange={(event) => setChildEditDraft((current) => ({
+                                ...current,
+                                guardianEmail: event.target.value,
+                              }))}
+                              className="mt-1.5 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm"
+                            />
+                          </label>
+                        )}
+
+                        {child.guardianCount > 1 && (
+                          <fieldset className="mt-3">
+                            <legend className="text-xs font-semibold uppercase tracking-wide text-gray-500">Remove a parent link</legend>
+                            <div className="mt-1.5 space-y-1.5">
+                              {child.guardians.map((guardian) => {
+                                const guardianName = [guardian.firstName, guardian.lastName].filter(Boolean).join(" ")
+                                const selected = childEditDraft.guardianIdToRemove === guardian.id
+                                return (
+                                  <label key={guardian.id} className={`flex cursor-pointer items-center gap-2 rounded-lg border p-2.5 text-sm ${selected ? "border-red-200 bg-red-50 text-red-800" : "border-gray-200 bg-white text-gray-700"}`}>
+                                    <input
+                                      data-guide-id="profile-remove-guardian"
+                                      type="checkbox"
+                                      checked={selected}
+                                      disabled={isSaving}
+                                      onChange={() => setChildEditDraft((current) => ({
+                                        ...current,
+                                        guardianIdToRemove: selected ? "" : guardian.id,
+                                      }))}
+                                      className="size-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                                    />
+                                    <span>Remove {guardianName}{guardian.isCurrentGuardian ? " (you)" : ""}</span>
+                                  </label>
+                                )
+                              })}
+                            </div>
+                            <p className="mt-1.5 text-xs text-gray-500">Only one link can be removed at a time.</p>
+                          </fieldset>
+                        )}
+                          </div>
+                        )}
+
+                        {child.status === "pending" && (
+                          <button
+                            type="button"
+                            disabled={isSaving}
+                            onClick={() => removePendingChild(child)}
+                            className="mt-3 inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700"
+                          >
+                            <TrashIcon className="size-4" /> Remove child
+                          </button>
+                        )}
+
+                        {child.status === "active" && child.relationshipStatus === "active" && familyData.ministries.length > 0 && (
+                          <div className={guardianEditorChildId === child.id ? "mt-4 border-t border-gray-200 pt-3" : ""}>
+                            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Ministry access</p>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <select data-guide-id="profile-child-ministry" value={requestMinistryId} onChange={(event) => setRequestMinistryId(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+                                <option value="">Choose a ministry</option>
+                                {familyData.ministries.map((ministry) => (
+                                  <option key={ministry.id} value={ministry.id}>
+                                    {child.activeMinistryIds?.includes(ministry.id) ? "✓ " : ""}{ministry.name}
+                                  </option>
+                                ))}
+                              </select>
+                              {hasSelectedMinistry ? (
+                                <button
+                                  type="button"
+                                  data-guide-id="profile-child-leave-ministry"
+                                  disabled={isSaving}
+                                  onClick={() => setLeaveMinistryDialog({ child, ministry: selectedMinistry })}
+                                  className="rounded-lg bg-red-600 px-3 py-2 text-sm font-bold text-white transition hover:bg-red-700 disabled:opacity-50"
+                                >
+                                  LEAVE MINISTRY
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={!requestMinistryId || selectedMinistryPending || isSaving}
+                                  onClick={() => runFamilyAction({ action: "request_membership", profileId: child.id, ministryId: requestMinistryId })}
+                                  className="rounded-lg border border-[#d8c7b8] px-3 py-2 text-sm font-semibold text-[#6f4f34] disabled:opacity-50"
+                                >
+                                  {selectedMinistryPending ? "REQUEST PENDING" : "REQUEST ACCESS"}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </article>
+                )
+              })}
             </div>
           )}
 
@@ -1201,6 +1432,53 @@ const MinistryProfile = ({ initialUser, onUserUpdate }) => {
         <p className="py-8 text-center text-sm text-gray-500">
           Loading profiles…
         </p>
+      )}
+
+      {leaveMinistryDialog && (
+        <div
+          className="fixed inset-0 z-[90] grid place-items-center bg-black/55 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !isSaving) setLeaveMinistryDialog(null)
+          }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="leave-ministry-title"
+            aria-describedby="leave-ministry-description"
+            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl"
+          >
+            <h3 id="leave-ministry-title" className="century-font text-xl text-gray-900">
+              Leave ministry?
+            </h3>
+            <p id="leave-ministry-description" className="mt-2 text-sm leading-6 text-gray-600">
+              Are you sure you want to LEAVE {leaveMinistryDialog.ministry.name} MINISTRY?
+            </p>
+            <p className="mt-2 text-xs leading-5 text-gray-500">
+              Ministry administrators will receive a message, and upcoming assignments will request substitutes. Assignments that have not been filled can be restored if this profile rejoins later.
+            </p>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={confirmLeaveMinistry}
+                className="rounded-lg bg-red-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-red-700 disabled:opacity-50"
+              >
+                {isSaving ? "LEAVING…" : "LEAVE"}
+              </button>
+              <button
+                type="button"
+                autoFocus
+                disabled={isSaving}
+                onClick={() => setLeaveMinistryDialog(null)}
+                className="rounded-lg border border-red-600 bg-white px-4 py-2.5 text-sm font-bold text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+              >
+                DON'T LEAVE
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <div aria-live="polite" aria-atomic="true" className="min-h-6 text-center text-sm">

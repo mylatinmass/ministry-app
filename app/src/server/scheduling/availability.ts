@@ -78,6 +78,44 @@ const parseDateKey = (value: unknown, fieldName: string) => {
 const cleanText = (value: unknown, maximum = 250) =>
   typeof value === "string" ? value.trim().slice(0, maximum) : ""
 
+const normalizeAvailabilityRule = (body: any) => {
+  const ministryIds: string[] = Array.from(new Set<string>(
+    (Array.isArray(body.ministryIds) ? body.ministryIds : [])
+      .map((value: unknown) => cleanText(value, 100))
+      .filter(Boolean),
+  ))
+  if (!ministryIds.length) {
+    throw Object.assign(new Error("Choose at least one ministry"), {
+      status: 400,
+    })
+  }
+  const dayOfWeek = Number(body.dayOfWeek)
+  const occurrence = ["every", "first", "second", "third", "fourth", "last"]
+    .includes(body.occurrence)
+    ? body.occurrence
+    : "every"
+  const allDay = body.allDay === true
+  const startTime = allDay ? "" : cleanText(body.startTime, 5)
+  const endTime = allDay ? "" : cleanText(body.endTime, 5)
+  if (
+    !Number.isInteger(dayOfWeek) ||
+    dayOfWeek < 0 ||
+    dayOfWeek > 6 ||
+    (!allDay && (
+      !/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime) ||
+      !/^([01]\d|2[0-3]):[0-5]\d$/.test(endTime) ||
+      Number(startTime.slice(3, 5)) % 15 !== 0 ||
+      Number(endTime.slice(3, 5)) % 15 !== 0 ||
+      endTime <= startTime
+    ))
+  ) {
+    throw Object.assign(new Error("Choose a valid day and time"), {
+      status: 400,
+    })
+  }
+  return { ministryIds, dayOfWeek, occurrence, allDay, startTime, endTime }
+}
+
 const loadAssignments = async (
   client: PoolClient,
   userId: string,
@@ -459,6 +497,42 @@ const cancelBlock = async (
   return { message: "Availability block removed" }
 }
 
+const updateBlock = async (
+  client: PoolClient,
+  context: Awaited<ReturnType<typeof getIdentityContext>>,
+  body: any,
+) => {
+  const blockId = cleanText(body.blockId, 100)
+  const existing = await client.query(
+    `
+      SELECT id
+      FROM availability_blocks
+      WHERE id = $1
+        AND user_id = $2
+        AND status = 'active'
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [blockId, context.user.id],
+  )
+  if (!existing.rowCount) {
+    throw Object.assign(new Error("Unavailable date range was not found"), {
+      status: 404,
+    })
+  }
+  await client.query(
+    `
+      UPDATE availability_blocks
+      SET status = 'cancelled', cancelled_by = $2,
+        cancelled_at = now(), updated_at = now()
+      WHERE id = $1
+    `,
+    [blockId, context.actor.id],
+  )
+  const result = await createBlock(client, context, body)
+  return { ...result, message: "Unavailable date range updated" }
+}
+
 async function requestAssignmentChange(
   client: PoolClient,
   context: Awaited<ReturnType<typeof getIdentityContext>>,
@@ -769,40 +843,14 @@ export const handleAvailability = async (request: Request) => {
     try {
       let result: any
       if (body.action === "create_availability_rule") {
-        const ministryIds: string[] = Array.from(new Set<string>(
-          (Array.isArray(body.ministryIds) ? body.ministryIds : [])
-            .map((value: unknown) => cleanText(value, 100))
-            .filter(Boolean),
-        ))
-        if (!ministryIds.length) {
-          throw Object.assign(new Error("Choose at least one ministry"), {
-            status: 400,
-          })
-        }
-        const dayOfWeek = Number(body.dayOfWeek)
-        const occurrence = ["every", "first", "second", "third", "fourth", "last"]
-          .includes(body.occurrence)
-          ? body.occurrence
-          : "every"
-        const allDay = body.allDay === true
-        const startTime = allDay ? "" : cleanText(body.startTime, 5)
-        const endTime = allDay ? "" : cleanText(body.endTime, 5)
-        if (
-          !Number.isInteger(dayOfWeek) ||
-          dayOfWeek < 0 ||
-          dayOfWeek > 6 ||
-          (!allDay && (
-            !/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime) ||
-            !/^([01]\d|2[0-3]):[0-5]\d$/.test(endTime) ||
-            Number(startTime.slice(3, 5)) % 15 !== 0 ||
-            Number(endTime.slice(3, 5)) % 15 !== 0 ||
-            endTime <= startTime
-          ))
-        ) {
-          throw Object.assign(new Error("Choose a valid day and time"), {
-            status: 400,
-          })
-        }
+        const {
+          ministryIds,
+          dayOfWeek,
+          occurrence,
+          allDay,
+          startTime,
+          endTime,
+        } = normalizeAvailabilityRule(body)
         let created = 0
         for (const ministryId of ministryIds) {
           await requireMinistryAccess(client, context.user, ministryId, false)
@@ -863,6 +911,100 @@ export const handleAvailability = async (request: Request) => {
             ? "Exclusion rule created"
             : "That exclusion rule already exists",
         }
+      } else if (body.action === "update_availability_rule") {
+        const ruleIds: string[] = Array.from(new Set<string>(
+          (Array.isArray(body.ruleIds) ? body.ruleIds : [body.ruleId])
+            .map((value: unknown) => cleanText(value, 100))
+            .filter(Boolean),
+        ))
+        if (!ruleIds.length) {
+          throw Object.assign(new Error("Choose an exclusion rule"), {
+            status: 400,
+          })
+        }
+        const previous = await client.query(
+          `SELECT id, ministry_id
+           FROM availability_weekly_rules
+           WHERE id = ANY($1::UUID[]) AND user_id = $2 AND status = 'active'
+           FOR UPDATE`,
+          [ruleIds, context.user.id],
+        )
+        if (previous.rowCount !== ruleIds.length) {
+          throw Object.assign(new Error("Availability rule was not found"), {
+            status: 404,
+          })
+        }
+        const {
+          ministryIds,
+          dayOfWeek,
+          occurrence,
+          allDay,
+          startTime,
+          endTime,
+        } = normalizeAvailabilityRule(body)
+        for (const ministryId of ministryIds) {
+          await requireMinistryAccess(client, context.user, ministryId, false)
+          const membership = await client.query(
+            `SELECT id FROM ministry_members
+             WHERE user_id = $1 AND ministry_id = $2 AND status = 'active'
+             LIMIT 1 FOR UPDATE`,
+            [context.user.id, ministryId],
+          )
+          if (!membership.rowCount) {
+            throw Object.assign(new Error("Rules can only be created for ministries you belong to"), {
+              status: 403,
+            })
+          }
+        }
+        await client.query(
+          `UPDATE availability_weekly_rules
+           SET status = 'cancelled', updated_at = now()
+           WHERE id = ANY($1::UUID[])`,
+          [ruleIds],
+        )
+        for (const ministryId of ministryIds) {
+          const duplicate = await client.query(
+            `SELECT id FROM availability_weekly_rules
+             WHERE user_id = $1 AND ministry_id = $2 AND day_of_week = $3
+               AND week_of_month = $4
+               AND start_time IS NOT DISTINCT FROM $5::TIME
+               AND end_time IS NOT DISTINCT FROM $6::TIME
+               AND status = 'active'
+             LIMIT 1`,
+            [context.user.id, ministryId, dayOfWeek, occurrence, allDay ? null : startTime, allDay ? null : endTime],
+          )
+          if (!duplicate.rowCount) {
+            const inserted = await client.query(
+              `INSERT INTO availability_weekly_rules (
+                 user_id, ministry_id, day_of_week, week_of_month,
+                 start_time, end_time
+               ) VALUES ($1, $2, $3, $4, $5::TIME, $6::TIME)
+               RETURNING id`,
+              [context.user.id, ministryId, dayOfWeek, occurrence, allDay ? null : startTime, allDay ? null : endTime],
+            )
+            await writeSchedulingAudit(client, context, {
+              action: "availability.rule_updated",
+              entityType: "availability_weekly_rule",
+              entityId: inserted.rows[0].id,
+              ministryId,
+              afterData: {
+                dayOfWeek,
+                occurrence,
+                startTime: allDay ? null : startTime,
+                endTime: allDay ? null : endTime,
+              },
+              metadata: { replacedRuleIds: ruleIds },
+            })
+          }
+        }
+        const affectedMinistryIds = new Set([
+          ...previous.rows.map((rule) => rule.ministry_id),
+          ...ministryIds,
+        ])
+        for (const ministryId of affectedMinistryIds) {
+          await syncFutureAllMemberAssignmentsForMinistry(client, context, ministryId)
+        }
+        result = { message: "Exclusion rule updated" }
       } else if (body.action === "delete_availability_rule") {
         const ruleIds: string[] = Array.from(new Set<string>(
           (Array.isArray(body.ruleIds) ? body.ruleIds : [body.ruleId])
@@ -1257,6 +1399,8 @@ export const handleAvailability = async (request: Request) => {
         }
       } else if (body.action === "create_block") {
         result = await createBlock(client, context, body)
+      } else if (body.action === "update_block") {
+        result = await updateBlock(client, context, body)
       } else if (body.action === "cancel_block") {
         const ministryId = cleanText(body.managedMinistryId, 100)
         const subjectUserId = cleanText(body.subjectUserId, 100)

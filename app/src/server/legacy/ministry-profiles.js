@@ -93,7 +93,7 @@ const loadUnreadAlertCounts = async (client, actorId) => {
 }
 
 const listProfiles = async (client, context) => {
-  const [childrenResult, ministriesResult, requestsResult, alertsResult, requestableMinistriesResult] = await Promise.all([
+  const [childrenResult, ministriesResult, requestsResult, alertsResult, requestableMinistriesResult, guardiansResult] = await Promise.all([
     client.query(
       `
         SELECT
@@ -107,6 +107,12 @@ const listProfiles = async (client, context) => {
           child.global_role,
           child.appearance_theme,
           child.status,
+          COALESCE((
+            SELECT array_agg(membership.ministry_id)
+            FROM ministry_members membership
+            WHERE membership.user_id = child.id
+              AND membership.status = 'active'
+          ), ARRAY[]::UUID[]) AS active_ministry_ids,
           (
             SELECT count(*)::INT
             FROM managed_profiles guardian_link
@@ -137,18 +143,16 @@ const listProfiles = async (client, context) => {
       `,
       [context.actor.id]
     ),
-    ["owner", "super_admin"].includes(context.actor.global_role)
-      ? client.query(`SELECT id, name, slug FROM ministries WHERE status = 'active' ORDER BY name`)
-      : client.query(
-          `
-            SELECT m.id, m.name, m.slug
-            FROM ministry_members mm
-            JOIN ministries m ON m.id = mm.ministry_id
-            WHERE mm.user_id = $1 AND mm.status = 'active' AND m.status = 'active'
-            ORDER BY m.name
-          `,
-          [context.actor.id]
-        ),
+    client.query(
+      `
+        SELECT id, name, slug
+        FROM ministries
+        WHERE status = 'active'
+          AND lower(COALESCE(slug, '')) NOT IN ('ceremony', 'sacred-music', 'choir')
+          AND lower(name) NOT IN ('ceremony', 'sacred music', 'choir')
+        ORDER BY lower(name)
+      `
+    ),
     client.query(
       `
         SELECT request.id, request.child_user_id, request.ministry_id,
@@ -185,11 +189,43 @@ const listProfiles = async (client, context) => {
       `,
       [context.user.id]
     ),
+    client.query(
+      `
+        SELECT
+          link.child_user_id,
+          guardian.id,
+          guardian.first_name,
+          guardian.last_name
+        FROM managed_profiles link
+        JOIN ministry_accounts guardian ON guardian.id = link.guardian_user_id
+        WHERE link.status IN ('active', 'separation_pending')
+          AND EXISTS (
+            SELECT 1
+            FROM managed_profiles actor_link
+            WHERE actor_link.child_user_id = link.child_user_id
+              AND actor_link.guardian_user_id = $1
+              AND actor_link.status IN ('active', 'separation_pending')
+          )
+        ORDER BY lower(guardian.first_name), lower(guardian.last_name)
+      `,
+      [context.actor.id]
+    ),
   ])
 
   const unreadCounts = new Map(
     alertsResult.rows.map((row) => [row.subject_user_id, Number(row.unread_count || 0)])
   )
+  const guardiansByChild = guardiansResult.rows.reduce((profiles, row) => {
+    const guardians = profiles.get(row.child_user_id) || []
+    guardians.push({
+      id: row.id,
+      firstName: row.first_name,
+      lastName: row.last_name,
+      isCurrentGuardian: row.id === context.actor.id,
+    })
+    profiles.set(row.child_user_id, guardians)
+    return profiles
+  }, new Map())
 
   return {
     actor: toPublicMinistryUser(context.actor),
@@ -217,6 +253,8 @@ const listProfiles = async (client, context) => {
         relationshipStatus: row.relationship_status,
         calendarColor: row.calendar_color || null,
         guardianCount: Number(row.guardian_count || 1),
+        guardians: guardiansByChild.get(row.id) || [],
+        activeMinistryIds: row.active_ministry_ids || [],
         hasPendingGuardianInvitation: Boolean(row.has_pending_guardian_invitation),
         separationEmail: row.separation_email || "",
         alertCount: unreadCounts.get(row.id) || 0,
@@ -488,25 +526,42 @@ const inviteGuardian = async (client, event, actor, body) => {
 
 const unlinkGuardian = async (client, actor, body) => {
   const childId = body.profileId?.toString()
+  const guardianId = body.guardianId?.toString() || actor.id
   if (!childId) return jsonResponse(400, { message: "Child profile is required" })
 
   await client.query("BEGIN")
   try {
+    const actorRelationshipResult = await client.query(
+      `
+        SELECT id
+        FROM managed_profiles
+        WHERE guardian_user_id = $1
+          AND child_user_id = $2
+          AND status IN ('active', 'separation_pending')
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [actor.id, childId]
+    )
+    if (!actorRelationshipResult.rowCount) {
+      await client.query("ROLLBACK")
+      return jsonResponse(404, { message: "This child is not linked to your account" })
+    }
     const relationshipResult = await client.query(
       `
         SELECT id
         FROM managed_profiles
         WHERE guardian_user_id = $1
           AND child_user_id = $2
-          AND status = 'active'
+          AND status IN ('active', 'separation_pending')
         LIMIT 1
         FOR UPDATE
       `,
-      [actor.id, childId]
+      [guardianId, childId]
     )
     if (!relationshipResult.rowCount) {
       await client.query("ROLLBACK")
-      return jsonResponse(404, { message: "This child is not linked to your account" })
+      return jsonResponse(404, { message: "That parent or guardian is no longer linked" })
     }
     const remainingResult = await client.query(
       `
@@ -514,9 +569,9 @@ const unlinkGuardian = async (client, actor, body) => {
         FROM managed_profiles
         WHERE child_user_id = $1
           AND guardian_user_id <> $2
-          AND status = 'active'
+          AND status IN ('active', 'separation_pending')
       `,
-      [childId, actor.id]
+      [childId, guardianId]
     )
     if (Number(remainingResult.rows[0]?.guardian_count || 0) < 1) {
       await client.query("ROLLBACK")
@@ -546,12 +601,232 @@ const unlinkGuardian = async (client, actor, body) => {
       childId,
       "guardian_link.unlinked",
       "managed_profile",
-      relationshipId
+      relationshipId,
+      { removedGuardianUserId: guardianId }
     )
     await client.query("COMMIT")
     return jsonResponse(200, {
       success: true,
-      message: "Child profile unlinked from your account",
+      message: guardianId === actor.id
+        ? "Child profile unlinked from your account"
+        : "Parent or guardian link removed",
+    })
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {})
+    throw error
+  }
+}
+
+const leaveMinistry = async (client, actor, body) => {
+  const childId = body.profileId?.toString()
+  const ministryId = body.ministryId?.toString()
+  if (!childId || !ministryId) {
+    return jsonResponse(400, { message: "Child profile and ministry are required" })
+  }
+
+  await client.query("BEGIN")
+  try {
+    const accessResult = await client.query(
+      `
+        SELECT child.first_name, child.last_name, ministry.name AS ministry_name,
+          membership.id AS membership_id
+        FROM managed_profiles profile
+        JOIN ministry_accounts child ON child.id = profile.child_user_id
+        JOIN ministry_members membership ON membership.user_id = child.id
+        JOIN ministries ministry ON ministry.id = membership.ministry_id
+        WHERE profile.guardian_user_id = $1
+          AND profile.child_user_id = $2
+          AND profile.status IN ('active', 'separation_pending')
+          AND membership.ministry_id = $3
+          AND membership.status = 'active'
+          AND ministry.status = 'active'
+        LIMIT 1
+        FOR UPDATE OF profile, membership
+      `,
+      [actor.id, childId, ministryId]
+    )
+    if (!accessResult.rowCount) {
+      await client.query("ROLLBACK")
+      return jsonResponse(404, { message: "This profile does not have active access to that ministry" })
+    }
+    const membership = accessResult.rows[0]
+    const childName = [membership.first_name, membership.last_name]
+      .filter(Boolean)
+      .join(" ")
+
+    const requestsResult = await client.query(
+      `
+        INSERT INTO assignment_change_requests (
+          assignment_id, subject_user_id, requested_by_user_id, reason,
+          request_type, request_source, previous_assignment_status,
+          ministry_id, event_id, responsibility_id,
+          minimum_level_rank, expires_at
+        )
+        SELECT assignment.id, assignment.user_id, $1,
+          $2, 'substitute', 'ministry_leave', assignment.status,
+          $3, event.id, responsibility.id,
+          greatest(
+            COALESCE(member_level.rank_order, 0),
+            COALESCE(required_level.rank_order, 0)
+          ),
+          event.start_time
+        FROM responsibility_assignments assignment
+        JOIN event_responsibilities responsibility
+          ON responsibility.id = assignment.responsibility_id
+        JOIN events event ON event.id = assignment.event_id
+        LEFT JOIN ministry_members member_access
+          ON member_access.user_id = assignment.user_id
+         AND member_access.ministry_id = $3
+        LEFT JOIN ministry_levels member_level
+          ON member_level.id = member_access.highest_level_id
+        LEFT JOIN ministry_levels required_level
+          ON required_level.id = responsibility.required_ministry_level_id
+        WHERE assignment.user_id = $4
+          AND COALESCE(responsibility.ministry_id, event.ministry_id) = $3
+          AND assignment.status IN ('pending', 'assigned', 'confirmed')
+          AND event.status IN ('draft', 'published')
+          AND event.start_time > now()
+          AND NOT EXISTS (
+            SELECT 1
+            FROM assignment_change_requests existing
+            WHERE existing.assignment_id = assignment.id
+              AND existing.status = 'pending'
+          )
+        RETURNING id, assignment_id
+      `,
+      [
+        actor.id,
+        `${childName} left the ${membership.ministry_name} ministry.`,
+        ministryId,
+        childId,
+      ]
+    )
+    const requestIds = requestsResult.rows.map((request) => request.id)
+    if (requestIds.length) {
+      await client.query(
+        `
+          INSERT INTO assignment_substitution_offers (
+            change_request_id, recipient_user_id
+          )
+          SELECT request.id, candidate.user_id
+          FROM assignment_change_requests request
+          JOIN responsibility_assignments assignment
+            ON assignment.id = request.assignment_id
+          JOIN event_responsibilities responsibility
+            ON responsibility.id = request.responsibility_id
+          JOIN ministry_members candidate
+            ON candidate.ministry_id = request.ministry_id
+           AND candidate.status = 'active'
+           AND candidate.can_serve = true
+           AND candidate.serving_preference <> 'cannot_serve'
+           AND candidate.user_id <> request.subject_user_id
+          JOIN ministry_accounts member
+            ON member.id = candidate.user_id
+           AND member.status = 'active'
+          LEFT JOIN ministry_levels candidate_level
+            ON candidate_level.id = candidate.highest_level_id
+          WHERE request.id = ANY($1::UUID[])
+            AND responsibility.substitution_allowed = true
+            AND COALESCE(candidate_level.rank_order, 0) >= request.minimum_level_rank
+            AND (
+              responsibility.required_group_id IS NULL
+              OR EXISTS (
+                SELECT 1
+                FROM ministry_group_members group_member
+                WHERE group_member.ministry_member_id = candidate.id
+                  AND group_member.group_id = responsibility.required_group_id
+              )
+            )
+          ON CONFLICT (change_request_id, recipient_user_id) DO NOTHING
+        `,
+        [requestIds]
+      )
+      await client.query(
+        `
+          UPDATE responsibility_assignments
+          SET status = 'change_requested', updated_at = now()
+          WHERE id = ANY($1::UUID[])
+        `,
+        [requestsResult.rows.map((request) => request.assignment_id)]
+      )
+    }
+
+    await client.query(
+      `
+        UPDATE ministry_members
+        SET status = 'inactive', can_serve = false, updated_at = now()
+        WHERE id = $1
+      `,
+      [membership.membership_id]
+    )
+
+    const adminsResult = await client.query(
+      `
+        SELECT DISTINCT account.id
+        FROM ministry_accounts account
+        LEFT JOIN ministry_members admin_membership
+          ON admin_membership.user_id = account.id
+         AND admin_membership.ministry_id = $1
+         AND admin_membership.status = 'active'
+        WHERE account.status = 'active'
+          AND (
+            account.global_role IN ('owner', 'super_admin')
+            OR admin_membership.level IN ('owner', 'admin')
+          )
+      `,
+      [ministryId]
+    )
+    if (adminsResult.rowCount) {
+      const bodyText = `${childName} left ${membership.ministry_name}. ${requestIds.length} upcoming ${requestIds.length === 1 ? "assignment now needs" : "assignments now need"} a substitute.`
+      const messageResult = await client.query(
+        `
+          INSERT INTO ministry_messages (
+            ministry_id, audience_scope, channel, subject, body,
+            created_by_actor_id, created_by_profile_id
+          ) VALUES ($1, 'members', 'telegram', NULL, $2, $3, $4)
+          RETURNING id
+        `,
+        [ministryId, bodyText, actor.id, childId]
+      )
+      const messageId = messageResult.rows[0].id
+      for (const admin of adminsResult.rows) {
+        await client.query(
+          `
+            INSERT INTO ministry_message_selected_members (message_id, profile_user_id)
+            VALUES ($1, $2)
+            ON CONFLICT (message_id, profile_user_id) DO NOTHING
+          `,
+          [messageId, admin.id]
+        )
+        await client.query(
+          `
+            INSERT INTO ministry_message_recipients (
+              message_id, profile_user_id, delivery_account_user_id,
+              is_delivery_target, delivery_status, last_error
+            ) VALUES ($1, $2, $2, false, 'skipped', 'in_app_only')
+            ON CONFLICT (
+              message_id, profile_user_id, delivery_account_user_id
+            ) DO NOTHING
+          `,
+          [messageId, admin.id]
+        )
+      }
+    }
+
+    await audit(
+      client,
+      actor.id,
+      childId,
+      "membership.left",
+      "ministry",
+      ministryId,
+      { substituteRequestCount: requestIds.length }
+    )
+    await client.query("COMMIT")
+    return jsonResponse(200, {
+      success: true,
+      message: `Left ${membership.ministry_name}. ${requestIds.length} upcoming ${requestIds.length === 1 ? "assignment is" : "assignments are"} requesting a substitute.`,
+      substituteRequestCount: requestIds.length,
     })
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {})
@@ -1104,6 +1379,9 @@ const handler = async (event) => {
     }
     if (event.httpMethod === "POST" && body.action === "unlink_guardian") {
       return await unlinkGuardian(client, context.actor, body)
+    }
+    if (event.httpMethod === "POST" && body.action === "leave_ministry") {
+      return await leaveMinistry(client, context.actor, body)
     }
     if (event.httpMethod === "POST" && body.action === "remove_pending_child") {
       return await removePendingChild(client, context.actor, body)

@@ -13,6 +13,9 @@ const {
 const {
   queueKlaviyoProfileSync,
 } = require("./helper/klaviyo-profile-sync")
+const {
+  restoreMinistryLeaveAssignments,
+} = require("./helper/ministry-leave-assignments")
 
 const jsonResponse = (statusCode, body) => ({
   statusCode,
@@ -349,6 +352,7 @@ const acceptInvitation = async (client, token, body, jwtSecret) => {
         `,
         [ministry.id, userId]
       )
+      await restoreMinistryLeaveAssignments(client, userId, ministry.id)
       await client.query(
         `
           INSERT INTO ministry_group_members (group_id, ministry_member_id, added_by)

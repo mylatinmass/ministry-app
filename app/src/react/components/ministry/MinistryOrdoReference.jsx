@@ -2,9 +2,11 @@ import * as React from "react"
 import {
   ArrowTopRightOnSquareIcon,
   BookOpenIcon,
+  CalendarDaysIcon,
   CheckIcon,
   ExclamationTriangleIcon,
   InformationCircleIcon,
+  MagnifyingGlassIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
@@ -55,10 +57,18 @@ const MinistryOrdoReference = ({
   eventId = "",
   startTime,
 }) => {
-  const liturgicalDate = toChapelDate(startTime)
+  const eventDate = toChapelDate(startTime)
   const [reference, setReference] = React.useState(null)
   const [selectedOptionId, setSelectedOptionId] = React.useState("")
   const [sacristyNotes, setSacristyNotes] = React.useState("")
+  const [selectedLiturgicalDate, setSelectedLiturgicalDate] = React.useState("")
+  const [celebrationType, setCelebrationType] = React.useState("event_date")
+  const [overrideNote, setOverrideNote] = React.useState("")
+  const [massCatalog, setMassCatalog] = React.useState([])
+  const [catalogYear, setCatalogYear] = React.useState(eventDate.slice(0, 4))
+  const [catalogLoadedYear, setCatalogLoadedYear] = React.useState("")
+  const [catalogQuery, setCatalogQuery] = React.useState("")
+  const [isCatalogLoading, setIsCatalogLoading] = React.useState(false)
   const [isLoading, setIsLoading] = React.useState(false)
   const [isSaving, setIsSaving] = React.useState(false)
   const [message, setMessage] = React.useState("")
@@ -80,8 +90,29 @@ const MinistryOrdoReference = ({
     closeDayDetails,
   )
 
-  const loadReference = React.useCallback(async () => {
-    if (!liturgicalDate) {
+  const applyReference = React.useCallback((result) => {
+    setReference(result)
+    const resultDate = result.event?.liturgicalDate || result.day.liturgicalDate
+    setSelectedLiturgicalDate(resultDate || eventDate)
+    setSelectedOptionId(
+      result.event?.selectedMassOptionId ||
+        (result.day.massOptions.length === 1
+          ? result.day.massOptions[0].id
+          : ""),
+    )
+    setSacristyNotes(result.event?.sacristyNotes || "")
+    setCelebrationType(
+      resultDate && resultDate !== eventDate
+        ? result.event?.celebrationType !== "event_date"
+          ? result.event?.celebrationType || "external_solemnity"
+          : "external_solemnity"
+        : "event_date",
+    )
+    setOverrideNote(result.event?.overrideNote || "")
+  }, [eventDate])
+
+  const loadReference = React.useCallback(async (dateOverride = "") => {
+    if (!eventDate) {
       setReference(null)
       return
     }
@@ -92,33 +123,88 @@ const MinistryOrdoReference = ({
         getFunctionEndpoint("scheduling/ordo"),
         window.location.origin,
       )
-      url.searchParams.set("date", liturgicalDate)
-      if (eventId) url.searchParams.set("eventId", eventId)
+      if (eventId) {
+        url.searchParams.set("eventId", eventId)
+        if (dateOverride) url.searchParams.set("date", dateOverride)
+      } else {
+        url.searchParams.set("date", dateOverride || eventDate)
+      }
       const response = await fetch(url, { headers: requestHeaders() })
       const result = await response.json()
       if (!response.ok) {
         throw new Error(result.message || "Unable to load the 1962 Ordo")
       }
-      setReference(result)
-      setSelectedOptionId(
-        result.event?.selectedMassOptionId ||
-          (result.day.massOptions.length === 1
-            ? result.day.massOptions[0].id
-            : ""),
-      )
-      setSacristyNotes(result.event?.sacristyNotes || "")
+      applyReference(result)
     } catch (error) {
       setReference(null)
       setErrorMessage(error.message)
     } finally {
       setIsLoading(false)
     }
-  }, [eventId, liturgicalDate])
+  }, [applyReference, eventDate, eventId])
 
   React.useEffect(() => {
     setMessage("")
     loadReference()
   }, [loadReference])
+
+  React.useEffect(() => {
+    setCatalogYear(eventDate.slice(0, 4))
+    setCatalogLoadedYear("")
+    setMassCatalog([])
+    setCatalogQuery("")
+  }, [eventDate, eventId])
+
+  const loadMassCatalog = React.useCallback(async (year = catalogYear) => {
+    if (!eventId || !reference?.event?.canOverrideLiturgicalDate) return
+    setIsCatalogLoading(true)
+    setErrorMessage("")
+    try {
+      const url = new URL(
+        getFunctionEndpoint("scheduling/ordo"),
+        window.location.origin,
+      )
+      url.searchParams.set("eventId", eventId)
+      url.searchParams.set("catalog", "true")
+      url.searchParams.set("year", year)
+      const response = await fetch(url, { headers: requestHeaders() })
+      const result = await response.json()
+      if (!response.ok) {
+        throw new Error(result.message || "Unable to load the list of Masses")
+      }
+      setMassCatalog(result.masses || [])
+      setCatalogLoadedYear(year)
+    } catch (error) {
+      setErrorMessage(error.message)
+      setCatalogLoadedYear(year)
+    } finally {
+      setIsCatalogLoading(false)
+    }
+  }, [catalogYear, eventId, reference?.event?.canOverrideLiturgicalDate])
+
+  React.useEffect(() => {
+    if (
+      (showDayDetails || !compact) &&
+      reference?.event?.canOverrideLiturgicalDate &&
+      catalogLoadedYear !== catalogYear &&
+      !isCatalogLoading
+    ) {
+      loadMassCatalog()
+    }
+  }, [
+    isCatalogLoading,
+    loadMassCatalog,
+    catalogLoadedYear,
+    catalogYear,
+    compact,
+    reference?.event?.canOverrideLiturgicalDate,
+    showDayDetails,
+  ])
+
+  const previewMassDate = async (date) => {
+    setMessage("")
+    await loadReference(date)
+  }
 
   const saveReference = async () => {
     if (!eventId || !reference?.event) return
@@ -129,6 +215,11 @@ const MinistryOrdoReference = ({
       const body = { eventId }
       if (reference.event.canSelectMass) {
         body.selectedMassOptionId = selectedOptionId
+      }
+      if (reference.event.canOverrideLiturgicalDate) {
+        body.liturgicalDate = selectedLiturgicalDate || eventDate
+        body.celebrationType = celebrationType
+        body.overrideNote = overrideNote
       }
       if (reference.event.canEditSacristyNotes) {
         body.sacristyNotes = sacristyNotes
@@ -145,7 +236,7 @@ const MinistryOrdoReference = ({
       if (!response.ok) {
         throw new Error(result.message || "Unable to update Ordo details")
       }
-      setReference(result)
+      applyReference(result)
       setMessage(result.message)
     } catch (error) {
       setErrorMessage(error.message)
@@ -154,7 +245,7 @@ const MinistryOrdoReference = ({
     }
   }
 
-  if (!liturgicalDate) return null
+  if (!eventDate) return null
 
   if (isLoading) {
     return (
@@ -245,6 +336,157 @@ const MinistryOrdoReference = ({
   const canUpdate =
     eventReference?.canSelectMass ||
     eventReference?.canEditSacristyNotes
+  const hasLiturgicalDateOverride =
+    Boolean(eventReference?.isMassEvent) &&
+    selectedLiturgicalDate &&
+    selectedLiturgicalDate !== eventDate
+  const celebrationTypeLabel = ({
+    external_solemnity: "External Solemnity",
+    transferred_celebration: "Transferred celebration",
+    votive_mass: "Votive Mass",
+    other: "Approved override",
+  })[celebrationType] || "Mass-date override"
+  const filteredMassCatalog = massCatalog
+    .filter((mass) => {
+      const query = catalogQuery.trim().toLowerCase()
+      return (
+        !query ||
+        mass.celebration.toLowerCase().includes(query) ||
+        mass.liturgicalDate.includes(query)
+      )
+    })
+    .slice(0, 80)
+  const massDateSelector = eventReference?.isMassEvent ? (
+    <section className="rounded-xl border border-[#e4d5c8] bg-[#fbf8f4] p-4">
+      <div className="flex items-start gap-3">
+        <CalendarDaysIcon className="mt-0.5 size-5 shrink-0 text-[#896542]" />
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold text-gray-900">Mass being celebrated</p>
+          <p className="mt-1 text-sm text-gray-600">
+            {day.celebration} · {selectedLiturgicalDate}
+          </p>
+          {hasLiturgicalDateOverride && (
+            <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-[#896542]">
+              Different from the event date ({eventDate})
+            </p>
+          )}
+        </div>
+      </div>
+
+      {eventReference.canOverrideLiturgicalDate && (
+        <div className="mt-4 space-y-3 border-t border-[#e4d5c8] pt-4">
+          <p className="text-sm font-semibold text-gray-800">
+            Select the Mass proper for this event
+          </p>
+          <button
+            type="button"
+            onClick={() => previewMassDate(eventDate)}
+            className={`w-full rounded-lg border px-3 py-2 text-left text-sm ${
+              !hasLiturgicalDateOverride
+                ? "border-[#896542] bg-white text-[#6f4f34]"
+                : "border-gray-200 bg-white text-gray-700"
+            }`}
+          >
+            <span className="font-semibold">Use the event date</span>
+            <span className="ml-2 text-gray-500">{eventDate}</span>
+          </button>
+          <div className="grid gap-2 sm:grid-cols-[8rem_1fr]">
+            <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Year
+              <input
+                type="number"
+                min="2017"
+                max="2100"
+                value={catalogYear}
+                onChange={(event) => {
+                  const nextYear = event.target.value.slice(0, 4)
+                  setCatalogYear(nextYear)
+                  setMassCatalog([])
+                  setCatalogLoadedYear("")
+                  if (/^\d{4}$/.test(nextYear)) loadMassCatalog(nextYear)
+                }}
+                className="mt-1 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm font-normal text-gray-800"
+              />
+            </label>
+            <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Find a feast or date
+              <span className="relative mt-1 block">
+                <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-2.5 size-5 text-gray-400" />
+                <input
+                  type="search"
+                  value={catalogQuery}
+                  onChange={(event) => setCatalogQuery(event.target.value)}
+                  placeholder="Seven Sorrows or 2026-09-15"
+                  className="h-10 w-full rounded-lg border border-gray-200 bg-white pl-10 pr-3 text-sm font-normal text-gray-800"
+                />
+              </span>
+            </label>
+          </div>
+          <div className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-gray-200 bg-white p-2">
+            {isCatalogLoading ? (
+              <p className="px-2 py-3 text-sm text-gray-500">
+                Loading Masses…
+              </p>
+            ) : filteredMassCatalog.length ? (
+              filteredMassCatalog.map((mass) => (
+                <button
+                  key={mass.liturgicalDate}
+                  type="button"
+                  onClick={() => previewMassDate(mass.liturgicalDate)}
+                  className={`w-full rounded-md px-3 py-2 text-left text-sm hover:bg-[#f7f3ef] ${
+                    selectedLiturgicalDate === mass.liturgicalDate
+                      ? "bg-[#f4ede6] text-[#6f4f34]"
+                      : "text-gray-700"
+                  }`}
+                >
+                  <span className="block font-semibold">{mass.celebration}</span>
+                  <span className="text-xs text-gray-500">
+                    {new Intl.DateTimeFormat("en-US", {
+                      weekday: "short",
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                      timeZone: "UTC",
+                    }).format(new Date(`${mass.liturgicalDate}T12:00:00Z`))}
+                  </span>
+                </button>
+              ))
+            ) : (
+              <p className="px-2 py-3 text-sm text-gray-500">
+                No matching Masses were found.
+              </p>
+            )}
+          </div>
+          {hasLiturgicalDateOverride && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-sm font-semibold text-gray-700">
+                Override type
+                <select
+                  value={celebrationType}
+                  onChange={(event) => setCelebrationType(event.target.value)}
+                  className="mt-1 h-11 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal"
+                >
+                  <option value="external_solemnity">External Solemnity</option>
+                  <option value="transferred_celebration">Transferred celebration</option>
+                  <option value="votive_mass">Votive Mass</option>
+                  <option value="other">Other approved reason</option>
+                </select>
+              </label>
+              <label className="text-sm font-semibold text-gray-700">
+                Approval note
+                <input
+                  value={overrideNote}
+                  onChange={(event) => setOverrideNote(event.target.value)}
+                  placeholder="Optional local note"
+                  className="mt-1 h-11 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal"
+                />
+              </label>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  ) : null
 
   if (compact) {
     return (
@@ -269,6 +511,11 @@ const MinistryOrdoReference = ({
                     }`}
                   />
                   {day.vestmentColor} vestments
+                </span>
+              )}
+              {hasLiturgicalDateOverride && (
+                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+                  {celebrationTypeLabel} · {selectedLiturgicalDate}
                 </span>
               )}
             </div>
@@ -347,6 +594,7 @@ const MinistryOrdoReference = ({
               </button>
             </header>
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5 text-sm text-gray-600">
+            {massDateSelector}
             {day.commemorations.length > 0 && (
               <div>
                 {day.commemorations.map((commemoration) => (
@@ -483,7 +731,14 @@ const MinistryOrdoReference = ({
             Cached reference
           </span>
         )}
+        {hasLiturgicalDateOverride && (
+          <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+            {celebrationTypeLabel} · {selectedLiturgicalDate}
+          </span>
+        )}
       </div>
+
+      <div className="mt-4">{massDateSelector}</div>
 
       {day.commemorations.length > 0 && (
         <div className="mt-4 text-sm text-gray-600">

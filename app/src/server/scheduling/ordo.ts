@@ -473,6 +473,32 @@ const discoverOrdoUrl = async (liturgicalDate: string) => {
   return sourceUrl
 }
 
+const loadOrdoCatalog = async (year: string, query: string) => {
+  const response = await fetchOrdo(ORDO_INDEX_URL)
+  const result = await response.json()
+  const normalizedQuery = query.toLowerCase()
+  return (Array.isArray(result?.liturgicalDays) ? result.liturgicalDays : [])
+    .filter((item: any) => /^\d{8}$/.test(String(item?.date || "")))
+    .filter((item: any) => !year || String(item.date).startsWith(year))
+    .filter(
+      (item: any) =>
+        !normalizedQuery ||
+        cleanText(item?.name, 250).toLowerCase().includes(normalizedQuery) ||
+        String(item.date).includes(normalizedQuery.replaceAll("-", "")),
+    )
+    .map((item: any) => ({
+      liturgicalDate: `${String(item.date).slice(0, 4)}-${String(item.date).slice(4, 6)}-${String(item.date).slice(6, 8)}`,
+      celebration: cleanText(item?.name, 250) || "Mass",
+      sourceUrl: isSafeOrdoUrl(cleanText(item?.permalink, 1000))
+        ? cleanText(item?.permalink, 1000)
+        : null,
+    }))
+    .sort((first: any, second: any) =>
+      first.liturgicalDate.localeCompare(second.liturgicalDate),
+    )
+    .slice(0, 500)
+}
+
 const toDateKey = (value: unknown) => {
   if (typeof value === "string") {
     const match = value.match(/^(\d{4}-\d{2}-\d{2})$/)
@@ -633,15 +659,22 @@ const loadEventAccess = async (
 ) => {
   const eventResult = await client.query(
     `
-      SELECT id, ministry_id, status, start_time
-      FROM events
-      WHERE id = $1
+      SELECT event.id, event.ministry_id, event.status, event.start_time,
+        event.schedule_event_type, template.name AS template_name,
+        template.system_key AS template_system_key
+      FROM events event
+      LEFT JOIN templates template ON template.id = event.template_id
+      WHERE event.id = $1
       LIMIT 1
     `,
     [eventId],
   )
   const event = eventResult.rows[0]
   if (!event) throw Object.assign(new Error("Event not found"), { status: 404 })
+  const isMassEvent =
+    ["low_mass", "high_mass"].includes(event.schedule_event_type) ||
+    String(event.template_system_key || "").startsWith("mass-schedule.") ||
+    /\bmass\b/i.test(String(event.template_name || ""))
 
   const participantResult = await client.query(
     `SELECT ministry_id FROM event_ministries WHERE event_id = $1`,
@@ -671,8 +704,10 @@ const loadEventAccess = async (
 
   return {
     event,
+    isMassEvent,
     canViewRelated,
     canSelectMass: coordinatorAccess.canManage,
+    canOverrideLiturgicalDate: coordinatorAccess.canManage && isMassEvent,
     canEditSacristyNotes:
       coordinatorAccess.canManage ||
       participantAccess.some((access) => access.canManage),
@@ -693,6 +728,12 @@ const loadSelection = async (
       sourceChanged: false,
       canSelectMass: false,
       canEditSacristyNotes: false,
+      canOverrideLiturgicalDate: false,
+      isMassEvent: access.isMassEvent,
+      eventDate: toDateKey(access.event.start_time),
+      liturgicalDate: day.liturgicalDate || toDateKey(access.event.start_time),
+      celebrationType: "event_date",
+      overrideNote: "",
     }
   }
   const result = await client.query(
@@ -722,6 +763,14 @@ const loadSelection = async (
       selection.source_hash_at_selection !== day.sourceHash,
     canSelectMass: access.canSelectMass,
     canEditSacristyNotes: access.canEditSacristyNotes,
+    canOverrideLiturgicalDate: access.canOverrideLiturgicalDate,
+    isMassEvent: access.isMassEvent,
+    eventDate: toDateKey(access.event.start_time),
+    liturgicalDate: day.liturgicalDate,
+    celebrationType: belongsToDay
+      ? selection.celebration_type || "event_date"
+      : "event_date",
+    overrideNote: belongsToDay ? selection.override_note || "" : "",
   }
 }
 
@@ -737,7 +786,16 @@ const updateSelection = async (
   const access = await loadEventAccess(client, context.user, eventId)
   const hasMassSelection = Object.hasOwn(body, "selectedMassOptionId")
   const hasSacristyNotes = Object.hasOwn(body, "sacristyNotes")
-  if (!hasMassSelection && !hasSacristyNotes) {
+  const hasLiturgicalDate = Object.hasOwn(body, "liturgicalDate")
+  const hasCelebrationType = Object.hasOwn(body, "celebrationType")
+  const hasOverrideNote = Object.hasOwn(body, "overrideNote")
+  if (
+    !hasMassSelection &&
+    !hasSacristyNotes &&
+    !hasLiturgicalDate &&
+    !hasCelebrationType &&
+    !hasOverrideNote
+  ) {
     throw Object.assign(new Error("No Ordo changes were provided"), {
       status: 400,
     })
@@ -755,7 +813,58 @@ const updateSelection = async (
     )
   }
 
-  const liturgicalDate = toDateKey(access.event.start_time)
+  const eventDate = toDateKey(access.event.start_time)
+  const currentResult = await client.query(
+    `
+      SELECT selection.*, day.liturgical_date AS selected_liturgical_date
+      FROM event_ordo_selections selection
+      JOIN ordo_days day ON day.id = selection.ordo_day_id
+      WHERE selection.event_id = $1
+      FOR UPDATE
+    `,
+    [eventId],
+  )
+  const stored = currentResult.rows[0]
+  const requestedLiturgicalDate = hasLiturgicalDate
+    ? cleanText(body.liturgicalDate, 10)
+    : ""
+  const liturgicalDate =
+    requestedLiturgicalDate ||
+    toDateKey(stored?.selected_liturgical_date) ||
+    eventDate
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(liturgicalDate)) {
+    throw Object.assign(new Error("A valid Ordo date is required"), {
+      status: 400,
+    })
+  }
+  const isDateOverride = liturgicalDate !== eventDate
+  if (isDateOverride && !access.canOverrideLiturgicalDate) {
+    throw Object.assign(
+      new Error("Only an authorized administrator may select another Mass date"),
+      { status: 403 },
+    )
+  }
+  const allowedCelebrationTypes = new Set([
+    "event_date",
+    "external_solemnity",
+    "transferred_celebration",
+    "votive_mass",
+    "other",
+  ])
+  const requestedCelebrationType = cleanText(body.celebrationType, 50)
+  const celebrationType = isDateOverride
+    ? allowedCelebrationTypes.has(requestedCelebrationType) &&
+      requestedCelebrationType !== "event_date"
+      ? requestedCelebrationType
+      : stored?.celebration_type && stored.celebration_type !== "event_date"
+        ? stored.celebration_type
+        : "external_solemnity"
+    : "event_date"
+  const overrideNote = isDateOverride
+    ? hasOverrideNote
+      ? cleanText(body.overrideNote, 1000)
+      : stored?.override_note || ""
+    : ""
   const day = await loadOrdoDay(client, liturgicalDate)
   if (!day.id || day.verificationRequired) {
     throw Object.assign(
@@ -765,11 +874,6 @@ const updateSelection = async (
       { status: 409 },
     )
   }
-  const currentResult = await client.query(
-    `SELECT * FROM event_ordo_selections WHERE event_id = $1 FOR UPDATE`,
-    [eventId],
-  )
-  const stored = currentResult.rows[0]
   const current = stored?.ordo_day_id === day.id ? stored : null
 
   const selectedMassOptionId = hasMassSelection
@@ -816,12 +920,14 @@ const updateSelection = async (
         selected_mass_option_snapshot,
         source_hash_at_selection,
         sacristy_notes,
+        celebration_type,
+        override_note,
         selected_by,
         selected_at,
         updated_by
       )
       VALUES (
-        $1, $2, $3, $4::JSONB, $5, $6, $7, $8, $9
+        $1, $2, $3, $4::JSONB, $5, $6, $7, $8, $9, $10, $11
       )
       ON CONFLICT (event_id) DO UPDATE SET
         ordo_day_id = excluded.ordo_day_id,
@@ -829,6 +935,8 @@ const updateSelection = async (
         selected_mass_option_snapshot = excluded.selected_mass_option_snapshot,
         source_hash_at_selection = excluded.source_hash_at_selection,
         sacristy_notes = excluded.sacristy_notes,
+        celebration_type = excluded.celebration_type,
+        override_note = excluded.override_note,
         selected_by = excluded.selected_by,
         selected_at = excluded.selected_at,
         updated_by = excluded.updated_by,
@@ -842,6 +950,8 @@ const updateSelection = async (
       selectedMassOption ? JSON.stringify(selectedMassOption) : null,
       sourceHashAtSelection,
       sacristyNotes || null,
+      celebrationType,
+      overrideNote || null,
       selectedBy,
       selectedAt,
       context.user.id,
@@ -857,6 +967,9 @@ const updateSelection = async (
     beforeData: stored || null,
     afterData: {
       liturgicalDate,
+      eventDate,
+      celebrationType,
+      overrideNote: overrideNote || null,
       celebration: day.celebration,
       classLabel: day.classLabel,
       vestmentColor: day.vestmentColor,
@@ -875,6 +988,12 @@ const updateSelection = async (
       sourceChanged: false,
       canSelectMass: access.canSelectMass,
       canEditSacristyNotes: access.canEditSacristyNotes,
+      canOverrideLiturgicalDate: access.canOverrideLiturgicalDate,
+      isMassEvent: access.isMassEvent,
+      eventDate,
+      liturgicalDate,
+      celebrationType: updated.celebration_type || "event_date",
+      overrideNote: updated.override_note || "",
     },
   }
 }
@@ -892,11 +1011,50 @@ export const handleOrdo = async (request: Request) => {
 
       if (eventId) {
         access = await loadEventAccess(client, context.user, eventId)
-        const eventDate = toDateKey(access.event.start_time)
-        if (liturgicalDate && liturgicalDate !== eventDate) {
-          return json({ message: "The Ordo date does not match the event" }, 400)
+        if (url.searchParams.get("catalog") === "true") {
+          if (!access.canOverrideLiturgicalDate) {
+            return json(
+              { message: "Only an authorized Mass-event administrator may browse Masses" },
+              403,
+            )
+          }
+          const eventYear = toDateKey(access.event.start_time).slice(0, 4)
+          const requestedYear = cleanText(url.searchParams.get("year"), 4)
+          const year = /^\d{4}$/.test(requestedYear)
+            ? requestedYear
+            : eventYear
+          const query = cleanText(url.searchParams.get("query"), 100)
+          return json({
+            year,
+            masses: await loadOrdoCatalog(year, query),
+          })
         }
-        liturgicalDate = eventDate
+        const eventDate = toDateKey(access.event.start_time)
+        if (
+          liturgicalDate &&
+          liturgicalDate !== eventDate &&
+          !access.canOverrideLiturgicalDate
+        ) {
+          return json(
+            { message: "Only an authorized administrator may select another Mass date" },
+            403,
+          )
+        }
+        if (!liturgicalDate) {
+          const selectedResult = await client.query(
+            `
+              SELECT day.liturgical_date
+              FROM event_ordo_selections selection
+              JOIN ordo_days day ON day.id = selection.ordo_day_id
+              WHERE selection.event_id = $1
+              LIMIT 1
+            `,
+            [eventId],
+          )
+          liturgicalDate = selectedResult.rows[0]?.liturgical_date
+            ? toDateKey(selectedResult.rows[0].liturgical_date)
+            : eventDate
+        }
       }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(liturgicalDate)) {
         return json({ message: "A valid Ordo date is required" }, 400)

@@ -549,9 +549,10 @@ Admin only: 1. Open Templates and create/edit a template, or open an event and s
 ### How to
 
 No separate weekly emergency email is sent.
-1. The scheduler creates one Daily Admin Alerts summary when substitute requests or unfilled positions need attention.
-2. Leaders open Home and select the applicable count.
-3. Open the affected event and resolve it.
+1. The scheduler creates a detailed Daily Admin Staffing Report when substitute requests or unfilled positions need attention.
+2. The email identifies the intended administrator, ministry scope, affected events, dates, responsibilities, missing quantities, and substitute requests.
+3. Select Review event in the email, or open Home and select the applicable staffing item.
+4. Review and resolve the affected event.
 
 ## Export ministry reports and schedules
 <!-- guide: auto -->
@@ -804,15 +805,18 @@ Parent/guardian: 1. Open the profile switcher.
 ## Let authorized users choose the applicable Ordo Mass option and record sacristy notes
 <!-- guide: auto -->
 
-**Purpose:** Preserve human liturgical judgment by letting authorized users select the applicable Mass option and record restricted preparation guidance.
+**Purpose:** Preserve human liturgical judgment by letting authorized users select the Mass being celebrated, including an approved proper from a different date, and record restricted preparation guidance.
 
 ### How to
 
-Authorized users: 1. Open the event details and select More Details.
-2. Review the available Ordo Mass options.
-3. Choose the option applicable to the event.
-4. Enter restricted sacristy/preparation notes if needed.
-5. Save so the selection, source, and notes remain attached to the event.
+**Authorized users on Mass-template events**
+1. Open the event details and select More Details.
+2. Under Mass being celebrated, keep the event date or search the 1962 Ordo list by feast name or date.
+3. If another date is selected, choose External Solemnity, Transferred celebration, Votive Mass, or Other approved reason.
+4. Add an approval note when useful.
+5. Review the Mass option, class, vestment color, commemorations, and Ordo instructions from the selected proper.
+6. Enter restricted sacristy/preparation notes if needed.
+7. Save so the selected date, Mass option, source, reason, and notes remain attached to the event.
 
 ## Let each user choose an account-wide reminder lead time
 <!-- guide: auto -->

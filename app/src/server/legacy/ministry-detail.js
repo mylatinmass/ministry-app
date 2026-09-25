@@ -256,8 +256,12 @@ const handler = async (event) => {
           LEFT JOIN event_ordo_selections ordo_selection
             ON ordo_selection.event_id = e.id
           LEFT JOIN ordo_days ordo_day
-            ON ordo_day.liturgical_date =
-              (e.start_time AT TIME ZONE 'America/New_York')::DATE
+            ON ordo_day.id = ordo_selection.ordo_day_id
+              OR (
+                ordo_selection.ordo_day_id IS NULL
+                AND ordo_day.liturgical_date =
+                  (e.start_time AT TIME ZONE 'America/New_York')::DATE
+              )
           WHERE (
               e.ministry_id = $1
               OR EXISTS (
@@ -371,8 +375,12 @@ const handler = async (event) => {
           LEFT JOIN event_ordo_selections ordo_selection
             ON ordo_selection.event_id = e.id
           LEFT JOIN ordo_days ordo_day
-            ON ordo_day.liturgical_date =
-              (e.start_time AT TIME ZONE 'America/New_York')::DATE
+            ON ordo_day.id = ordo_selection.ordo_day_id
+              OR (
+                ordo_selection.ordo_day_id IS NULL
+                AND ordo_day.liturgical_date =
+                  (e.start_time AT TIME ZONE 'America/New_York')::DATE
+              )
           WHERE e.status IN ('published', 'cancelled', 'completed')
           ORDER BY e.start_time
         `

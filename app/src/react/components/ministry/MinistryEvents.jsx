@@ -1,20 +1,30 @@
 import * as React from "react"
 import {
   CheckIcon,
+  CalendarDaysIcon,
+  ChevronDownIcon,
   DocumentArrowDownIcon,
   DocumentDuplicateIcon,
   ExclamationTriangleIcon,
   NoSymbolIcon,
   PencilSquareIcon,
+  PlusIcon,
 } from "@heroicons/react/24/outline"
 import getFunctionEndpoint from "../../utils/getFunctionEndpoint"
 import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 import MinistryOrdoReference from "./MinistryOrdoReference"
+import MinistryTemplates from "./MinistryTemplates"
 import useAccessibleDialog from "../../hooks/useAccessibleDialog"
 import {
   downloadEventSchedulePdf,
   getEventRange,
 } from "./downloadEventSchedulePdf"
+
+const VENUE_FIELDS = [
+  ["venueName", "Venue name"], ["address1", "Address line 1"],
+  ["address2", "Address line 2"], ["city", "City"],
+  ["region", "State or region"], ["postalCode", "Postal code"], ["country", "Country"],
+]
 
 const requestHeaders = () => ({
   "Content-Type": "application/json",
@@ -30,7 +40,158 @@ const toInputValue = (value) => {
   return new Date(date.getTime() - offset).toISOString().slice(0, 16)
 }
 
-const initialForm = () => ({
+const nextWeekInputValue = (value) => {
+  if (!value) return ""
+  const date = new Date(value)
+  date.setDate(date.getDate() + 7)
+  return toInputValue(date)
+}
+
+const padTimePart = (value) => String(value).padStart(2, "0")
+const monthOptions = Array.from({ length: 12 }, (_, index) =>
+  new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" })
+    .format(new Date(Date.UTC(2020, index, 1))),
+)
+const daysInMonth = (year, month) => new Date(Date.UTC(year, month, 0)).getUTCDate()
+
+const nextDate = (date) => {
+  const noon = new Date(`${date}T12:00`)
+  noon.setDate(noon.getDate() + 1)
+  return toInputValue(noon).slice(0, 10)
+}
+
+const endAtClockTime = (startTime, clockTime) => {
+  const [date, startClock] = startTime.split("T")
+  return `${clockTime < startClock ? nextDate(date) : date}T${clockTime}`
+}
+
+const EventFormDropdown = ({ label, value, icon: Icon, disabled = false, fullWidth = false, highlight = false, children }) => {
+  const [open, setOpen] = React.useState(false)
+  const dropdownRef = React.useRef(null)
+  const buttonRef = React.useRef(null)
+  const panelId = React.useId()
+  const expanded = open && !disabled
+
+  React.useEffect(() => {
+    if (disabled) setOpen(false)
+  }, [disabled])
+
+  React.useEffect(() => {
+    if (!expanded) return
+    const dismissOutside = (event) => {
+      if (!dropdownRef.current?.contains(event.target)) setOpen(false)
+    }
+    document.addEventListener("pointerdown", dismissOutside, true)
+    return () => document.removeEventListener("pointerdown", dismissOutside, true)
+  }, [expanded])
+
+  const triggerClass = "flex min-h-11 w-full items-center gap-2 border px-2 py-2 text-left text-sm transition-colors sm:px-3"
+  if (disabled) {
+    return <button type="button" disabled aria-label={label}
+      className={`${triggerClass} cursor-not-allowed rounded-lg border-gray-200 bg-gray-100 text-gray-400`}>{value}</button>
+  }
+  return (
+    <div ref={dropdownRef} className={`relative min-w-0 ${expanded ? "z-30" : ""}`} onBlur={(event) => {
+      if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) {
+        setOpen(false)
+      }
+    }} onKeyDown={(event) => {
+      if (event.key === "Escape" && expanded) {
+        event.preventDefault()
+        event.stopPropagation()
+        setOpen(false)
+        buttonRef.current?.focus()
+      }
+    }}>
+      <button ref={buttonRef} type="button" aria-label={`${label}, ${value}`}
+        aria-expanded={expanded} aria-controls={panelId} onClick={() => setOpen((current) => !current)}
+        className={`${triggerClass} rounded-t-lg ${expanded ? "rounded-b-none border-[#c1a387] bg-white" : "rounded-b-lg border-gray-200 bg-gray-50 hover:bg-white"} ${highlight ? "font-semibold text-orange-700" : "text-gray-900"}`}>
+        {Icon && <Icon aria-hidden="true" className="size-4 shrink-0" />}
+        <span>{value}</span>
+        <ChevronDownIcon aria-hidden="true" className={`ml-auto size-4 shrink-0 text-gray-500 transition-transform duration-150 motion-reduce:transition-none ${expanded ? "rotate-180" : ""}`} />
+      </button>
+      <div id={panelId} aria-hidden={!expanded} inert={expanded ? undefined : ""}
+        className={`absolute top-full -mt-px origin-top rounded-b-lg border border-[#c1a387] bg-white p-3 shadow-lg transition-[opacity,translate,scale,visibility] duration-150 ease-out motion-reduce:transition-none ${fullWidth ? "inset-x-0" : `w-52 max-w-[calc(100vw-2rem)] ${Icon ? "left-0" : "right-0"}`} ${expanded ? "visible translate-y-0 scale-y-100 opacity-100" : "invisible pointer-events-none -translate-y-1 scale-y-95 opacity-0"}`}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+const EventDateSelect = ({ label, value, onChange, min, max, placeholder }) => {
+  const [year, month, day] = value.split("-").map(Number)
+  const currentYear = new Date().getFullYear()
+  const updateDate = (year, month, day) => {
+    const validDay = Math.min(day, daysInMonth(year, month))
+    const date = `${year}-${padTimePart(month)}-${padTimePart(validDay)}`
+    onChange(min && date < min ? min : max && date > max ? max : date)
+  }
+  const labelDate = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" })
+    .format(new Date(`${value}T12:00`))
+  return (
+    <EventFormDropdown label={label} value={placeholder || labelDate} icon={CalendarDaysIcon}>
+      <div role="group" aria-label={`${label} year`} className="mb-2 inline-flex rounded-xl bg-gray-50 p-1">
+        {[currentYear, currentYear + 1].map((option) => (
+          <button key={option} type="button" aria-pressed={year === option}
+            onClick={() => updateDate(option, month, day)}
+            className={`rounded-lg px-3 py-2 text-sm font-semibold ${year === option ? "bg-white text-orange-700 shadow-sm" : "text-gray-600"}`}>
+            {option}
+          </button>
+        ))}
+      </div>
+      <div className="grid grid-cols-[2fr_1fr] gap-2">
+        <select aria-label={`${label} month`} value={month}
+          onChange={(event) => updateDate(year, Number(event.target.value), day)}
+          className="min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-2 text-sm">
+          {monthOptions.map((month, index) => <option key={month} value={index + 1}>{month}</option>)}
+        </select>
+        <select aria-label={`${label} day`} value={day}
+          onChange={(event) => updateDate(year, month, Number(event.target.value))}
+          className="min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-2 text-sm">
+          {Array.from({ length: daysInMonth(year, month) }, (_, index) => index + 1)
+            .map((day) => <option key={day} value={day}>{day}</option>)}
+        </select>
+      </div>
+      {placeholder && <button type="button" onClick={() => onChange(value)}
+        className="mt-2 rounded-md px-2 py-1 text-sm font-semibold text-[#6f4f34] hover:bg-[#f7f3ef]">
+        Use this date
+      </button>}
+    </EventFormDropdown>
+  )
+}
+
+const EventTimeSelect = ({ label, value, onChange, disabled, placeholder }) => {
+  const [hour, minute] = value.slice(11, 16).split(":").map(Number)
+  const time = { hour: hour % 12 || 12, minute, period: hour < 12 ? "AM" : "PM" }
+  const updateTime = (key, value) => {
+    const next = { ...time, [key]: value }
+    const hour = next.hour % 12 + (next.period === "PM" ? 12 : 0)
+    onChange(`${padTimePart(hour)}:${padTimePart(next.minute)}`)
+  }
+  const selectClass = "min-w-0 w-full appearance-none rounded-lg border border-gray-200 bg-white px-1 py-2 text-center text-sm text-gray-900 sm:appearance-auto sm:px-2"
+  return (
+    <EventFormDropdown label={label} value={disabled ? "—" : placeholder || `${time.hour}:${padTimePart(minute)} ${time.period}`} disabled={disabled}>
+      <div className="grid grid-cols-[1fr_1fr_1.2fr] gap-1 sm:gap-2">
+        <select aria-label={`${label} hour`} value={time.hour} onChange={(event) => updateTime("hour", Number(event.target.value))} className={selectClass}>
+          {Array.from({ length: 12 }, (_, index) => index + 1).map((hour) => <option key={hour} value={hour}>{hour}</option>)}
+        </select>
+        <select aria-label={`${label} minute`} value={time.minute} onChange={(event) => updateTime("minute", Number(event.target.value))} className={selectClass}>
+          {Array.from({ length: 60 }, (_, minute) => <option key={minute} value={minute}>{padTimePart(minute)}</option>)}
+        </select>
+        <select aria-label={`${label} AM or PM`} value={time.period} onChange={(event) => updateTime("period", event.target.value)} className={selectClass}>
+          <option value="AM">AM</option>
+          <option value="PM">PM</option>
+        </select>
+      </div>
+      {placeholder && <button type="button" onClick={() => onChange(value.slice(11, 16))}
+        className="mt-2 rounded-md px-2 py-1 text-sm font-semibold text-[#6f4f34] hover:bg-[#f7f3ef]">
+        Use this time
+      </button>}
+    </EventFormDropdown>
+  )
+}
+
+const initialForm = (date = "") => ({
   eventId: "",
   sourceEventId: "",
   templateId: "",
@@ -38,9 +199,23 @@ const initialForm = () => ({
   title: "",
   description: "",
   location: "",
+  venueType: "chapel",
+  venueName: "",
+  address1: "",
+  address2: "",
+  city: "",
+  region: "",
+  postalCode: "",
+  country: "",
+  venueNotes: "",
+  participatingMinistryIds: [],
+  allMembersSelected: false,
+  useTemplatePositions: false,
   roomIds: [],
-  startTime: "",
+  startTime: `${date || toInputValue(new Date()).slice(0, 10)}T09:00`,
   endTime: "",
+  endDate: "",
+  allDay: false,
   confirmationDeadline: "",
   recurrenceFrequency: "none",
   recurrenceInterval: 1,
@@ -51,6 +226,7 @@ const initialForm = () => ({
   participationType: "members",
   visibility: "public",
   inlineResponsibilities: [],
+  copyCount: 1,
   copySourceRoster: true,
 })
 
@@ -58,12 +234,12 @@ const cloneFormForEvent = (event) => ({
   ...initialForm(),
   sourceEventId: event.id,
   templateId: "",
-  title: `${event.title} Practice`,
+  title: event.title,
   description: event.description || "",
   location: event.location || "",
   roomIds: event.room_ids || event.rooms?.map((room) => room.id) || [],
-  startTime: "",
-  endTime: "",
+  startTime: nextWeekInputValue(event.start_time),
+  endTime: nextWeekInputValue(event.end_time),
   participationType: event.participation_type || "members",
   visibility: event.visibility || "public",
   copySourceRoster: true,
@@ -138,17 +314,52 @@ const previewRepeatingDates = (form) => {
   })
 }
 
-const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
+const MinistryEvents = ({ data: workspaceData, activeAction, onEventSelect, ministries, onMinistryChange }) => {
+  const [localMinistry, setLocalMinistry] = React.useState(null)
+  React.useEffect(() => setLocalMinistry(null), [workspaceData.ministry.id])
+  const data = localMinistry && !onMinistryChange
+    ? { ...workspaceData, ministry: localMinistry }
+    : workspaceData
   const canManageRecurrence = ["owner", "super_admin"].includes(
     data.user?.globalRole,
   )
   const [templates, setTemplates] = React.useState([])
+  const [managedMinistries, setManagedMinistries] = React.useState([])
+  const availableMinistries = ministries || managedMinistries
+  const ministryChoices = availableMinistries.some((ministry) => ministry.id === data.ministry.id)
+    ? availableMinistries : [data.ministry, ...availableMinistries]
   const [events, setEvents] = React.useState([])
   const [rooms, setRooms] = React.useState([])
-  const [levels, setLevels] = React.useState([])
   const [form, setForm] = React.useState(() =>
-    activeAction?.event ? cloneFormForEvent(activeAction.event) : initialForm(),
+    activeAction?.event ? cloneFormForEvent(activeAction.event) : initialForm(activeAction?.date),
   )
+  const isNewEvent = !form.eventId && !form.sourceEventId
+  const selectedMinistryIds = form.allMembersSelected
+    ? ministryChoices.map((ministry) => ministry.id)
+    : form.participatingMinistryIds
+  const selectedMinistryNames = ministryChoices
+    .filter((ministry) => selectedMinistryIds.includes(ministry.id))
+    .map((ministry) => ministry.name)
+  const canAddAttendanceCall = form.visibility !== "private" && form.participationType !== "volunteers"
+  const startDate = form.startTime.slice(0, 10)
+  const isAllDay = isNewEvent && form.allDay
+  const defaultEndTime = isNewEvent
+    ? toInputValue(new Date(new Date(form.startTime).getTime() + 3_600_000))
+    : ""
+  const timedEnd = form.endTime || defaultEndTime
+  const endDate = form.endDate || (isAllDay ? startDate : timedEnd.slice(0, 10))
+  const schedulingStartTime = isAllDay ? `${startDate}T00:00` : form.startTime
+  const schedulingEndTime = isAllDay
+    ? `${nextDate(endDate)}T00:00`
+    : form.endDate ? `${form.endDate}T${timedEnd.slice(11, 16)}` : timedEnd
+  const deadlineValue = form.confirmationDeadline || toInputValue(
+    new Date(new Date(schedulingStartTime || toInputValue(new Date())).getTime() - 3_600_000),
+  )
+  const deadlineTooLate = Boolean(form.confirmationDeadline && schedulingStartTime &&
+    form.confirmationDeadline >= schedulingStartTime)
+  const [showTemplateForm, setShowTemplateForm] = React.useState(false)
+  const closeTemplateForm = React.useCallback(() => setShowTemplateForm(false), [])
+  const templateDialogRef = useAccessibleDialog(showTemplateForm, closeTemplateForm)
   const [isLoading, setIsLoading] = React.useState(true)
   const [isSaving, setIsSaving] = React.useState(false)
   const [templatePreview, setTemplatePreview] = React.useState(null)
@@ -172,8 +383,8 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
   const [priestRequestUrgency, setPriestRequestUrgency] = React.useState("normal")
   const [isRequestingPriest, setIsRequestingPriest] = React.useState(false)
   const repeatingDatePreview = React.useMemo(
-    () => previewRepeatingDates(form),
-    [form],
+    () => previewRepeatingDates({ ...form, startTime: schedulingStartTime }),
+    [form, schedulingStartTime],
   )
   const selectedTemplate = React.useMemo(
     () => templates.find((template) => template.id === form.templateId) || null,
@@ -223,12 +434,8 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
         ),
       )
       setEvents(eventResult.events)
+      setManagedMinistries(templateResult.manageableMinistries || [])
       setRooms(eventResult.rooms || [])
-      setLevels(
-        (templateResult.levels || []).filter(
-          (level) => level.ministryId === data.ministry.id,
-        ),
-      )
     } catch (error) {
       setErrorMessage(error.message)
     } finally {
@@ -244,25 +451,25 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
     setForm(
       activeAction?.event
         ? cloneFormForEvent(activeAction.event)
-        : initialForm(),
+        : initialForm(activeAction.date),
     )
     setMessage("")
     setErrorMessage("")
-  }, [activeAction.id, activeAction.event])
+  }, [activeAction.id, activeAction.event, activeAction.date])
 
   React.useEffect(() => {
     if (
       form.eventId ||
       form.sourceEventId ||
       !form.templateId ||
-      !form.startTime ||
-      !form.endTime
+      !schedulingStartTime ||
+      !schedulingEndTime
     ) {
       setAssignmentCandidates({})
       return undefined
     }
-    const start = new Date(form.startTime)
-    const end = new Date(form.endTime)
+    const start = new Date(schedulingStartTime)
+    const end = new Date(schedulingEndTime)
     if (
       Number.isNaN(start.getTime()) ||
       Number.isNaN(end.getTime()) ||
@@ -309,10 +516,10 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       controller.abort()
     }
   }, [
-    form.endTime,
+    schedulingEndTime,
     form.eventId,
     form.sourceEventId,
-    form.startTime,
+    schedulingStartTime,
     form.templateId,
   ])
 
@@ -320,16 +527,16 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
     if (
       form.eventId ||
       form.sourceEventId ||
-      !form.startTime ||
-      !form.endTime ||
+      !schedulingStartTime ||
+      !schedulingEndTime ||
       form.participationType === "volunteers"
     ) {
       setAvailableMinistryMembers([])
       setMemberPreview(null)
       return undefined
     }
-    const start = new Date(form.startTime)
-    const end = new Date(form.endTime)
+    const start = new Date(schedulingStartTime)
+    const end = new Date(schedulingEndTime)
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
       setAvailableMinistryMembers([])
       return undefined
@@ -367,25 +574,25 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
     }
   }, [
     data.ministry.id,
-    form.endTime,
+    schedulingEndTime,
     form.eventId,
     form.participationType,
     form.sourceEventId,
-    form.startTime,
+    schedulingStartTime,
     form.inlineResponsibilities,
   ])
 
   React.useEffect(() => {
     if (
       data.ministry?.slug !== "priests" ||
-      !form.startTime ||
-      !form.endTime
+      !schedulingStartTime ||
+      !schedulingEndTime
     ) {
       setPrioryOverview(null)
       return undefined
     }
-    const start = new Date(form.startTime)
-    const end = new Date(form.endTime)
+    const start = new Date(schedulingStartTime)
+    const end = new Date(schedulingEndTime)
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
       setPrioryOverview(null)
       return undefined
@@ -414,7 +621,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [data.ministry?.slug, form.endTime, form.startTime])
+  }, [data.ministry?.slug, schedulingEndTime, schedulingStartTime])
 
   const requestPriestAvailability = async () => {
     if (!form.eventId) {
@@ -451,13 +658,25 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
   const updateField = (field, value) => {
     setConflictPreview(null)
     if (field !== "templateId") setTemplatePreview(null)
-    if (["startTime", "endTime"].includes(field)) {
+    if (["startTime", "endTime", "endDate", "allDay"].includes(field)) {
       setAssignmentSelections({})
     }
     if (field === "participationType" && value === "volunteers") {
       setAssignmentSelections({})
     }
     setForm((current) => ({ ...current, [field]: value }))
+  }
+
+  const updateNewEventStart = (startTime) => {
+    setConflictPreview(null)
+    setAssignmentSelections({})
+    setForm((current) => ({
+      ...current,
+      startTime,
+      endTime: current.endTime ? endAtClockTime(startTime, current.endTime.slice(11, 16)) : "",
+      endDate: current.endDate && current.endDate < startTime.slice(0, 10)
+        ? startTime.slice(0, 10) : current.endDate,
+    }))
   }
 
   const selectTemplate = (templateId) => {
@@ -468,9 +687,8 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
     setForm((current) => ({
       ...current,
       templateId,
-      title: template ? template.name : "",
-      description: current.description || template?.description || "",
-      participationType: template?.participationType || current.participationType,
+      title: current.title || template?.name || "",
+      participationType: current.participationType,
       visibility: privateByDefault ? "private" : current.visibility,
       roomIds:
         data.ministry?.slug === "priests" && current.roomIds.length === 0
@@ -481,6 +699,20 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
     }))
     setAssignmentSelections({})
     setAssignmentCandidates({})
+  }
+
+  const changeSelectedMinistry = (ministryId, checked) => {
+    const nextIds = checked
+      ? [...form.participatingMinistryIds, ministryId]
+      : form.participatingMinistryIds.filter((id) => id !== ministryId)
+    updateField("participatingMinistryIds", nextIds)
+    if (!nextIds.length || nextIds.includes(data.ministry.id)) return
+    const nextMinistry = ministryChoices.find((ministry) => ministry.id === nextIds[0])
+    if (!nextMinistry) return
+    selectTemplate("")
+    setTemplates([])
+    if (onMinistryChange) onMinistryChange(nextMinistry.id)
+    else setLocalMinistry(nextMinistry)
   }
 
   const updateAssignmentSelection = (slotKey, userId) => {
@@ -613,6 +845,10 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
     setMessage("")
     setErrorMessage("")
     try {
+      if (isNewEvent && form.participationType === "members" && !selectedMinistryIds.length) {
+        throw new Error("Select a ministry or choose All Members.")
+      }
+      if (deadlineTooLate) throw new Error("The RSVP deadline must be before the event starts.")
       const editing = Boolean(form.eventId)
       const cloning = Boolean(form.sourceEventId)
       const requestedUpdateScope =
@@ -624,8 +860,27 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
       const body = {
         ...form,
         ministryId: data.ministry.id,
-        startTime: new Date(form.startTime).toISOString(),
-        endTime: new Date(form.endTime).toISOString(),
+        startTime: new Date(schedulingStartTime).toISOString(),
+        endTime: isNewEvent && !isAllDay && !form.endTime && !form.endDate
+          ? null : new Date(schedulingEndTime).toISOString(),
+        ...(isNewEvent ? {
+          location: form.venueType === "chapel"
+            ? "Our Chapel"
+            : [form.venueName, form.address1, form.address2,
+                [form.city, form.region, form.postalCode].filter(Boolean).join(" "),
+                form.country, form.venueNotes]
+                .map((value) => value.trim()).filter(Boolean).join(", "),
+          roomIds: form.venueType === "chapel" ? form.roomIds : [],
+          participatingMinistryIds: form.participationType === "members"
+            ? selectedMinistryIds.filter((id) => id !== data.ministry.id)
+            : [],
+          inlineResponsibilities: form.participationType === "volunteers" ? [] :
+            form.inlineResponsibilities
+              .filter((item) => canAddAttendanceCall || item.assignmentMode === "standard")
+              .map((item) => form.visibility === "ministry" && item.audienceScope === "all"
+                ? { ...item, audienceScope: "ministry" }
+                : item),
+        } : {}),
         confirmationDeadline: form.confirmationDeadline
           ? new Date(form.confirmationDeadline).toISOString()
           : null,
@@ -641,7 +896,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
         status: editing ? undefined : "published",
         assignments:
           !editing &&
-          !cloning &&
+          !cloning && form.useTemplatePositions &&
           form.participationType !== "volunteers"
             ? Object.entries(assignmentSelections)
                 .filter(([, userId]) => Boolean(userId))
@@ -815,12 +1070,29 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
     Object.values(assignmentSelections).filter(Boolean),
   )
 
-  if (isLoading) {
+  if (isLoading && !showForm) {
     return <p className="p-6 text-center text-gray-500">Loading events...</p>
   }
 
   return (
     <div className="space-y-6">
+      {showTemplateForm && (
+        <div className="fixed inset-0 z-[110] overflow-y-auto bg-black/40 p-4">
+          <section ref={templateDialogRef} role="dialog" aria-modal="true" aria-labelledby="new-event-template-title" tabIndex={-1}
+            className="mx-auto max-w-4xl rounded-2xl bg-white p-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h2 id="new-event-template-title" className="century-font text-2xl">New template</h2>
+              <button type="button" onClick={closeTemplateForm} className="rounded-lg border border-gray-200 px-3 py-2">Close</button>
+            </div>
+            <MinistryTemplates data={data} activeAction={{ id: "new-template" }}
+              onTemplateCreated={(templateId, name) => {
+                closeTemplateForm()
+                setForm((current) => ({ ...current, templateId, title: current.title || name }))
+                loadData()
+              }} />
+          </section>
+        </div>
+      )}
       {(message || errorMessage) && (
         <div
           role={errorMessage ? "alert" : "status"}
@@ -862,6 +1134,9 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                 <div key={conflict.id} className="rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm text-orange-900">
                   <span className="font-semibold">{conflict.title}</span>
                   <span> · {formatEventDate(conflict.startTime)}</span>
+                  {conflict.copyStartTime && (
+                    <span> · Copy on {formatEventDate(conflict.copyStartTime)}</span>
+                  )}
                   {conflict.roomNames && (
                     <span className="block text-xs">Rooms: {conflict.roomNames}</span>
                   )}
@@ -908,6 +1183,11 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
               : "rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
           }
         >
+          {isNewEvent && (
+            <div className="mb-5">
+              <MinistryOrdoReference summaryOnly startTime={form.startTime || new Date().toISOString()} />
+            </div>
+          )}
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-[#896542]">
@@ -935,60 +1215,38 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
           </div>
 
           {!form.eventId && !form.sourceEventId && canManageRecurrence && (
-            <div className="mt-5 flex flex-wrap gap-2">
+            <div role="group" aria-label="Event frequency" className="mt-5 inline-flex flex-wrap rounded-xl bg-gray-50 p-1">
               <button
                 type="button"
+                aria-pressed={!creatingRepeatingEvent}
                 onClick={() => {
                   setCreatingRepeatingEvent(false)
                   updateField("recurrenceFrequency", "none")
                 }}
                 className={`rounded-lg px-4 py-2 text-sm font-semibold ${
                   !creatingRepeatingEvent
-                    ? "bg-[#896542] text-white"
-                    : "border border-gray-200 bg-white text-gray-600"
+                    ? "bg-white text-[#6f4f34] shadow-sm"
+                    : "text-gray-600"
                 }`}
               >
-                Create one-time event
+                One Time Event
               </button>
               <button
                 type="button"
+                aria-pressed={creatingRepeatingEvent}
                 onClick={() => {
                   setCreatingRepeatingEvent(true)
                   updateField("recurrenceFrequency", "weekly")
                 }}
                 className={`rounded-lg px-4 py-2 text-sm font-semibold ${
                   creatingRepeatingEvent
-                    ? "bg-[#896542] text-white"
-                    : "border border-gray-200 bg-white text-gray-600"
+                    ? "bg-white text-[#6f4f34] shadow-sm"
+                    : "text-gray-600"
                 }`}
               >
-                Create repeating event
+                Repeating Event
               </button>
             </div>
-          )}
-
-          {!form.eventId && !form.sourceEventId && (
-            <label className="mt-6 block text-sm font-semibold text-gray-700">
-              Event template <span className="font-normal text-gray-500">(optional)</span>
-              <select
-                value={form.templateId}
-                onChange={(event) => selectTemplate(event.target.value)}
-                className="mt-2 h-12 w-full rounded-xl border border-gray-200 bg-white px-4 font-normal"
-              >
-                <option value="">No template — start with a blank event</option>
-                {templates.map((template) => (
-                  <option key={template.id} value={template.id}>
-                    {template.name} —{" "}
-                    {template.ministries
-                      .map((ministry) => ministry.ministryName)
-                      .join(", ")}
-                  </option>
-                ))}
-              </select>
-              <span className="mt-2 block text-xs font-normal text-gray-500">
-                Templates are optional presets for events that reuse predetermined logistics and positions.
-              </span>
-            </label>
           )}
 
           {form.eventId && (
@@ -1062,12 +1320,6 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
             </div>
           )}
 
-          {!templates.length && !form.eventId && !form.sourceEventId && (
-            <p className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
-              No templates are available for this ministry. You can still publish a blank event and add its logistics later.
-            </p>
-          )}
-
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             {data.ministry?.slug === "priests" && (
               <label className="text-sm font-semibold text-gray-700 sm:col-span-2">
@@ -1087,39 +1339,38 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
               </label>
             )}
             <label className="text-sm font-semibold text-gray-700 sm:col-span-2">
-              Who can participate
-              <select
-                value={form.participationType}
-                onChange={(event) =>
-                  updateField("participationType", event.target.value)
-                }
-                className="mt-2 h-12 w-full rounded-xl border border-gray-200 bg-white px-4 font-normal"
-              >
-                <option value="members">Ministry members only</option>
-                <option value="volunteers">Public volunteers only</option>
-                <option value="both">Members and public volunteers</option>
-              </select>
-              <span className="mt-2 block text-xs font-normal text-gray-500">
-                Volunteer events can receive signups through a public link after the event is published.
-              </span>
-            </label>
-            <label className="text-sm font-semibold text-gray-700 sm:col-span-2">
               Event name
               <input
                 value={form.title}
                 onChange={(event) => updateField("title", event.target.value)}
                 required
-                disabled={Boolean(form.templateId)}
                 className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-4 font-normal outline-none focus:border-[#896542] focus:ring-2 focus:ring-[#896542]/15 disabled:bg-gray-50 disabled:text-gray-600"
               />
-              {form.templateId && (
-                <span className="mt-2 block text-xs font-normal text-gray-500">
-                  This event uses the template name. Remove the template to enter a different event name.
-                </span>
-              )}
             </label>
+            {isNewEvent ? (
+              <fieldset className="min-w-0 sm:col-span-2">
+                <legend className="text-sm font-semibold text-gray-700">Date &amp; time</legend>
+                <div className="mt-2 grid grid-cols-[auto_minmax(0,1.2fr)_minmax(0,1fr)] items-center gap-x-2 gap-y-2 sm:gap-x-3">
+                  <span className="text-right text-sm font-medium text-gray-700">From</span>
+                  <EventDateSelect label="Start date" value={startDate}
+                    onChange={(date) => updateNewEventStart(`${date}T${form.startTime.slice(11, 16)}`)} />
+                  <EventTimeSelect label="Start time" value={form.startTime} disabled={isAllDay}
+                    onChange={(clockTime) => updateNewEventStart(`${startDate}T${clockTime}`)} />
+                  <span className="text-right text-sm font-medium text-gray-700">To</span>
+                  <EventDateSelect label="End date" value={endDate} min={startDate}
+                    onChange={(date) => updateField("endDate", date)} />
+                  <EventTimeSelect label="End time" value={timedEnd} disabled={isAllDay}
+                    onChange={(clockTime) => updateField("endTime", endAtClockTime(form.startTime, clockTime))} />
+                  <label className="col-start-2 col-span-2 flex items-center gap-2 py-1 text-sm text-gray-700">
+                    <input type="checkbox" checked={isAllDay} className="size-4 accent-orange-600"
+                      onChange={(event) => updateField("allDay", event.target.checked)} />
+                    All Day
+                  </label>
+                </div>
+              </fieldset>
+            ) : <>
             <label className="text-sm font-semibold text-gray-700">
-              Starts
+              Start time
               <input
                 type="datetime-local"
                 value={form.startTime}
@@ -1131,7 +1382,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
               />
             </label>
             <label className="text-sm font-semibold text-gray-700">
-              Ends
+              End time
               <input
                 type="datetime-local"
                 value={form.endTime}
@@ -1142,23 +1393,176 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                 className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-4 font-normal"
               />
             </label>
-            <label className="text-sm font-semibold text-gray-700 sm:col-span-2">
-              Assignment confirmation deadline
-              <input
-                type="datetime-local"
-                value={form.confirmationDeadline}
-                max={form.startTime || undefined}
-                onChange={(event) =>
-                  updateField("confirmationDeadline", event.target.value)
-                }
-                className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-4 font-normal"
-              />
-              <span className="mt-2 block text-xs font-normal text-gray-500">
-                Optional. If left blank, the app chooses a deadline based on
-                the publication date and event date.
-              </span>
-            </label>
-            <label className="text-sm font-semibold text-gray-700 sm:col-span-2">
+            </>}
+            <fieldset className="min-w-0 sm:col-span-2">
+              <legend className="text-sm font-semibold text-gray-700">RSVP deadline</legend>
+              <div className="mt-2 grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-2 sm:gap-3">
+                <EventDateSelect label="RSVP date" value={deadlineValue.slice(0, 10)} max={schedulingStartTime.slice(0, 10)}
+                  placeholder={!form.confirmationDeadline && "Select date"}
+                  onChange={(date) => updateField("confirmationDeadline", `${date}T${deadlineValue.slice(11, 16)}`)} />
+                <EventTimeSelect label="RSVP time" value={deadlineValue}
+                  placeholder={!form.confirmationDeadline && "Select time"}
+                  onChange={(time) => updateField("confirmationDeadline", `${deadlineValue.slice(0, 10)}T${time}`)} />
+              </div>
+              <div className="mt-2 flex items-start justify-between gap-2 text-xs text-gray-500">
+                {deadlineTooLate
+                  ? <span role="alert" className="text-red-700">Choose a deadline before the event starts.</span>
+                  : <span>Optional. The app chooses a deadline if you leave it blank.</span>}
+                {form.confirmationDeadline && (
+                  <button type="button" onClick={() => updateField("confirmationDeadline", "")}
+                    className="shrink-0 font-semibold text-[#6f4f34] hover:underline">Clear</button>
+                )}
+              </div>
+            </fieldset>
+            {canManageRecurrence &&
+              ((creatingRepeatingEvent && !form.eventId && !form.sourceEventId) ||
+                (form.eventId && form.recurrenceFrequency !== "none")) && (
+              <fieldset className="rounded-xl border border-gray-100 p-4 sm:col-span-2">
+                <legend className="px-2 text-sm font-semibold text-gray-700">
+                  Repeating-event rule
+                </legend>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <label className="text-sm text-gray-600">
+                    Rule
+                    <select
+                      value={form.recurrenceFrequency}
+                      onChange={(event) =>
+                        updateField(
+                          "recurrenceFrequency",
+                          event.target.value,
+                        )
+                      }
+                      className="mt-2 h-10 w-full rounded-lg border border-gray-200 bg-white px-3"
+                    >
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly on this date</option>
+                      <option value="first_friday">First Friday</option>
+                      <option value="friday_before_first_saturday">Friday before First Saturday</option>
+                      <option value="first_saturday">First Saturday</option>
+                      <option value="monthly_nth_weekday">Monthly weekday rule</option>
+                    </select>
+                  </label>
+                  <>
+                      <label className="text-sm text-gray-600">
+                        Every
+                        <div className="mt-2 flex items-center gap-2">
+                          <input
+                            type="number"
+                            min="1"
+                            max="12"
+                            value={form.recurrenceInterval}
+                            onChange={(event) =>
+                              updateField(
+                                "recurrenceInterval",
+                                Number(event.target.value),
+                              )
+                            }
+                            className="h-10 w-full rounded-lg border border-gray-200 px-3"
+                          />
+                          <span>
+                            {form.recurrenceFrequency === "weekly" ? "week(s)" : "month(s)"}
+                          </span>
+                        </div>
+                      </label>
+                      {!form.eventId && (
+                        <label className="text-sm text-gray-600">
+                          Number of events
+                          <input
+                            type="number"
+                            min="2"
+                            max="52"
+                            value={form.recurrenceCount}
+                            onChange={(event) =>
+                              updateField("recurrenceCount", Number(event.target.value))
+                            }
+                            className="mt-2 h-10 w-full rounded-lg border border-gray-200 px-3"
+                          />
+                        </label>
+                      )}
+                    </>
+                </div>
+                {form.recurrenceFrequency === "monthly_nth_weekday" && (
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <label className="text-sm text-gray-600">
+                      Occurrence
+                      <select
+                        value={form.recurrenceOrdinal}
+                        onChange={(event) => updateField("recurrenceOrdinal", Number(event.target.value))}
+                        className="mt-2 h-10 w-full rounded-lg border border-gray-200 bg-white px-3"
+                      >
+                        <option value="1">First</option>
+                        <option value="2">Second</option>
+                        <option value="3">Third</option>
+                        <option value="4">Fourth</option>
+                        <option value="-1">Last</option>
+                      </select>
+                    </label>
+                    <label className="text-sm text-gray-600">
+                      Weekday
+                      <select
+                        value={form.recurrenceWeekday}
+                        onChange={(event) => updateField("recurrenceWeekday", Number(event.target.value))}
+                        className="mt-2 h-10 w-full rounded-lg border border-gray-200 bg-white px-3"
+                      >
+                        {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day, index) => (
+                          <option key={day} value={index}>{day}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                )}
+                {!form.eventId && repeatingDatePreview.length > 0 && (
+                  <div className="mt-4 rounded-xl bg-[#f7f3ef] p-4 text-sm text-gray-700">
+                    <p className="font-semibold text-[#6f4f34]">Date preview</p>
+                    <ul className="mt-2 grid gap-1 text-xs text-gray-600 sm:grid-cols-2">
+                      {repeatingDatePreview.map((date) => (
+                        <li key={date.toISOString()}>
+                          {isAllDay ? date.toLocaleDateString("en-US", { dateStyle: "medium" }) : formatEventDate(date)}
+                        </li>
+                      ))}
+                    </ul>
+                    {Number(form.recurrenceCount) > repeatingDatePreview.length && (
+                      <p className="mt-2 text-xs text-gray-500">
+                        + {Number(form.recurrenceCount) - repeatingDatePreview.length} more dates
+                      </p>
+                    )}
+                  </div>
+                )}
+              </fieldset>
+            )}
+            {isNewEvent && (
+              <fieldset className="sm:col-span-2">
+                <legend className="text-sm font-semibold text-gray-700">Location</legend>
+                <div className="mt-2 inline-flex rounded-xl bg-gray-50 p-1">
+                  {[["chapel", "Our Chapel"], ["outside", "Outside Venue"]].map(([value, label]) => (
+                    <button key={value} type="button" aria-pressed={form.venueType === value}
+                      onClick={() => updateField("venueType", value)}
+                      className={`rounded-lg px-3 py-2 text-sm font-semibold ${form.venueType === value ? "bg-white text-[#6f4f34] shadow-sm" : "text-gray-600"}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+            )}
+            {isNewEvent && form.venueType === "outside" && (
+              <fieldset className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
+                <legend className="sr-only">Outside venue address</legend>
+                {VENUE_FIELDS.map(([field, label]) => (
+                  <label key={field} className="text-sm font-semibold text-gray-700">
+                    {label}
+                    <input value={form[field]} onChange={(event) => updateField(field, event.target.value)}
+                      className="mt-1 h-11 w-full rounded-xl border border-gray-200 px-3 font-normal" />
+                  </label>
+                ))}
+                <label className="text-sm font-semibold text-gray-700 sm:col-span-2">
+                  Venue notes
+                  <textarea value={form.venueNotes} onChange={(event) => updateField("venueNotes", event.target.value)}
+                    placeholder="Parking or arrival instructions" rows={2}
+                    className="mt-1 w-full rounded-xl border border-gray-200 p-3 font-normal" />
+                </label>
+              </fieldset>
+            )}
+            {!isNewEvent && <label className="text-sm font-semibold text-gray-700 sm:col-span-2">
               Location
               <input
                 value={form.location}
@@ -1167,8 +1571,8 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                 }
                 className="mt-2 h-12 w-full rounded-xl border border-gray-200 px-4 font-normal"
               />
-            </label>
-            <fieldset className="sm:col-span-2">
+            </label>}
+            {(!isNewEvent || form.venueType === "chapel") && <fieldset className="sm:col-span-2">
               <legend className="text-sm font-semibold text-gray-700">
                 Chapel rooms
               </legend>
@@ -1213,9 +1617,9 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                   </p>
                 )}
               </div>
-            </fieldset>
+            </fieldset>}
             <label className="text-sm font-semibold text-gray-700 sm:col-span-2">
-              Description
+              Event description
               <textarea
                 value={form.description}
                 onChange={(event) =>
@@ -1225,7 +1629,80 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                 className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-3 font-normal"
               />
             </label>
+            <label className="text-sm font-semibold text-gray-700 sm:col-span-2">
+              Who can participate
+              <select
+                value={form.participationType}
+                onChange={(event) =>
+                  updateField("participationType", event.target.value)
+                }
+                className="mt-2 h-12 w-full rounded-xl border border-gray-200 bg-white px-4 font-normal"
+              >
+                <option value="members">Ministry members only</option>
+                <option value="volunteers">Public volunteers only</option>
+                <option value="both">Members and public volunteers</option>
+              </select>
+            </label>
+            {isNewEvent && form.participationType === "members" && (
+              <fieldset className="sm:col-span-2">
+                <legend className="text-sm font-semibold text-gray-700">Select ministries</legend>
+                <div className="mt-2">
+                  <EventFormDropdown label="Select ministries" fullWidth highlight={selectedMinistryIds.length > 0}
+                    value={form.allMembersSelected ? "ALL MEMBERS" : selectedMinistryNames.join(", ") || "Choose ministries"}>
+                  <div className="max-h-56 overflow-y-auto">
+                    <label className={`flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm font-semibold hover:bg-gray-50 ${form.allMembersSelected ? "text-orange-700" : "text-gray-700"}`}>
+                      <input type="checkbox" checked={form.allMembersSelected} className="size-4 accent-orange-600"
+                        onChange={(event) => updateField("allMembersSelected", event.target.checked)} />
+                      ALL MEMBERS
+                    </label>
+                    {!canManageRecurrence && (
+                      <p className="px-3 pb-2 text-xs text-gray-500">Includes the ministries you administer.</p>
+                    )}
+                    <div className="border-t border-gray-100 pt-1">
+                      {ministryChoices.map((ministry) => {
+                        const checked = !form.allMembersSelected && form.participatingMinistryIds.includes(ministry.id)
+                        return (
+                          <label key={ministry.id}
+                            className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm ${form.allMembersSelected
+                              ? "cursor-not-allowed text-gray-400"
+                              : checked ? "cursor-pointer font-semibold text-orange-700 hover:bg-orange-50" : "cursor-pointer text-gray-700 hover:bg-gray-50"}`}>
+                            <input type="checkbox" checked={checked} disabled={form.allMembersSelected}
+                              className="size-4 accent-orange-600"
+                              onChange={(event) => changeSelectedMinistry(ministry.id, event.target.checked)} />
+                            {ministry.name}
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  </EventFormDropdown>
+                </div>
+              </fieldset>
+            )}
           </div>
+
+          {!form.eventId && !form.sourceEventId && (
+            <div className="mt-5 flex items-end gap-2"><label className="min-w-0 flex-1 text-sm font-semibold text-gray-700">
+              Event template <span className="font-normal text-gray-500">(optional)</span>
+              <select
+                value={form.templateId}
+                onChange={(event) => selectTemplate(event.target.value)}
+                className="mt-2 h-12 w-full rounded-xl border border-gray-200 bg-white px-4 font-normal"
+              >
+                <option value="">No template — start with a blank event</option>
+                {templates.map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.name} —{" "}
+                    {template.ministries
+                      .map((ministry) => ministry.ministryName)
+                      .join(", ")}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button type="button" aria-label="Create a template" onClick={() => setShowTemplateForm(true)} className="size-12 shrink-0 rounded-xl border border-gray-200 text-[#6f4f34] hover:bg-gray-50"><PlusIcon aria-hidden="true" className="mx-auto size-5" /></button>
+            </div>
+          )}
 
           {data.ministry?.slug === "priests" && prioryOverview?.settings?.enabled && (
             <section className="mt-5 rounded-xl border border-orange-200 bg-orange-50 p-4">
@@ -1308,14 +1785,24 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
             </section>
           )}
 
-          {form.startTime && (
-            <div className="mt-5">
-              <MinistryOrdoReference startTime={form.startTime} />
-            </div>
-          )}
-
           {form.sourceEventId && (
-            <section className="mt-5 rounded-xl border border-[#d8c7b8] bg-[#fbf8f4] p-4">
+            <section className="mt-5 space-y-4 rounded-xl border border-[#d8c7b8] bg-[#fbf8f4] p-4">
+              <label className="block text-sm font-semibold text-gray-700">
+                Number of copies
+                <input
+                  type="number"
+                  min="1"
+                  max="52"
+                  step="1"
+                  required
+                  value={form.copyCount}
+                  onChange={(event) => updateField("copyCount", event.target.value)}
+                  className="ml-3 w-20 rounded-lg border border-gray-200 bg-white px-3 py-2"
+                />
+                <span className="mt-1 block text-xs font-normal text-gray-500">
+                  The first copy uses the date above. Each additional copy starts one week later at the same chapel time.
+                </span>
+              </label>
               <label className="flex items-start gap-3 text-sm text-gray-700">
                 <input
                   type="checkbox"
@@ -1326,7 +1813,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                 <span>
                   <span className="block font-semibold">Call the source event roster to attend</span>
                   <span className="mt-1 block text-xs text-gray-500">
-                    Everyone assigned to the original event will be expected at this copy unless unavailable. They can choose Can’t attend.
+                    Everyone assigned to the original event will be expected at each copy when available. They can choose Can’t attend.
                   </span>
                 </span>
               </label>
@@ -1340,10 +1827,10 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h3 className="font-semibold text-gray-900">
-                      Staffing and expected attendance
+                      Positions
                     </h3>
                     <p className="mt-1 text-sm text-gray-500">
-                      Add staffed positions separately from the group of members expected to attend.
+                      Add required positions only if this event needs them.
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -1352,9 +1839,9 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                       onClick={() => addInlineResponsibility("standard")}
                       className="rounded-lg border border-[#C1A387] bg-white px-3 py-2 text-sm font-semibold text-[#6f4f34]"
                     >
-                      Add position
+                      Add required position
                     </button>
-                    <button
+                    {canAddAttendanceCall && <button
                       type="button"
                       disabled={form.inlineResponsibilities.some(
                         (item) => item.assignmentMode === "all_available_members",
@@ -1363,123 +1850,54 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                       className="rounded-lg bg-[#896542] px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"
                     >
                       Add attendance call
-                    </button>
+                    </button>}
                   </div>
                 </div>
                 <div className="mt-4 space-y-3">
-                  {form.inlineResponsibilities.map((responsibility) => (
-                    <div key={responsibility.key} className="grid gap-3 rounded-xl bg-[#f7f3ef] p-4 sm:grid-cols-[1fr_1fr_auto]">
-                      <label className="text-xs font-semibold text-gray-600">
-                        {responsibility.assignmentMode === "all_available_members"
-                          ? "Attendance call"
-                          : "Position"}
-                        <input
-                          value={responsibility.name}
-                          onChange={(event) =>
-                            updateInlineResponsibility(
-                              responsibility.key,
-                              "name",
-                              event.target.value,
-                            )
-                          }
-                          disabled={responsibility.assignmentMode === "all_available_members"}
-                          required
-                          className="mt-1 h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm font-normal disabled:bg-gray-100"
-                        />
-                      </label>
-                      <label className="text-xs font-semibold text-gray-600">
-                        {responsibility.assignmentMode === "all_available_members"
-                          ? "Expected audience"
-                          : "Assigned member"}
-                        {responsibility.assignmentMode === "all_available_members" ? (
-                          <select
-                            value={responsibility.audienceScope || "ministry"}
-                            onChange={(event) => {
-                              const audienceScope = event.target.value
-                              updateInlineResponsibility(
-                                responsibility.key,
-                                "audienceScope",
-                                audienceScope,
-                              )
-                              if (audienceScope !== "level") {
-                                updateInlineResponsibility(
-                                  responsibility.key,
-                                  "requiredLevelId",
-                                  "",
-                                )
-                              }
-                            }}
-                            className="mt-1 h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm font-normal"
-                          >
-                            <option value="ministry">All available ministry members</option>
-                            {["owner", "super_admin"].includes(data.user?.globalRole) && (
-                              <option value="all">All active members</option>
-                            )}
-                            <option value="level">Ministry level or higher</option>
+                  {form.inlineResponsibilities.filter((item) => canAddAttendanceCall || item.assignmentMode === "standard").map((responsibility) => (
+                    <div key={responsibility.key} className="flex flex-wrap items-end gap-3 rounded-xl bg-[#f7f3ef] p-4">
+                      {responsibility.assignmentMode === "all_available_members" ? (
+                        <label className="min-w-0 flex-1 text-sm font-semibold text-gray-700">
+                          Attendance notification
+                          <select value={form.visibility === "ministry" ? "ministry" : responsibility.audienceScope} onChange={(event) =>
+                            updateInlineResponsibility(responsibility.key, "audienceScope", event.target.value)
+                          } className="mt-1 h-11 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal">
+                            <option value="ministry">{form.participationType === "members" ? "All members of selected ministries" : "All members of the lead ministry"}</option>
+                            {canManageRecurrence && form.visibility === "public" && <option value="all">All members</option>}
                           </select>
-                        ) : (
-                          <select
-                            value={responsibility.preferredAssigneeUserId}
-                            onChange={(event) =>
-                              updateInlineResponsibility(
-                                responsibility.key,
-                                "preferredAssigneeUserId",
-                                event.target.value,
-                              )
-                            }
-                            disabled={!form.startTime || !form.endTime}
-                            className="mt-1 h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm font-normal"
-                          >
-                            <option value="">LEAVE BLANK</option>
-                            {availableMinistryMembers.map((member) => (
-                              <option key={member.userId} value={member.userId}>
-                                {member.firstName} {member.lastName}
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                      </label>
-                      {responsibility.assignmentMode === "all_available_members" &&
-                        responsibility.audienceScope === "level" && (
-                          <label className="text-xs font-semibold text-gray-600 sm:col-span-2">
-                            Minimum ministry level
-                            <select
-                              value={responsibility.requiredLevelId || ""}
-                              onChange={(event) =>
-                                updateInlineResponsibility(
-                                  responsibility.key,
-                                  "requiredLevelId",
-                                  event.target.value,
-                                )
-                              }
-                              required
-                              className="mt-1 h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm font-normal"
-                            >
-                              <option value="">Choose a minimum level</option>
-                              {levels.map((level) => (
-                                <option key={level.id} value={level.id}>
-                                  Level {level.rankOrder} · {level.name}
-                                </option>
+                        </label>
+                      ) : (
+                        <>
+                          <label className="min-w-0 flex-1 text-sm font-semibold text-gray-700">
+                            Position
+                            <input value={responsibility.name} onChange={(event) =>
+                              updateInlineResponsibility(responsibility.key, "name", event.target.value)
+                            } required className="mt-1 h-11 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal" />
+                          </label>
+                          <label className="min-w-0 flex-1 text-sm font-semibold text-gray-700">
+                            Assigned member
+                            <select value={responsibility.preferredAssigneeUserId} onChange={(event) =>
+                              updateInlineResponsibility(responsibility.key, "preferredAssigneeUserId", event.target.value)
+                            } disabled={!form.startTime || !schedulingEndTime}
+                              className="mt-1 h-11 w-full rounded-lg border border-gray-200 bg-white px-3 font-normal">
+                              <option value="">Leave blank</option>
+                              {availableMinistryMembers.map((member) => (
+                                <option key={member.userId} value={member.userId}>{member.firstName} {member.lastName}</option>
                               ))}
                             </select>
                           </label>
-                        )}
-                      <button
-                        type="button"
+                        </>
+                      )}
+                      <button type="button" onClick={() => removeInlineResponsibility(responsibility.key)}
                         aria-label={`Remove ${responsibility.name || "position"}`}
-                        onClick={() => removeInlineResponsibility(responsibility.key)}
-                        className="self-end rounded-lg border border-red-200 bg-white px-3 py-3 text-sm font-semibold text-red-700"
-                      >
+                        className="rounded-lg border border-red-200 bg-white px-3 py-3 text-sm font-semibold text-red-700">
                         Remove
                       </button>
                     </div>
                   ))}
-                  {!form.inlineResponsibilities.length && (
-                    <p className="text-sm text-gray-500">No event-only positions added.</p>
-                  )}
                   {form.inlineResponsibilities.some(
                     (item) => item.assignmentMode === "all_available_members",
-                  ) && memberPreview && (
+                    ) && memberPreview && selectedMinistryIds.length <= 1 && (
                     <p className="rounded-lg bg-white px-3 py-2 text-sm text-gray-600">
                       {memberPreview.expectedCount} expected · {memberPreview.unavailableCount} unavailable · {memberPreview.conflictCount} schedule conflict{memberPreview.conflictCount === 1 ? "" : "s"}
                     </p>
@@ -1488,9 +1906,18 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
               </section>
             )}
 
+          {isNewEvent && selectedTemplate?.responsibilities?.some((item) => item.assignmentMode === "standard") && (
+            <label className="mt-5 flex items-center gap-2 text-sm font-semibold text-gray-700">
+              <input type="checkbox" checked={form.useTemplatePositions}
+                onChange={(event) => updateField("useTemplatePositions", event.target.checked)} />
+              Include the template’s positions
+            </label>
+          )}
+
           {!form.eventId &&
             !form.sourceEventId &&
-            selectedTemplate?.responsibilities?.length > 0 && (
+            form.useTemplatePositions &&
+            selectedTemplate?.responsibilities?.some((item) => item.assignmentMode === "standard") && (
               <section className="mt-5 rounded-xl border border-gray-100 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -1505,7 +1932,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                       <button
                         type="button"
                         onClick={autoAssign}
-                        disabled={isLoadingCandidates || !form.startTime || !form.endTime}
+                        disabled={isLoadingCandidates || !form.startTime || !schedulingEndTime}
                         className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                       >
                         {isLoadingCandidates ? "Checking members…" : "Auto Assignments"}
@@ -1523,7 +1950,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                         A selected member stays assigned across the series when available. Unavailable dates remain open for leader review.
                       </p>
                     )}
-                    {selectedTemplate.responsibilities.map((responsibility) => (
+                    {selectedTemplate.responsibilities.filter((item) => item.assignmentMode === "standard").map((responsibility) => (
                       <div key={responsibility.id} className="rounded-xl border border-gray-100 p-4">
                         <p className="font-semibold text-gray-900">
                           {responsibility.name}
@@ -1549,7 +1976,7 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                                     onChange={(event) =>
                                       updateAssignmentSelection(slotKey, event.target.value)
                                     }
-                                    disabled={!form.startTime || !form.endTime || isLoadingCandidates}
+                                    disabled={!form.startTime || !schedulingEndTime || isLoadingCandidates}
                                     className="mt-1 h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm font-normal"
                                   >
                                     <option value="">LEAVE BLANK</option>
@@ -1581,121 +2008,6 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                 )}
               </section>
             )}
-
-          {canManageRecurrence &&
-            ((creatingRepeatingEvent && !form.eventId && !form.sourceEventId) ||
-              (form.eventId && form.recurrenceFrequency !== "none")) && (
-            <fieldset className="mt-5 rounded-xl border border-gray-100 p-4">
-              <legend className="px-2 text-sm font-semibold text-gray-700">
-                Repeating-event rule
-              </legend>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <label className="text-sm text-gray-600">
-                  Rule
-                  <select
-                    value={form.recurrenceFrequency}
-                    onChange={(event) =>
-                      updateField(
-                        "recurrenceFrequency",
-                        event.target.value,
-                      )
-                    }
-                    className="mt-2 h-10 w-full rounded-lg border border-gray-200 bg-white px-3"
-                  >
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly on this date</option>
-                    <option value="first_friday">First Friday</option>
-                    <option value="friday_before_first_saturday">Friday before First Saturday</option>
-                    <option value="first_saturday">First Saturday</option>
-                    <option value="monthly_nth_weekday">Monthly weekday rule</option>
-                  </select>
-                </label>
-                <>
-                    <label className="text-sm text-gray-600">
-                      Every
-                      <div className="mt-2 flex items-center gap-2">
-                        <input
-                          type="number"
-                          min="1"
-                          max="12"
-                          value={form.recurrenceInterval}
-                          onChange={(event) =>
-                            updateField(
-                              "recurrenceInterval",
-                              Number(event.target.value),
-                            )
-                          }
-                          className="h-10 w-full rounded-lg border border-gray-200 px-3"
-                        />
-                        <span>
-                          {form.recurrenceFrequency === "weekly" ? "week(s)" : "month(s)"}
-                        </span>
-                      </div>
-                    </label>
-                    {!form.eventId && (
-                      <label className="text-sm text-gray-600">
-                        Number of events
-                        <input
-                          type="number"
-                          min="2"
-                          max="52"
-                          value={form.recurrenceCount}
-                          onChange={(event) =>
-                            updateField("recurrenceCount", Number(event.target.value))
-                          }
-                          className="mt-2 h-10 w-full rounded-lg border border-gray-200 px-3"
-                        />
-                      </label>
-                    )}
-                  </>
-              </div>
-              {form.recurrenceFrequency === "monthly_nth_weekday" && (
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <label className="text-sm text-gray-600">
-                    Occurrence
-                    <select
-                      value={form.recurrenceOrdinal}
-                      onChange={(event) => updateField("recurrenceOrdinal", Number(event.target.value))}
-                      className="mt-2 h-10 w-full rounded-lg border border-gray-200 bg-white px-3"
-                    >
-                      <option value="1">First</option>
-                      <option value="2">Second</option>
-                      <option value="3">Third</option>
-                      <option value="4">Fourth</option>
-                      <option value="-1">Last</option>
-                    </select>
-                  </label>
-                  <label className="text-sm text-gray-600">
-                    Weekday
-                    <select
-                      value={form.recurrenceWeekday}
-                      onChange={(event) => updateField("recurrenceWeekday", Number(event.target.value))}
-                      className="mt-2 h-10 w-full rounded-lg border border-gray-200 bg-white px-3"
-                    >
-                      {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day, index) => (
-                        <option key={day} value={index}>{day}</option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              )}
-              {!form.eventId && repeatingDatePreview.length > 0 && (
-                <div className="mt-4 rounded-xl bg-[#f7f3ef] p-4 text-sm text-gray-700">
-                  <p className="font-semibold text-[#6f4f34]">Date preview</p>
-                  <ul className="mt-2 grid gap-1 text-xs text-gray-600 sm:grid-cols-2">
-                    {repeatingDatePreview.map((date) => (
-                      <li key={date.toISOString()}>{formatEventDate(date)}</li>
-                    ))}
-                  </ul>
-                  {Number(form.recurrenceCount) > repeatingDatePreview.length && (
-                    <p className="mt-2 text-xs text-gray-500">
-                      + {Number(form.recurrenceCount) - repeatingDatePreview.length} more dates
-                    </p>
-                  )}
-                </div>
-              )}
-            </fieldset>
-          )}
 
           <div className="mt-6 flex flex-wrap gap-2">
             {form.eventId ? (
@@ -1749,7 +2061,9 @@ const MinistryEvents = ({ data, activeAction, onEventSelect }) => {
                 {isSaving
                   ? "Publishing..."
                   : form.sourceEventId
-                    ? "PUBLISH COPY"
+                    ? Number(form.copyCount) > 1
+                      ? `PUBLISH ${form.copyCount} COPIES`
+                      : "PUBLISH COPY"
                     : "PUBLISH EVENT"}
               </button>
             )}

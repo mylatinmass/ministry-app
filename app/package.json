@@ -8,7 +8,6 @@
   },
   "scripts": {
     "dev": "node --env-file-if-exists=.env.local ./node_modules/astro/bin/astro.mjs dev",
-    "prebuild": "node --env-file-if-exists=.env.local scripts/sync-mass-schedule.mjs --build",
     "build": "astro build",
     "check": "astro check",
     "snapshot": "node scripts/snapshot-data.mjs",

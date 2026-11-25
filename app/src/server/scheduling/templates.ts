@@ -1397,6 +1397,14 @@ export const handleTemplates = async (request: Request) => {
         loadAvailableMinistries(client),
         loadAvailableLevels(client),
       ])
+      const isGlobalAdmin = ["owner", "super_admin"].includes(context.user.global_role)
+      const managedIds = isGlobalAdmin ? null : new Set(
+        (await client.query(
+          `SELECT ministry_id FROM ministry_members WHERE user_id = $1
+            AND status = 'active' AND level IN ('owner', 'admin')`,
+          [context.user.id],
+        )).rows.map((row) => row.ministry_id),
+      )
       const templates = await Promise.all(
         loadedTemplates.map(async (template) => {
           const coordinatorAccess = await getMinistryAccess(
@@ -1428,7 +1436,10 @@ export const handleTemplates = async (request: Request) => {
           }
         }),
       )
-      return json({ templates, ministries, levels, canManage: true })
+      return json({
+        templates, ministries, levels, canManage: true,
+        manageableMinistries: ministries.filter((ministry) => !managedIds || managedIds.has(ministry.id)),
+      })
     }
 
     if (request.method === "POST") {

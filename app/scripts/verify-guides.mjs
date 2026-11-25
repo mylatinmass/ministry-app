@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { buildGuide } from "../src/react/components/ministry/ministryGuideDefinitions.js"
+import { indexDocumentation, searchDocumentation } from "../src/react/components/ministry/ministryDocumentationSearch.js"
 
 const root = process.cwd()
 const documentation = await fs.readFile(
@@ -25,6 +26,7 @@ for (const rawLine of documentation.split(/\r?\n/)) {
       title: line.slice(3).trim(),
       purpose: "",
       note: "",
+      keywords: "",
       steps: [],
       guideMode: "auto",
       guideOverrides: {},
@@ -33,6 +35,10 @@ for (const rawLine of documentation.split(/\r?\n/)) {
     continue
   }
   if (!current) continue
+  if (line.startsWith("<!-- search:")) {
+    current.keywords = line.slice("<!-- search:".length).replace(/-->$/, "").trim()
+    continue
+  }
   if (line === "<!-- guide: auto -->") {
     current.guideMode = "auto"
     continue
@@ -66,6 +72,13 @@ for (const rawLine of documentation.split(/\r?\n/)) {
 if (current) topics.push(current)
 
 assert.ok(topics.length > 0, "Documentation must contain at least one topic")
+const index = indexDocumentation(topics)
+assert.equal(searchDocumentation(index, "add even")[0]?.title, "Add Event from the Calendar")
+assert.equal(searchDocumentation(index, "how do I add event")[0]?.title, "Add Event from the Calendar")
+assert.equal(searchDocumentation(index, "rsvp deadline")[0]?.title, "Set the dates, times, All Day, and RSVP deadline")
+assert.ok(searchDocumentation(index, "test mode").some((topic) => topic.title === "Test notifications with one account"))
+assert.ok(searchDocumentation(index, "parking instructions").some((topic) => topic.title === "Choose a chapel room or enter an outside venue"))
+assert.equal(searchDocumentation(index, "unmatchablezz").length, 0)
 const stepCount = topics.reduce((total, topic) => total + topic.steps.length, 0)
 assert.ok(stepCount >= topics.length, "Every topic must contain at least one step")
 const guideIds = new Set()

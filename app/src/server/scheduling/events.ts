@@ -5,6 +5,7 @@ import { json } from "../request"
 import {
   sendAssignmentNotifications,
   sendEventScheduleNotifications,
+  queueAttendanceCall,
   sendSubstitutionAcceptedNotifications,
   sendSubstitutionRequestNotifications,
 } from "../notifications/assignment-notifications"
@@ -366,13 +367,31 @@ const findEventConflicts = async (
   }))
 }
 
+const eventEndOrDefault = (value: unknown, start: Date) =>
+  value ? parseDate(value, "End time") : new Date(start.getTime() + 3_600_000)
+
+const loadAdditionalEventMinistries = async (
+  client: PoolClient,
+  context: any,
+  body: any,
+) => {
+  if (body.participationType !== "members" || !Array.isArray(body.participatingMinistryIds)) {
+    return []
+  }
+  const ids = [...new Set<string>(body.participatingMinistryIds.map((id: unknown) => cleanText(id, 100)).filter(Boolean))]
+  for (const id of ids) {
+    await requireMinistryAccess(client, context.user, id, true)
+  }
+  return ids
+}
+
 const previewEventConflicts = async (
   client: PoolClient,
   context: any,
   body: any,
 ) => {
   const start = parseDate(body.startTime, "Start time")
-  const end = parseDate(body.endTime, "End time")
+  const end = eventEndOrDefault(body.endTime, start)
   if (end <= start) {
     throw Object.assign(new Error("End time must be after start time"), {
       status: 400,
@@ -422,7 +441,8 @@ const previewEventConflicts = async (
       ministryIds = [ministryId]
     }
   }
-  ministryIds = await excludeReservationMinistry(client, ministryIds)
+  const additionalMinistryIds = await loadAdditionalEventMinistries(client, context, body)
+  ministryIds = await excludeReservationMinistry(client, [...new Set([...ministryIds, ...additionalMinistryIds])])
   const [scheduleConflicts, roomConflicts] = await Promise.all([
     findEventConflicts(
       client,
@@ -1687,6 +1707,7 @@ export const syncAllAvailableMemberAssignments = async (
   client: PoolClient,
   context: any,
   eventId: string,
+  queueRegistrationAlert = true,
 ) => {
   const eventResult = await client.query(
     `SELECT event.id, event.ministry_id, event.title, event.start_time,
@@ -1952,7 +1973,7 @@ export const syncAllAvailableMemberAssignments = async (
       afterData: { added, removed },
     })
   }
-  if (newlyRegisteredUserIds.size) {
+  if (queueRegistrationAlert && newlyRegisteredUserIds.size) {
     const seriesKey = event.recurrence_group_id || event.id
     const recipients = await client.query(
       `SELECT subject.id AS subject_user_id,
@@ -3714,10 +3735,21 @@ export const createEvents = async (
     structure.template.ministry_id,
     true,
   )
+  const additionalMinistryIds = await loadAdditionalEventMinistries(client, context, body)
+  const existingMinistryIds = new Set(structure.blocks.map((block: any) => block.ministry_id))
+  for (const id of additionalMinistryIds) {
+    if (!existingMinistryIds.has(id)) {
+      structure.blocks.push({ id: null, ministry_id: id, is_required: false, instructions: null, sort_order: 0, group_ids: [] })
+    }
+  }
   const inlineResponsibilities = normalizeInlineResponsibilities(
     body.inlineResponsibilities,
     structure.template.ministry_id,
-  )
+  ).flatMap((responsibility) => responsibility.assignment_mode === "all_available_members"
+    ? [responsibility, ...additionalMinistryIds
+        .filter((id) => id !== responsibility.ministry_id)
+        .map((id) => ({ ...responsibility, ministry_id: id }))]
+    : [responsibility])
   if (
     inlineResponsibilities.some(
       (responsibility: any) =>
@@ -3731,21 +3763,20 @@ export const createEvents = async (
     )
   }
   structure.responsibilities = [
-    ...structure.responsibilities,
+    ...structure.responsibilities.filter((responsibility: any) =>
+      body.useTemplatePositions !== false || responsibility.assignment_mode !== "standard"),
     ...inlineResponsibilities,
   ]
 
-  const title = templateId
-    ? structure.template.name
-    : cleanText(body.title, 250)
+  const title = cleanText(body.title, 250) || structure.template.name
   if (!title) {
     throw Object.assign(new Error("Event title is required"), { status: 400 })
   }
   let description =
-    cleanText(body.description) || structure.template.description || ""
+    body.description === undefined ? structure.template.description || "" : cleanText(body.description)
   let location = cleanText(body.location, 500)
   const start = parseDate(body.startTime, "Start time")
-  const end = parseDate(body.endTime, "End time")
+  const end = eventEndOrDefault(body.endTime, start)
   if (end <= start) {
     throw Object.assign(new Error("End time must be after start time"), {
       status: 400,
@@ -3792,6 +3823,12 @@ export const createEvents = async (
     : privateByDefault
       ? "private"
       : "public"
+  if (inlineResponsibilities.some((item) =>
+    (item.assignment_mode === "all_active_members" && visibility !== "public") ||
+    (item.assignment_mode === "all_available_members" && visibility === "private"),
+  )) {
+    throw Object.assign(new Error("The attendance audience is too broad for this event’s visibility"), { status: 400 })
+  }
   const roomIds = normalizeRoomIds(body.roomIds)
   await validateRoomIds(client, roomIds)
   if (visibility === "private") {
@@ -3896,8 +3933,13 @@ export const createEvents = async (
     }
   }
 
+  const allDayDuration = body.allDay === true
+    ? toChapelWallClock(end).getTime() - toChapelWallClock(start).getTime()
+    : null
   for (const occurrenceStart of occurrenceStarts) {
-    const occurrenceEnd = new Date(occurrenceStart.getTime() + duration)
+    const occurrenceEnd = allDayDuration === null
+      ? new Date(occurrenceStart.getTime() + duration)
+      : fromChapelWallClock(new Date(toChapelWallClock(occurrenceStart).getTime() + allDayDuration))
     const [scheduleConflicts, roomConflicts] = await Promise.all([
       findEventConflicts(
         client,
@@ -4040,7 +4082,12 @@ export const createEvents = async (
         )
       }
     }
-    await syncAllAvailableMemberAssignments(client, context, eventId)
+    await syncAllAvailableMemberAssignments(
+      client,
+      context,
+      eventId,
+      !inlineResponsibilities.some((item) => EXPECTED_ATTENDANCE_MODES.includes(item.assignment_mode)),
+    )
     if (occurrenceStarts.length > 1) {
       const generated = await fillAndReviewAutomaticSchedule(
         client,
@@ -4209,10 +4256,13 @@ const cloneEvent = async (
   client: PoolClient,
   context: any,
   body: any,
+  previewOnly = false,
 ) => {
   const sourceEventId = cleanText(body.sourceEventId, 100)
   const sourceResult = await client.query(
-    `SELECT * FROM events WHERE id = $1 FOR UPDATE`,
+    previewOnly
+      ? `SELECT * FROM events WHERE id = $1`
+      : `SELECT * FROM events WHERE id = $1 FOR UPDATE`,
     [sourceEventId],
   )
   const source = sourceResult.rows[0]
@@ -4241,6 +4291,10 @@ const cloneEvent = async (
   ])
   const start = parseDate(body.startTime, "Start time")
   const end = parseDate(body.endTime, "End time")
+  const copyCount = Number(body.copyCount ?? 1)
+  if (!Number.isInteger(copyCount) || copyCount < 1 || copyCount > 52) {
+    throw Object.assign(new Error("Choose between 1 and 52 copies"), { status: 400 })
+  }
   if (end <= start) {
     throw Object.assign(new Error("End time must be after start time"), {
       status: 400,
@@ -4258,8 +4312,8 @@ const cloneEvent = async (
 
   const structure = {
     template: {
-      id: null,
-      version: null,
+      id: copyCount > 1 ? source.template_id : null,
+      version: copyCount > 1 ? source.template_version : null,
       ministry_id: source.ministry_id,
       participation_type: source.participation_type,
     },
@@ -4329,11 +4383,42 @@ const cloneEvent = async (
     ? sourceRooms.rows.map((room) => room.room_id)
     : normalizeRoomIds(body.roomIds)
   await validateRoomIds(client, roomIds)
-  const [scheduleConflicts, roomConflicts] = await Promise.all([
-    findEventConflicts(client, ministryIds, start, end, []),
-    findRoomConflicts(client, roomIds, start, end, []),
-  ])
-  const conflicts = [...scheduleConflicts, ...roomConflicts]
+  const duration = end.getTime() - start.getTime()
+  const copies = getOccurrenceStarts(
+    start,
+    { frequency: "weekly", interval: 1, count: copyCount },
+    1,
+  ).map((occurrence, index) => {
+    const copyStart = index === 0 ? start : occurrence
+    return { start: copyStart, end: new Date(copyStart.getTime() + duration) }
+  })
+  if (copies.some((copy, index) => index > 0 && copies[index - 1].end > copy.start)) {
+    throw Object.assign(new Error("The weekly copies would overlap each other"), { status: 400 })
+  }
+  if (copyCount > 1) {
+    const existing = await client.query(
+      `SELECT 1 FROM events
+       WHERE source_event_id = $1 AND start_time = ANY($2::TIMESTAMPTZ[])
+         AND status NOT IN ('cancelled', 'archived')
+       LIMIT 1`,
+      [sourceEventId, copies.map((copy) => copy.start.toISOString())],
+    )
+    if (existing.rowCount) {
+      throw Object.assign(new Error("A copy already exists at one of the selected times"), { status: 409 })
+    }
+  }
+  const conflicts = []
+  for (const copy of copies) {
+    const [scheduleConflicts, roomConflicts] = await Promise.all([
+      findEventConflicts(client, ministryIds, copy.start, copy.end, []),
+      findRoomConflicts(client, roomIds, copy.start, copy.end, []),
+    ])
+    conflicts.push(...[...scheduleConflicts, ...roomConflicts].map((conflict) => ({
+      ...conflict,
+      copyStartTime: copy.start.toISOString(),
+    })))
+  }
+  if (previewOnly) return { conflicts, eventIds: [] }
   const conflictOverride = body.conflictOverride === true
   if (conflicts.length && !conflictOverride) {
     throw Object.assign(
@@ -4341,30 +4426,42 @@ const cloneEvent = async (
       { status: 409, conflicts },
     )
   }
-  const clonedEventId = await createEventFromStructure(client, context, {
-    structure,
-    title: cleanText(body.title, 250) || `${source.title} Copy`,
-    description:
-      body.description === undefined
-        ? source.description
-        : cleanText(body.description),
-    location:
-      body.location === undefined ? source.location : cleanText(body.location),
-    start,
-    end,
-    status: "published",
-    recurrenceGroupId: null,
-    recurrenceRule: null,
-    confirmationDeadline,
-    sourceEventId,
-    conflictOverride: conflicts.length > 0 && conflictOverride,
-    conflictOverrideReason: conflictOverride
-      ? cleanText(body.conflictOverrideReason, 500) || "Overlap reviewed by ministry administrator"
-      : null,
-    roomIds,
-  })
-  await syncAllAvailableMemberAssignments(client, context, clonedEventId)
-  return clonedEventId
+  const deadlineOffset = confirmationDeadline
+    ? start.getTime() - confirmationDeadline.getTime()
+    : null
+  const eventIds: string[] = []
+  for (const copy of copies) {
+    const clonedEventId = await createEventFromStructure(client, context, {
+      structure,
+      title: cleanText(body.title, 250) || source.title,
+      description:
+        body.description === undefined
+          ? source.description
+          : cleanText(body.description),
+      location:
+        body.location === undefined ? source.location : cleanText(body.location),
+      start: copy.start,
+      end: copy.end,
+      visibility: source.visibility || "public",
+      status: "published",
+      recurrenceGroupId: null,
+      recurrenceRule: null,
+      confirmationDeadline: deadlineOffset === null
+        ? null
+        : new Date(copy.start.getTime() - deadlineOffset),
+      sourceEventId,
+      conflictOverride: conflictOverride && conflicts.some(
+        (conflict) => conflict.copyStartTime === copy.start.toISOString(),
+      ),
+      conflictOverrideReason: conflictOverride
+        ? cleanText(body.conflictOverrideReason, 500) || "Overlap reviewed by ministry administrator"
+        : null,
+      roomIds,
+    })
+    await syncAllAvailableMemberAssignments(client, context, clonedEventId)
+    eventIds.push(clonedEventId)
+  }
+  return { conflicts, eventIds }
 }
 
 const previewTemplateReplacement = async (
@@ -6967,7 +7064,9 @@ export const handleEvents = async (request: Request) => {
     try {
       if (request.method === "POST") {
         if (body.action === "preview_event_conflicts") {
-          const preview = await previewEventConflicts(client, context, body)
+          const preview = body.sourceEventId
+            ? await cloneEvent(client, context, body, true)
+            : await previewEventConflicts(client, context, body)
           await client.query("COMMIT")
           return json(preview)
         }
@@ -7008,9 +7107,14 @@ export const handleEvents = async (request: Request) => {
           return json(preview)
         }
         if (body.action === "clone") {
-          const eventId = await cloneEvent(client, context, body)
+          const { eventIds } = await cloneEvent(client, context, body)
           await client.query("COMMIT")
-          return json({ message: "Event copy published", eventIds: [eventId] }, 201)
+          return json({
+            message: eventIds.length === 1
+              ? "Event copy published"
+              : `${eventIds.length} weekly copies published`,
+            eventIds,
+          }, 201)
         }
         const creation = await createEvents(client, context, body)
         await client.query("COMMIT")
@@ -7026,6 +7130,20 @@ export const handleEvents = async (request: Request) => {
               )
             },
           )
+        }
+        const attendance = Array.isArray(body.inlineResponsibilities)
+          ? body.inlineResponsibilities.find((item: any) => item?.assignmentMode === "all_available_members")
+          : null
+        if (attendance && body.participationType !== "volunteers") {
+          const attendanceEventIds = creation.generatedSchedules.length ? publishedEventIds : creation.eventIds
+          const audience = attendance.audienceScope === "all"
+            ? "all"
+            : [body.ministryId, ...(body.participationType === "members" && Array.isArray(body.participatingMinistryIds)
+              ? body.participatingMinistryIds : [])].filter(Boolean)
+          for (const eventId of attendanceEventIds) {
+            await queueAttendanceCall(eventId, audience)
+              .catch((error) => console.error("Attendance call could not be queued:", error))
+          }
         }
         return json(
           {

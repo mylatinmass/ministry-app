@@ -656,6 +656,7 @@ const MinistryHomeWorkspace = ({ data }) => {
     unreadCount: 0,
   })
   const [showCreateEvent, setShowCreateEvent] = React.useState(false)
+  const [createEventDate, setCreateEventDate] = React.useState("")
   const [cloneEventDraft, setCloneEventDraft] = React.useState(null)
   const [eventView, setEventView] = React.useState("all")
   const [pinnedEventIds, setPinnedEventIds] = React.useState(() =>
@@ -893,6 +894,14 @@ const MinistryHomeWorkspace = ({ data }) => {
     setSectionId("events")
     setShowCreateEvent(true)
     window.history.replaceState({}, "", "/?section=events")
+  }
+
+  const openCreateEvent = (date = "") => {
+    if (!manageableMinistries.length) return
+    selectSection("events")
+    setCloneEventDraft(null)
+    setCreateEventDate(date)
+    setShowCreateEvent(true)
   }
 
   const openAlerts = () => {
@@ -1300,12 +1309,13 @@ const MinistryHomeWorkspace = ({ data }) => {
       <MinistryHomeCalendar
         events={calendarEvents}
         onEventSelect={setSelectedEvent}
+        onAddEvent={manageableMinistries.length ? openCreateEvent : undefined}
       />
     )
   } else if (sectionId === "events") {
     const createMinistry = manageableMinistries.find(
       (ministry) => ministry.id === createMinistryId,
-    )
+    ) || manageableMinistries[0]
     const canCreateEvents = manageableMinistries.length > 0
     const eventActions = [
       {
@@ -1344,22 +1354,20 @@ const MinistryHomeWorkspace = ({ data }) => {
         icon: PlusIcon,
         active: showCreateEvent,
         hidden: !canCreateEvents,
-        onClick: () => {
-          setCloneEventDraft(null)
-          setShowCreateEvent(true)
-        },
+        onClick: () => openCreateEvent(),
       },
     ]
     content = showCreateEvent && canCreateEvents && createMinistry ? (
       <div className="space-y-5 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] lg:pb-0">
         <MinistrySectionActions label="Event actions" actions={eventActions} />
         <MinistryEvents
-          key={createMinistry.id}
           data={{ ministry: createMinistry, user: currentUser }}
+          ministries={manageableMinistries}
+          onMinistryChange={setCreateMinistryId}
           activeAction={
             cloneEventDraft
               ? { id: "clone-event", label: "Clone event", event: cloneEventDraft }
-              : { id: "add-event", label: "Create event" }
+              : { id: "add-event", label: "Create event", date: createEventDate }
           }
           onEventSelect={setSelectedEvent}
         />

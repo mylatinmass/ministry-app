@@ -35,6 +35,7 @@ const OUTBOUND_ALERT_KINDS = new Set([
   "weekly_schedule_summary",
   "day_before_schedule_reminder",
   "final_schedule_reminder",
+  "attendance_call_published",
 ])
 
 const digestDelayMinutes = () => {
@@ -1315,6 +1316,60 @@ export const sendAssignmentChangeRequestedNotification = async (
   return { queued: leaders.rowCount || 0 }
 }
 
+export const queueAttendanceCall = async (
+  eventId: string,
+  audience: "all" | string[],
+) => {
+  const result = await getPool().query(
+    `
+      SELECT DISTINCT recipient.id AS recipient_user_id,
+        recipient.first_name AS recipient_first_name, recipient.last_name AS recipient_last_name,
+        event.title, event.start_time, event.location, event.ministry_id
+      FROM events event
+      JOIN ministry_accounts member ON member.status = 'active'
+        AND NOT COALESCE(member.is_volunteer_profile, false)
+      JOIN ministry_members membership ON membership.user_id = member.id
+        AND membership.status = 'active'
+      LEFT JOIN managed_profiles guardian ON guardian.child_user_id = member.id
+        AND guardian.status IN ('active', 'separation_pending')
+      JOIN ministry_accounts recipient ON recipient.id = COALESCE(guardian.guardian_user_id, member.id)
+        AND recipient.status = 'active'
+      WHERE event.id = $1 AND event.status = 'published'
+        AND (
+          ($2::BOOL AND COALESCE(event.visibility, 'public') = 'public')
+          OR (NOT $2::BOOL AND COALESCE(event.visibility, 'public') <> 'private'
+            AND membership.ministry_id = ANY($3::UUID[])
+            AND EXISTS (
+              SELECT 1 FROM event_ministries participating
+              WHERE participating.event_id = event.id AND participating.ministry_id = membership.ministry_id
+            )
+          )
+        )
+    `,
+    [eventId, audience === "all", Array.isArray(audience) ? audience : []],
+  )
+  for (const row of result.rows) {
+    const conciseMessage = `Hello ${accountName(row)}. You have a new attendance request. Check the Ministry App for details.`
+    await enqueueAlert({
+      subjectUserId: row.recipient_user_id,
+      recipientUserId: row.recipient_user_id,
+      kind: "attendance_call_published",
+      title: `Attendance requested: ${row.title}`,
+      message: [formatAssignmentDate(row.start_time), row.location, "Open the Ministry App for event details."].filter(Boolean).join("\n"),
+      eventId,
+      ministryId: row.ministry_id,
+      dedupeKey: `attendance-call:${row.recipient_user_id}:${eventId}`,
+      metadata: {
+        notificationCategory: "schedule_changes",
+        notificationUrl: `/?event=${eventId}`,
+        privacySafeMessage: conciseMessage,
+        conciseMessage,
+      },
+      immediate: true,
+    })
+  }
+}
+
 export const sendEventScheduleNotifications = async (
   eventId: string,
   changeKind:
@@ -1756,6 +1811,7 @@ const buildConciseDigest = (alerts: any[], recipientName: string) => {
   for (const alert of alerts) {
     const label = ({
       assignment_created: "new assignment",
+      attendance_call_published: "attendance request",
       substitution_available: "substitute request",
       substitution_accepted: "substitution update",
       event_published: "published schedule",

@@ -68,7 +68,7 @@ const CALENDAR_VIEWS = [
 
 const MOBILE_WEEKDAYS = ["M", "Tu", "W", "Th", "F", "Sa", "Su"];
 
-const MinistryHomeCalendar = ({ events = [], onEventSelect }) => {
+const MinistryHomeCalendar = ({ events = [], onEventSelect, onAddEvent }) => {
   const [visibleMonth, setVisibleMonth] = React.useState(() => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
@@ -83,6 +83,18 @@ const MinistryHomeCalendar = ({ events = [], onEventSelect }) => {
     window.matchMedia("(max-width: 639px)").matches ? "week" : "month",
   );
   const [eventFilter, setEventFilter] = React.useState("all");
+  const addEventButton = onAddEvent && (
+    <button
+      type="button"
+      data-guide-id="calendar-add-event"
+      onClick={() => onAddEvent(toDateKey(
+        calendarView === "today" ? new Date() : selectedDate || agendaFocusDate,
+      ))}
+      className="whitespace-nowrap rounded-lg px-2 py-2 text-xs font-semibold text-gray-500 transition hover:bg-white hover:text-[#6f4f34] sm:px-3 sm:text-sm"
+    >
+      Add Event
+    </button>
+  );
   const visibleMonths = React.useMemo(
     () => [
       visibleMonth,
@@ -526,11 +538,11 @@ const MinistryHomeCalendar = ({ events = [], onEventSelect }) => {
         </span>
       </div> */}
 
-      <div className="flex shrink-0 items-center justify-between gap-3 border-y border-gray-100 py-3">
+      <div className="flex shrink-0 items-center justify-between gap-1 border-y border-gray-100 py-3 sm:gap-3">
         <div
           role="group"
           aria-label="Event filters"
-          className="inline-flex rounded-xl bg-gray-50 p-1"
+          className="inline-flex min-w-0 items-center rounded-xl bg-gray-50 p-1"
         >
           {[
             { id: "all", label: "All Events" },
@@ -543,7 +555,7 @@ const MinistryHomeCalendar = ({ events = [], onEventSelect }) => {
                 type="button"
                 onClick={() => setEventFilter(filter.id)}
                 aria-pressed={active}
-                className={`rounded-lg px-3 py-2 text-xs font-semibold transition sm:text-sm ${
+                className={`whitespace-nowrap rounded-lg px-2 py-2 text-xs font-semibold transition sm:px-3 sm:text-sm ${
                   active
                     ? "bg-white text-[#6f4f34] shadow-sm"
                     : "text-gray-500 hover:text-gray-800"
@@ -553,11 +565,12 @@ const MinistryHomeCalendar = ({ events = [], onEventSelect }) => {
               </button>
             );
           })}
+          {addEventButton}
         </div>
         <button
           type="button"
           onClick={exportCurrentViewPdf}
-          className="inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-[#6f4f34] transition hover:bg-[#f7f3ef] sm:text-sm"
+          className="inline-flex shrink-0 items-center gap-1 rounded-xl px-2 py-2 text-xs font-semibold text-[#6f4f34] transition hover:bg-[#f7f3ef] sm:gap-2 sm:px-3 sm:text-sm"
         >
           <DocumentArrowDownIcon className="size-5" />
           <span className="sm:hidden">PDF</span>
@@ -582,6 +595,11 @@ const MinistryHomeCalendar = ({ events = [], onEventSelect }) => {
             : showNextMonthFromAgenda
         }
         label={agendaLabel}
+        emptyAction={addEventButton && (
+          <span className="inline-flex rounded-xl bg-gray-50 p-1">
+            {addEventButton}
+          </span>
+        )}
         emptyTitle={
           calendarView === "today"
             ? eventFilter === "my"

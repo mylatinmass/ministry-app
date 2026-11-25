@@ -55,7 +55,7 @@ const requestHeaders = () => ({
   )}`,
 })
 
-const MinistryTemplates = ({ data, activeAction }) => {
+const MinistryTemplates = ({ data, activeAction, onTemplateCreated }) => {
   const [library, setLibrary] = React.useState({
     templates: [],
     ministries: [],
@@ -295,6 +295,10 @@ const MinistryTemplates = ({ data, activeAction }) => {
           return
         }
         throw new Error(result.message || "Unable to save template")
+      }
+      if (!form.templateId && onTemplateCreated) {
+        onTemplateCreated(result.templateId, form.name)
+        return
       }
       const affected = Number(result.affectedEventCount || 0)
       const cancelled = Number(result.cancelledAssignmentCount || 0)

@@ -1,7 +1,7 @@
 ---
 title: Ministry App Documentation
 description: Step-by-step help for completed Ministry App features.
-updated: 2026-08-28
+updated: 2026-11-25
 guide:
   version: 1
   coverage: all-completed-topics
@@ -40,7 +40,7 @@ Use this file as the canonical source for the in-app Support → Documentation p
 5. The visitor enters the requested contact details and submits the RSVP.
 6. Review the registration from the event roster.
 
-## Add Spanish localization and broader accessibility enhancements
+## Change appearance, text size, or browser language
 <!-- guide: auto -->
 
 **Purpose:** Make the app usable by a broader range of languages, devices, abilities, and text-size needs so accessibility is part of normal participation.
@@ -50,8 +50,7 @@ Use this file as the canonical source for the in-app Support → Documentation p
 1. Open My Profile, then Account Details or Preferences.
 2. Choose Light or Dark appearance and save.
 3. Use the browser or device text-size/zoom controls for larger text.
-4. The responsive layout reflows through 200% zoom without clipping navigation, forms, calendars, dialogs, or actions.
-5. Use browser translation when another language is needed.
+4. Use your browser's translate feature to read the interface in another language.
 
 ## Add, edit, and cancel responsibilities directly on an event
 <!-- guide: auto -->
@@ -134,22 +133,102 @@ Parent/guardian: 1. Open My Profile.
 4. Confirm the response.
 5. Verify that the opening returned to the event without creating a substitute request.
 
-## Allow authorized users to create ministry events
+## Add Event from the Calendar
 <!-- guide: auto -->
+<!-- search: add event add even create event new calendar event schedule an event no events this day -->
+
+**Purpose:** Start an event on the exact day you select, including a day with an empty schedule.
+
+### How to
+
+**Admin only**
+1. Open Calendar and choose Week or Month.
+2. Select the day the event should take place.
+3. Select Add Event beside All Events and My Events. On an empty day, you can also select Add Event below No events this day.
+<!-- guide-step: {"mode":"target","target":"calendar-add-event","event":"click"} -->
+4. The From date in Create Event already matches the day you selected. Complete the form and review the date before publishing.
+
+## Create an event manually
+<!-- guide: auto -->
+<!-- search: add event create event new event event setup publish event schola sung mass basic event -->
 
 **Purpose:** Capture new ministry activity in the authoritative schedule with consistent permissions, staffing, and notification behavior.
 
 ### How to
 
-Admin only: 1. Open Events in a ministry you administer.
+**Admin only**
+1. Open Events.
 2. Select Create Event.
-3. Enter the event name, date, start/end time, location, and optional description or notes.
-4. Choose a template and participating ministries if applicable.
-5. Review the generated responsibilities.
-6. Save or publish the event.
+<!-- guide-step: {"mode":"target","target":"action-create","event":"click"} -->
+3. Check the feast and vestment color at the top. Enter the event name, From and To dates and times, location, and an optional description. Set an RSVP deadline if you need one.
+4. Under Who can participate, choose Ministry members only, Public volunteers only, or Members and public volunteers.
+5. For Ministry members only, open Select ministries and choose one or more ministries. Choose an event template if useful.
+6. Add required positions only if you need to staff specific duties. Add an Attendance Call if you want the selected audience notified when the event is published.
+7. Select Publish Event. Review any conflict warning before confirming.
 
-## Allow authorized users to edit and clone existing events
+## Set the dates, times, All Day, and RSVP deadline
 <!-- guide: auto -->
+<!-- search: from to date time dropdown month day year next year all day overnight deadline confirmation deadline rsvp -->
+
+**Purpose:** Schedule a timed or all-day event and optionally choose when members must respond.
+
+### How to
+
+**Admin only**
+1. Open Events and select Create Event.
+2. Open the From date picker. Choose the year, month, and day. The year switch offers this year and next year.
+3. Open the From time dropdown and choose the hour, minute, and AM or PM.
+4. Review To, which starts one hour after From by default. Choose a different date or time if needed. The To date is the last included date for an All Day event.
+5. Select All Day to disable the time controls and schedule the full selected dates.
+6. Use the matching RSVP date and time controls to set a deadline before the event starts. Select Clear to return to the app's automatic deadline.
+7. Click outside a dropdown, select its button again, or press Escape to close it.
+
+## Choose a chapel room or enter an outside venue
+<!-- guide: auto -->
+<!-- search: event location our chapel outside venue address parking where to park room booking location notes -->
+
+**Purpose:** Give participants the right location and reserve chapel rooms when required.
+
+### How to
+
+**Admin only**
+1. Open the Location section in Create Event.
+2. Select Our Chapel to show Chapel rooms. Choose the rooms needed for the event.
+3. Select Outside Venue for an off-site event. Enter the venue name, address, city, state or region, postal code, and country as applicable. Add parking or arrival instructions under Venue notes.
+4. Review venue details and any room conflicts before publishing.
+
+## Select ministries or All Members for a new event
+<!-- guide: auto -->
+<!-- search: multi-ministry event ministry picker all members select ministries checkbox orange who can participate -->
+
+**Purpose:** Choose which ministries participate in a members-only event.
+
+### How to
+
+**Admin only**
+1. In Create Event, set Who can participate to Ministry members only.
+2. Open Select ministries. Check the ministries you want to include. Selected names appear in orange.
+3. To include every ministry you can administer, select All Members at the top. The individual choices will gray out. Clear All Members to return to your previous selections.
+4. Click outside the dropdown to close it. Use Add Attendance Call separately if you want the app to send a notice at publication.
+
+## Send an Attendance Call when an event is published
+<!-- guide: auto -->
+<!-- search: expected attendance attendance notification notify choir all members selected ministries no unfilled positions schola practice -->
+
+**Purpose:** Notify a group about a new event without creating an unfilled-position alert for attendance.
+
+### How to
+
+**Admin only**
+1. Set up the event and select the participating ministries where applicable.
+2. In Positions, select Add attendance call.
+3. Choose All members of selected ministries, or All members when your role allows chapel-wide delivery. An event that accepts members and public volunteers uses the lead ministry for ministry-scoped attendance calls.
+4. Add required positions only for actual staffed roles. For a Schola-only event, leave the other ministry positions out and use the attendance call for the choir.
+5. Select Publish Event. The app queues one notice per recipient account for this event, including a combined notice for linked profiles.
+
+## Edit or clone an event and make weekly copies
+<!-- guide: auto -->
+<!-- search: clone event copy event duplicate event five copies next sunday repeat weekly schola copies -->
 
 **Purpose:** Make recurring or similar event setup faster while allowing authorized corrections without re-entering the entire event.
 
@@ -157,9 +236,10 @@ Admin only: 1. Open Events in a ministry you administer.
 
 Admin only: 1. Open Events and select an event owned by a ministry you administer.
 2. To edit it, choose Edit, update the permitted fields, and save.
-3. To copy it, choose Clone Event beside the event name.
-4. Change the copied event's date, time, title, or other details.
-5. Save the clone as a new event.
+3. To copy it, choose Clone. The first copy starts one week after the original by default. Adjust the date, time or title as needed.
+4. Set Number of copies. For a Sunday 11:00 AM Mass, enter 5 to make five weekly copies beginning on the From date. Check those dates for existing events.
+5. Choose whether to call the source event roster to attend. The copy uses the source event's active positions, so start with a Schola-only event when you only need the choir.
+6. Select Publish Copy or Publish Copies. Resolve or explicitly review any conflicts shown for the batch.
 
 ## Allow each ministry to define an ordered hierarchy of serving levels
 <!-- guide: auto -->
@@ -294,56 +374,53 @@ Admin only: 1. Open Events and select an event owned by a ministry you administe
 ### How to
 
 **Super Admin only**
-1. Open Events and select Create Repeating Event.
+1. Open Events, select Create Event, then choose Repeating Event.
 2. Choose the template for the special or seasonal service.
-3. Select the applicable monthly, yearly, first-weekday, or custom recurrence rule.
-4. Enter the effective dates for First Friday, First Saturday, Holy Week, annual feasts, processions, or another approved observance.
+3. Choose a supported rule such as weekly, monthly, First Friday, or First Saturday, and set the number of events.
+4. Create one-time events separately for special dates that do not follow the available rules.
 5. Preview the generated dates.
 6. Save and review any exceptions before publication.
 
 ## Apply ministry template-section changes only to future events
 <!-- guide: auto -->
 
-**Purpose:** Keep already-created events stable while allowing template improvements to shape future events.
+**Purpose:** Review how changes to a shared template affect future events based on it.
 
 ### How to
 
 1. Open the shared template.
 2. Edit the participating ministry’s template block.
-3. Save the change.
-4. Create a new event from the updated template.
-5. Confirm that the new event contains the revised staffing plan.
-6. Open an older event and confirm that its copied staffing plan did not change.
+3. Review any impact preview before saving, especially if removing positions with existing assignments.
+4. Save the change and check the number of affected future events in the confirmation.
+5. Open a future event to confirm the revised staffing, and check older events for their historical schedule.
 
-## Apply OLV recurring Mass times, Confession/Rosary timing, and effective-dated schedule rules automatically
+## Create a repeating event with a fixed number of dates
 <!-- guide: auto -->
 
-**Purpose:** Turn approved recurring chapel times and preparation offsets into consistent events so Confession, Rosary, Mass, and duties stay aligned.
+**Purpose:** Add a fixed set of dates using weekly, monthly, or chapel schedule rules.
 
 ### How to
 
 **Super Admin only**
 1. Open Events.
-2. Select Create Repeating Event.
-3. Choose the approved Mass template.
-4. Set the recurrence dates and the effective start or end date.
-5. Confirm the configured Mass, Confession, Rosary, and duty-time offsets.
-6. Save the repeating event and review the generated occurrences.
+2. Select Create Event, then Repeating Event.
+3. Set From and To and choose the Rule, interval, and Number of events.
+4. Check the date preview. Add a template and staffing if appropriate.
+5. Publish and review the generated dates and any staffing exceptions.
 
-## Apply SSPX proper-calendar precedence and chapel-specific liturgical rules automatically with human review
+## Add a fixed chapel observance
 <!-- guide: auto -->
 
-**Purpose:** Apply SSPX and chapel-specific observances consistently while keeping Father or an authorized delegate as the final liturgical authority.
+**Purpose:** Record a recurring fixed-date observance specific to the chapel.
 
 ### How to
 
 **Super Admin only**
 1. Open Chapel Settings.
 2. Select Local Observances.
-3. Add or edit the fixed chapel feast or local liturgical rule.
-4. Choose the applicable template, time, precedence, and effective year.
-5. Save the observance.
-6. Review the affected event dates and make any required human correction.
+3. Select Add observance, or open an existing observance.
+4. Enter the name, month, and day. Set the effective starting year, default template, default time, or notes as needed.
+5. Select Update observance. Create the corresponding calendar event separately when it is needed.
 
 ## Assign eligible ministry members to event responsibilities
 <!-- guide: auto -->
@@ -359,17 +436,19 @@ Admin only: 1. Open the event details.
 5. Save assignments.
 6. Confirm the member appears in the responsibility roster.
 
-## Automatically generate and maintain the regular chapel service calendar
+## Build the regular chapel calendar manually
 <!-- guide: auto -->
+<!-- search: automatic events mass schedule import stop automation recurring schedule recurring mass -->
 
-**Purpose:** Maintain one reliable base calendar for regular chapel services so downstream staffing and preparation do not depend on repeated manual entry.
+**Purpose:** Decide explicitly which regular services appear on the Ministry calendar.
 
 ### How to
 
-**Automatic workflow**
-1. Super Admins configure the approved recurring service rules and templates.
-2. The schedule synchronizer creates or updates the regular published Mass events.
-3. Administrators review exceptions in Events; ordinary recurring events require no manual recreation.
+**Admin only**
+1. Open Calendar or Events and check which Masses are already scheduled.
+2. Add an event for a new service, or open an existing service and select Clone.
+3. Use Number of copies to publish a fixed set of weekly dates. For more complex rules, use Repeating Event when that option is available to your role.
+4. Review the resulting events and staffing. App builds no longer add or refresh Mass events.
 
 ## Automatically publish normal conflict-free schedules while holding exceptions for review
 <!-- guide: auto -->
@@ -436,17 +515,17 @@ Automatic behavior: 1. Open an event date that has Ordo data.
 2. Add/Edit Template.
 3. connect each current ministry. Add required positions, optional staffing defaults, or no positions. Ministry admins manage their own blocks; apply the template when creating an event.
 
-## Copy template responsibilities into an event so later template edits do not rewrite the event
+## Use template positions in a new event
 <!-- guide: auto -->
 
-**Purpose:** Protect existing events from unintended future template changes while retaining the template as a reusable source for new events.
+**Purpose:** Choose whether a new event needs the staffing positions defined by its template.
 
 ### How to
 
 1. Create an event and select a template.
-2. Save the event so the template responsibilities are copied into event-specific records.
-3. Later, edit the original template.
-4. Reopen the existing event and confirm its copied responsibilities remain unchanged unless an admin explicitly reapplies a template.
+2. In Positions, select Include the template’s positions if you want the standard staffing roles.
+3. Enter assignments or leave positions open for review. A required opening can appear in the admin shortage report.
+4. Publish the event. Use the template impact preview when changing shared templates linked to future events.
 
 ## Create a ministry account while accepting an invitation
 <!-- guide: auto -->
@@ -461,10 +540,10 @@ Automatic behavior: 1. Open an event date that has Ordo data.
 4. Submit the form.
 5. Sign in with the new account after the membership is activated.
 
-## Create a notification-only account with only a verified email and explicit subscriptions
+## Register for a public volunteer event without a Ministry account
 <!-- guide: auto -->
 
-**Purpose:** Let people receive explicitly chosen notifications without forcing full ministry membership or unnecessary personal-data collection.
+**Purpose:** Let a public volunteer register for an individual event and receive its event-related communications.
 
 ### How to
 
@@ -536,7 +615,7 @@ Admin only: 1. Open Templates and create/edit a template, or open an event and s
 ### How to
 
 **Automatic workflow**
-1. Open an event and select 1962 Ordo.
+1. Open an event and select More Details to check the reference shown in the app. Select SSPX Ordo to open the original page.
 2. If the live source cannot be parsed, the app uses the last stored reference.
 3. Select the warning indicator to review the fallback and the item requiring verification.
 4. An authorized administrator confirms or corrects the event details.
@@ -577,7 +656,7 @@ No separate weekly emergency email is sent.
 
 **Super Admin only**
 1. Open Events.
-2. Select Create Repeating Event.
+2. Select Create Event, then Repeating Event.
 3. Choose the approved template and recurrence rule.
 4. Enter the scheduling dates and staffing requirements.
 5. Save the series.
@@ -595,19 +674,18 @@ No separate weekly emergency email is sent.
 3. Select My Ministries to see every active ministry membership for the account.
 4. Choose a ministry to open its shared workspace.
 
-## Import and maintain the public chapel Mass schedule through the approved MyLatinMass Mass Schedule feed
+## Run an approved manual import of the public Mass schedule
 <!-- guide: auto -->
+<!-- search: mass schedule feed public calendar manual import build deployment -->
 
 **Purpose:** Keep the Ministry App’s Mass calendar aligned with the approved public schedule and eliminate duplicate manual entry while preserving local corrections.
 
 ### How to
 
-**Automatic workflow**
-1. The approved Mass Schedule feed is configured for the Ministry App.
-2. During build/deployment, or when `npm run sync:mass-schedule` is run, the synchronizer imports the public schedule.
-3. It creates or updates normal Ministry App Mass events and the system-managed Low Mass/High Mass templates.
-4. It connects the configured Sacristans, Altar Servers, and Ushers ministries.
-5. Administrators review exceptions in Events.
+**Technical administrator workflow**
+1. Confirm with the chapel that a bulk import is wanted. App builds no longer run the import.
+2. In the Ministry app's working directory, run npm run sync:mass-schedule with the approved database and public feed configuration.
+3. Review the import result and check the affected events in Events. The importer can create or refresh Low Mass and High Mass events with the configured Sacristans, Altar Servers, and Ushers responsibilities.
 
 ## Import future Google Calendar events and compare calendars during transition
 <!-- guide: auto -->
@@ -811,7 +889,7 @@ Parent/guardian: 1. Open the profile switcher.
 
 **Authorized users on Mass-template events**
 1. Open the event details and select More Details.
-2. Under Mass being celebrated, keep the event date or search the 1962 Ordo list by feast name or date.
+2. Under Mass being celebrated, keep the event date or search the SSPX Ordo list by feast name or date.
 3. If another date is selected, choose External Solemnity, Transferred celebration, Votive Mass, or Other approved reason.
 4. Add an approval note when useful.
 5. Review the Mass option, class, vestment color, commemorations, and Ordo instructions from the selected proper.
@@ -1048,17 +1126,17 @@ Admin only: 1. Open Templates and create or edit a template.
 4. Open the desired ministry card.
 5. Super Admins may use Add Ministry; regular members will not see that control.
 
-## Manage APR requirements, document packets, screening types, renewals, and hard assignment eligibility without exposing private reasons
+## Review a member’s serving eligibility
 <!-- guide: auto -->
 
-**Purpose:** Enforce role-specific screening eligibility without exposing or storing sensitive evidence and private reasons in ordinary ministry workflows.
+**Purpose:** Review the serving status the Ministry App actually uses when selecting people for roles.
 
 ### How to
 
-No official APR documents are stored in the Ministry App.
-1. An authorized administrator records only the permitted reminder date or simple verification status.
-2. The app sends the configured renewal reminder when due.
-3. Official documents, screening files, and private compliance reasons remain in the chapel's approved external system.
+**Admin only**
+1. Open the ministry and select Members.
+2. Open the member’s record and review their serving eligibility, verification status, and assigned level.
+3. Keep APR documents and screening renewals in the chapel’s approved compliance process.
 
 ## Open a detailed event view from calendars and lists
 <!-- guide: auto -->
@@ -1070,7 +1148,7 @@ No official APR documents are stored in the Ministry App.
 1. Open Calendar or Events.
 2. Select an event card or calendar entry.
 3. Review the feast/class/vestments header, event name, date, time, location, and active responsibilities.
-4. Select More Details for the slide-in day information or 1962 Ordo for the source.
+4. Select More Details for the slide-in day information or SSPX Ordo for the dated source.
 5. Close the panel or return to the schedule when finished.
 
 ## Persist real ministry data in the existing database
@@ -1250,18 +1328,16 @@ Operational setup:
 4. Review the generated current or upcoming schedule.
 5. Save the PDF or send it to the printer.
 
-## Provide private, revocable Google/Apple personal calendar subscriptions
+## Use the public chapel calendar alongside the Ministry schedule
 <!-- guide: auto -->
 
-**Purpose:** Place a person’s permitted schedule in their preferred calendar while allowing access to be withdrawn when needed.
+**Purpose:** Find the public chapel schedule and the separate schedule assigned to your profile.
 
 ### How to
 
-1. Open the public Events calendar.
-2. Select Add or Subscribe to Calendar.
-3. Choose Google Calendar or Apple Calendar.
-4. Follow the calendar provider’s confirmation prompt.
-5. Remove the subscription later from the same calendar provider if access is no longer needed.
+1. Open Calendar in the Ministry App for chapel events and ministry assignments.
+2. Select My Events to see your own assignments or those for your visible family profiles.
+3. Use Download PDF for a copy of that view. The public chapel calendar is available separately on MyLatinMass.com.
 
 ## Provide reliable email delivery with visible delivery status, retries, and fallback handling
 <!-- guide: auto -->
@@ -1591,17 +1667,18 @@ No member action is required.
 5. Correct the ministry or level mismatch.
 6. Save again after all highlighted errors are resolved.
 
-## Show the 1962 Ordo reference for an event date
+## Open the SSPX Ordo, Mass texts, and fasting or abstinence information
 <!-- guide: auto -->
+<!-- search: 1962 ordo liturgical calendar feast color colour vestments mass texts readings fasting fast abstinence fish -->
 
 **Purpose:** Give sacristans, servers, clergy, and other authorized users the liturgical context needed to prepare correctly for a specific date.
 
 ### How to
 
-1. Open an event from Calendar or Events.
-2. Review the feast of the day, liturgical class, and vestment color at the top.
-3. Select More Details to open the slide-in day information.
-4. Select 1962 Ordo to open the referenced source.
+1. Open an event from Calendar or Events. While creating an event, the preview at the top follows the From date.
+2. Review the feast, liturgical class, and vestment color. The creation preview also shows a labeled fish marker when the SSPX Ordo supplies fasting or abstinence information.
+3. On Event Details, select More Details for rubrics and the Ordo reference. A saved Mass override uses the selected reference date.
+4. Select SSPX Ordo to open the exact date and read the Mass texts and the day's reference information.
 
 ## Support Auto Suggest, event-level approval, and Leave Open
 <!-- guide: auto -->
@@ -1749,19 +1826,17 @@ Admin only: 1. Open the event.
 5. Enable approval or keep the position privately assigned.
 6. Save and verify that only eligible people can be selected.
 
-## Track Archconfraternity of St. Stephen level history
+## Record a current serving level for an altar server
 <!-- guide: auto -->
 
-**Purpose:** Preserve dated formation and advancement history so leaders can understand a server’s current level and progression over time.
+**Purpose:** Keep an altar server’s current serving level up to date for assignment eligibility.
 
 ### How to
 
-1. Open the applicable ministry and select Members.
+1. Open Altar Servers and select Members.
 2. Choose the member.
-3. Open the ministry level or advancement history.
-4. Select the Archconfraternity of St. Stephen level achieved.
-5. Enter the date the member achieved that level.
-6. Save and confirm that the dated level appears in the member’s history.
+3. Under the member’s ministry membership, choose the current serving level used by that ministry.
+4. Save and confirm the level appears on the member’s record.
 
 ## Track completed service, recent workload, and six-month position history
 <!-- guide: auto -->
@@ -2637,17 +2712,17 @@ Admin only: 1. Open the recurring event and choose Edit.
 3. Select This and future events when the approved pattern changes from this date forward.
 4. Review the preview before applying the effective-dated change.
 
-## Understand why editing a template does not rewrite existing events
+## Review future event changes before updating a template
 <!-- guide: auto -->
 
-**Purpose:** Keep already-created schedules stable while allowing the reusable design to improve for future events.
+**Purpose:** Understand which scheduled events and assignments may change when you save a reusable template.
 
 ### How to
 
 Admin only: 1. Open Templates and edit the reusable template.
-2. Existing events retain the responsibility snapshot copied when they were created.
-3. New events created from the updated template receive the new design.
-4. Edit a specific existing event separately when it also needs the change.
+2. Review the impact preview if you remove a staffed position or change its assignment mode.
+3. Confirm the affected assignments only if those cancellations are intended, then save.
+4. Review the future events linked to that template. For a change to just one event, edit that event directly.
 
 ## Cancel an event without deleting its history
 <!-- guide: auto -->
@@ -2811,3 +2886,150 @@ Admin only: 1. Open the event or assignment that displays a conflict.
 5. Choose one of the 16 square Calendar color swatches. The circle beside the child's name previews your choice.
 <!-- guide-step: {"mode":"target","target":"profile-child-calendar-color","event":"change"} -->
 6. Select Save. The color appears on that child's event dots. A linked guardian may choose a different color in their own household view.
+
+## Create a template while filling out an event
+<!-- guide: auto -->
+<!-- search: plus button add template new event template missing template schola sung mass -->
+
+**Purpose:** Create a reusable template without losing the event details already entered.
+
+### How to
+
+**Admin only**
+1. In Create Event, scroll to Event template.
+2. Select the plus button beside the template dropdown.
+3. Enter the template name and set up ministries, responsibilities, or attendance as needed.
+4. Select Create template. The template editor closes and the new template is selected in the event form.
+5. Review the event and choose whether to include the template’s positions.
+
+## Pin or unpin an event
+<!-- guide: auto -->
+<!-- search: star favorite pinned events saved event bookmark -->
+
+**Purpose:** Keep frequently referenced events in one personal list.
+
+### How to
+
+1. Open Events and locate the event under All Events or My Events.
+2. Select the star on the event row to pin it.
+3. Select Pinned Events to see your saved list. Select the star again to remove the pin.
+
+## Read, filter, and mark Ministry messages as read
+<!-- guide: auto -->
+<!-- search: inbox unread messages view all mark all read message alerts notices -->
+
+**Purpose:** Find new messages and keep your unread list manageable.
+
+### How to
+
+1. Open Messages. You can also select Unread Messages from Home.
+2. Select Unread to filter unread messages, or View All to browse the full inbox.
+3. Open a message to read it. Use Mark All Read to clear the unread state on the inbox.
+
+## Send a message to all participants of an event
+<!-- guide: auto -->
+<!-- search: message all event participants event roster email alert direct message send announcement -->
+
+**Purpose:** Send a timely update to the people participating in a specific event.
+
+### How to
+
+**Admin only**
+1. Open an event owned by a ministry you administer.
+2. Select Message beside the event name on desktop or near the bottom of Event Details on mobile.
+3. Choose Email for a detailed message with a subject, or Alert for a short message.
+4. Review your text and select Send to participants.
+
+## Send a message to a member, ministry, or group
+<!-- guide: auto -->
+<!-- search: compose new message send email alert announcement selected members selected groups ministry broadcast -->
+
+**Purpose:** Deliver an announcement or direct message to the intended audience.
+
+### How to
+
+**Admin only**
+1. Open Messages and select New Message.
+2. Under Send to, choose the audience. Select the specific ministries, members, or groups if prompted.
+3. Choose the message type, write the message, and include a subject for email.
+4. Confirm the audience and select Send.
+
+## Test notifications with one account
+<!-- guide: auto -->
+<!-- search: test mode testing profile danger zone notification settings send only to me email telegram push sms test -->
+
+**Purpose:** Test notification delivery from production with a single approved testing profile.
+
+### How to
+
+**Super Admin only**
+1. Open Chapel Settings.
+2. In Danger Zone, find Notification Settings and set Test Mode to On.
+3. Choose a Testing profile and select Save Notification Settings.
+4. Check that the active Test Mode banner appears. Send or trigger the notification you want to test, then check the selected profile’s enabled channels.
+5. When finished, set Test Mode to Off and select Save Notification Settings to restore normal delivery for new notifications.
+
+## Read the weekly admin staffing alerts
+<!-- guide: auto -->
+<!-- search: daily admin alerts ministry update pending requests shortages unfilled positions substitute request staffing email -->
+
+**Purpose:** See which events need staffing or substitute follow-up.
+
+### How to
+
+**Admin only**
+1. Open the Monday Ministry summary and find the staffing section. The same message also includes your own or your household’s events for the week when applicable.
+2. Review pending substitute requests and unfilled required positions for upcoming events through Sunday. The alert count includes each request and each individual vacancy.
+3. Open the Ministry App and select Pending Requests from Home to find the affected event.
+4. Review the relevant responsibility or substitute request and make the needed change.
+
+## Remove a pending child profile
+<!-- guide: auto -->
+<!-- search: delete test child remove child cancel pending app approval guardian family profile -->
+
+**Purpose:** Cancel a pending child-profile application that was created in error or is no longer needed.
+
+### How to
+
+1. Open My Profile and select Profiles.
+2. Find the child marked Pending app approval and select Remove child.
+3. Check the child’s name in the confirmation and confirm the removal. For an active profile, use the applicable guardian, membership, or independence workflow.
+
+## Add, edit, or archive chapel rooms
+<!-- guide: auto -->
+<!-- search: add room chapel rooms archive room deactivate room room reservation chapel settings -->
+
+**Purpose:** Keep the room choices in the event form current while retaining past reservations.
+
+### How to
+
+**Super Admin only**
+1. Open Chapel Settings and find Chapel rooms.
+2. Select Add room or open the room to edit. Enter the room name, description, display order, and status.
+3. Select Update room. Use the archive action when a room should disappear from future reservations.
+4. In Create Event, select Our Chapel and check the relevant active room.
+
+## Find a guide or contact Support
+<!-- guide: auto -->
+<!-- search: help documentation instructions guide me search contact support report bug screenshot -->
+
+**Purpose:** Find instructions for a task or send a reproducible problem report.
+
+### How to
+
+1. Open Support and select Documentation.
+2. Search using a button name or task such as Add Event, RSVP, or Test Mode. You can search while typing.
+3. Open the result to read the steps. Select Guide Me for help finding the controls.
+4. If you still need help, select Contact Support and describe what you clicked, what you expected, and what appeared. Include the affected event or date if relevant.
+
+## Review or mark Home alerts as read
+<!-- guide: auto -->
+<!-- search: home pending alerts mark all read reminders dismiss old alert home dashboard -->
+
+**Purpose:** Find recent reminders and clear items you have already reviewed.
+
+### How to
+
+1. Open Home and select Pending Alerts to jump to Alerts & Reminders.
+2. Open an alert that needs attention and review the event or assignment it refers to.
+3. Use Mark all read in Alerts & Reminders after reviewing the list. To review direct messages separately, open Messages.

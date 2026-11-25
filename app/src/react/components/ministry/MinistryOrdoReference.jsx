@@ -14,6 +14,7 @@ import { MINISTRY_SESSION_KEY } from "./MinistryLogin"
 import useAccessibleDialog from "../../hooks/useAccessibleDialog"
 
 const CHAPEL_TIME_ZONE = "America/New_York"
+const ORDO_HOMEPAGE = "https://ordo.fsspx.org/en"
 
 const colorClasses = {
   Black: "bg-gray-950",
@@ -54,6 +55,7 @@ const requestHeaders = () => ({
 
 const MinistryOrdoReference = ({
   compact = false,
+  summaryOnly = false,
   eventId = "",
   startTime,
 }) => {
@@ -269,12 +271,52 @@ const MinistryOrdoReference = ({
 
   const { day } = reference
   const eventReference = reference.event
-  const isOrdoSource = day.dataSource === "1962ordo"
-  const sourceLabel = isOrdoSource
-    ? "1962 Ordo"
-    : day.dataSource === "divinum_officium"
-      ? "Fallback source"
-      : ""
+  const ordoDate = day.liturgicalDate || eventDate
+  const ordoLink = (
+    <a
+      href={`${ORDO_HOMEPAGE}/day/${encodeURIComponent(ordoDate)}`}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-[#6f4f34] hover:border-[#C1A387]"
+    >
+      SSPX Ordo
+      <ArrowTopRightOnSquareIcon className="size-4" />
+    </a>
+  )
+  if (summaryOnly) {
+    const observance = day.fastingObservance
+    const completeFast = observance === "Fast and complete abstinence"
+    const splitMarker = observance === "Fast and partial abstinence" || observance === "Fast"
+    return (
+      <section aria-label="Liturgical day" className="flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 pb-4">
+        <div>
+          <h3 className="century-font text-2xl text-gray-900">{day.celebration}</h3>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-gray-700">
+            {day.classLabel && <span className="rounded-full bg-gray-100 px-3 py-1">{day.classLabel}</span>}
+            {day.vestmentColor && (
+              <span className="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1">
+                <span aria-hidden="true" className={`size-3 rounded-full ${colorClasses[day.vestmentColor] || "bg-gray-400"}`} />
+                {day.vestmentColor} vestments
+              </span>
+            )}
+            {observance && (
+              <span className="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1">
+                <svg aria-hidden="true" viewBox="-1 0 32 20" className="h-4 w-6">
+                  <path fill={completeFast ? "#79191f" : "#939393"} fillRule="evenodd"
+                    d="M29.36 8.71C28.77 7.97 28.1 7.3 27.38 6.67C25.24 4.81 22.78 3.76 19.94 3.51L19.25 3.47L18.47 2.72C17.89 2.24 17.27 1.84 16.61 1.5L16.61 18.02C17.6 17.54 18.5 16.82 19.19 15.89C22.94 15.75 26.67 14.28 29.34 11.65C29.39 11.57 29.42 11.51 29.41 11.42C29.41 11.37 29.36 11.3 29.29 11.27L27.8 10.7L29.86 9.82C30 9.74 30.02 9.55 29.93 9.42L29.36 8.71C29.36 8.71 29.36 8.71 29.36 8.71Z M25.96 8.34C25.88 8.72 25.55 8.95 25.2 8.96C24.84 8.96 24.51 8.75 24.41 8.39C24.32 8.07 24.44 7.75 24.69 7.55C24.95 7.35 25.3 7.34 25.59 7.51C25.85 7.67 26.03 8 25.96 8.33C25.96 8.33 25.96 8.34 25.96 8.34Z" />
+                  <path fill={completeFast || splitMarker ? "#79191f" : "#939393"}
+                    d="M16.61 1.5C16.14 1.26 15.65 1.05 15.15 0.89C14.24 0.59 13.1 0.4 12.17 0.61C12 0.65 11.84 0.71 11.7 0.81C11.36 1.07 11.58 1.46 11.84 1.79C12.44 2.54 12.71 3.55 12.71 4.52C10.64 5.36 8.9 6.71 7.29 8.27L6.62 7.34C5.29 5.59 3.2 4.22 0.98 4.01C0.59 3.97 0.01 3.91 -0.13 4.16C-0.17 4.26 -0.17 4.38 -0.12 4.49C0.26 5.12 0.52 5.78 0.79 6.47L1.31 7.82C1.61 8.52 1.98 9.16 2.58 9.69C1.8 10.37 1.24 11.33 0.85 12.29L0.4 13.41L-0.22 14.86C-0.31 15.06 -0.11 15.25 0.07 15.26C0.32 15.29 0.56 15.28 0.81 15.26C3.04 15.05 5.16 13.81 6.62 12.14L7.3 11.3L8.01 11.89C8.54 12.38 9.07 12.82 9.65 13.25C11.09 14.33 12.65 15.18 14.45 15.56L13.96 16.19L13 17.36C12.77 17.63 12.49 18.11 12.67 18.39C12.77 18.55 12.95 18.59 13.13 18.63C14.36 18.77 15.54 18.53 16.61 18.02C16.61 18.02 16.61 1.5 16.61 1.5Z" />
+                </svg>
+                {observance}
+              </span>
+            )}
+          </div>
+          {day.verificationRequired && <p className="mt-2 text-sm text-amber-800">Verify this date with the Ordo.</p>}
+        </div>
+        {ordoLink}
+      </section>
+    )
+  }
   const verificationNotice = day.verificationRequired ? (
     <>
       <button
@@ -522,17 +564,7 @@ const MinistryOrdoReference = ({
           </div>
           <div className="flex items-center gap-2">
             {verificationNotice}
-            {day.sourceUrl && (
-              <a
-                href={day.sourceUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-[#6f4f34] hover:border-[#C1A387]"
-              >
-                {isOrdoSource ? "1962 Ordo" : "Ordo source"}
-                <ArrowTopRightOnSquareIcon className="size-4" />
-              </a>
-            )}
+            {ordoLink}
             <button
               type="button"
               onClick={() => setShowDayDetails(true)}
@@ -693,17 +725,7 @@ const MinistryOrdoReference = ({
         </div>
         <div className="flex items-center gap-2">
           {verificationNotice}
-          {day.sourceUrl && (
-            <a
-              href={day.sourceUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-[#6f4f34] hover:border-[#C1A387]"
-            >
-              {sourceLabel}
-              <ArrowTopRightOnSquareIcon className="size-4" />
-            </a>
-          )}
+          {ordoLink}
         </div>
       </div>
 

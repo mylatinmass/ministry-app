@@ -56,8 +56,8 @@ configuration names only; secrets and production data must never be committed.
 | CockroachDB | Current | System of record for accounts, ministries, memberships, profiles, templates, events, responsibilities, assignments, availability, audit history, cached Ordo references, and future delivery records. Private operational data remains here and is accessed only through server-side application APIs. | `COCKROACHDB_CONNECTION_STRING`; reviewed SQL migrations in `app/migrations/`; least-privilege production credentials; backup and restore ownership still required. |
 | Astro application API | Current | Stable boundary used by the standalone web client. Other websites must use an approved API or feed rather than read application tables directly. Private endpoints require Ministry authentication and return only role-authorized data. | Routes under `https://ministry.mylatinmass.com/api/`; request/response contract must be documented before third-party use. |
 | Vercel | Current deployment target | Hosts the standalone Astro Ministry application at `ministry.mylatinmass.com`, including its API routes, static assets, PWA manifest, and Ministry-only service worker. The project is connected to `mylatinmass/ministry-app`; pushes to `main` create production deployments. A Netlify scheduled function triggers the private Vercel deploy hook daily at 04:50 UTC, ten minutes before the public site's 05:00 UTC rebuild. | Chapel-owned `ministry-app` Vercel project; production branch `main`; root directory `app`; subdomain DNS; environment variables; monitoring; rollback ownership; private `VERCEL_DEPLOY_HOOK_URL` stored only in Netlify environment variables. |
-| 1962ordo.today | Current read-only reference | Supplies public liturgical reference data. The application normalizes and caches it; the source never receives ministry rosters, assignments, contact data, or private notes. | Outbound HTTPS; cache/refresh behavior in the Ordo service; source-failure monitoring and terms review remain required. |
-| MyLatinMass/public websites | Current schedule input and link boundary | Each Ministry App build reads the same public Mass Schedule and liturgical-days feeds used by MyLatinMass and idempotently creates or refreshes Mass events in CockroachDB. The liturgical-day name becomes the event name while Low Mass or High Mass remains the scheduling template. Only rows whose descriptions contain Mass are imported; Confession, Rosary, Holy Hour, Adoration, Benediction, and similar rows remain public schedule context and do not become Ministry App events. The public website still must not receive volunteer names, staffing details, private notes, eligibility, family data, or private events. | `MASS_SCHEDULE_URL`, `MASS_SCHEDULE_LITURGICAL_DAYS_URL`, location/time-zone settings, ministry slug mappings, `COCKROACHDB_CONNECTION_STRING`, and migration `20260806_04_add_mass_schedule_sync.sql`. |
+| SSPX Ordo (ordo.fsspx.org) | Current read-only reference | Supplies public liturgical reference data. The application normalizes and caches it; the source never receives ministry rosters, assignments, contact data, or private notes. | Outbound HTTPS; cache/refresh behavior in the Ordo service; source-failure monitoring and terms review remain required. |
+| MyLatinMass/public websites | Optional manual schedule import and link boundary | The manual import reads the public Mass Schedule and liturgical-days feeds and idempotently creates or refreshes Mass events in CockroachDB. Builds do not run the import. The liturgical-day name becomes the event name and Low Mass or High Mass remains the scheduling template. The public website still must not receive volunteer names, staffing details, private notes, eligibility, family data, or private events. | `MASS_SCHEDULE_URL`, `MASS_SCHEDULE_LITURGICAL_DAYS_URL`, location/time-zone settings, ministry slug mappings, `MINISTRY_DATABASE_URL`, and migration `20260806_04_add_mass_schedule_sync.sql`. |
 | Klaviyo | Future preferred communications platform | Intended provider for permission-based email and SMS, including assignment messages, reminders, schedule changes, cancellations, volunteer opportunities, and chapel subscriptions. CockroachDB remains the operational source of truth; Klaviyo receives only the minimum approved profile, consent, subscription, and event data needed for delivery. | Klaviyo account ownership; private API key/credential; list and segment design; event schema; consent and unsubscribe mapping; sender/domain authentication; webhook handling; retry, deduplication, delivery-status, retention, and deletion rules. |
 | SMTP/Nodemailer | Transitional, limited | Existing account invitation, one-time member sign-in, managed-profile review, authenticated Support contact, and grouped Ministry alert digests can send transactional email. Alert records remain attached to the affected profile while a managed child's digest is delivered to the parent/contact. Sign-in links are single-use, expire after 15 minutes, are unavailable to Owner/Super Admin accounts, and create restricted sessions that cannot change account or member access. The Support recipient list stays server-side and may contain the webmaster and other designated people; it falls back to `GMAIL_USER` until a dedicated list is configured. This should be replaced or deliberately retained when Klaviyo is integrated. | `GMAIL_USER`, `GMAIL_PASS`, comma-separated `SUPPORT_RECIPIENTS`, `SITE_URL`, `MINISTRY_LOGIN_LINK_TTL_MINUTES`, optional `MINISTRY_NOTIFICATION_DIGEST_MINUTES` (default 5), delivery-safety controls, and an approved migration plan to Klaviyo. |
 | Browser push | Designed, not operationally accepted | The codebase contains a subscription and reminder-delivery foundation, but notifications are still considered Pending until production configuration, scheduling, consent, delivery testing, and stakeholder acceptance are complete. | VAPID keys, `VAPID_SUBJECT`, scheduler identity, delivery monitoring, retry policy, and user-facing consent. |
@@ -83,12 +83,13 @@ configuration names only; secrets and production data must never be committed.
   documented setup steps, and secrets stored only in the approved hosting secret
   manager.
 
-## Automatic Mass Schedule base calendar
+## Manual event scheduling and Mass Schedule import
 
-`npm run build` runs the Mass Schedule synchronizer before Astro builds. When the
-database connection is available, the synchronizer reads `MASS_SCHEDULE_URL`,
+Builds do not create or refresh Ministry events. Administrators can create
+events in the app or clone an event into a fixed number of weekly copies.
+The optional command `npm run sync:mass-schedule` reads `MASS_SCHEDULE_URL`,
 keeps only Mass rows, and stores them as published Ministry App events. The source
-date and local time form a stable import key, so another build refreshes the same
+date and local time form a stable import key, so a later import refreshes the same
 event instead of creating a duplicate. If a source time changes and it is the only
 unmatched Mass of that type on the date, the importer remaps the existing event.
 
@@ -108,23 +109,20 @@ manually.
 
 Imported source values refresh only fields that still equal the last imported
 value. If an administrator has changed an event title, time, or location, a later
-build preserves that local override while retaining the newest source value for
+manual import preserves that local override while retaining the newest source value for
 comparison. Existing assignments are never deleted automatically. A source change
 from Low to High Mass (or the reverse) replaces the generated responsibilities
 only when none of those responsibilities has active assignments; otherwise the
 change is reported for manual review.
 
-Apply migrations before enabling the production build sync:
+Apply migrations before running a manual import:
 
 ```sh
 npm run migrate
 npm run sync:mass-schedule
 ```
 
-Builds continue with the last successfully imported schedule when the public feed
-is temporarily unavailable. Set `MASS_SCHEDULE_SYNC_REQUIRED=true` only if a
-deployment should fail instead. Running `npm run sync:mass-schedule` manually is
-always strict and returns an error when the feed or database is unavailable.
+The manual import returns an error when the feed or database is unavailable.
 
 ## Ministry authentication and audit controls
 

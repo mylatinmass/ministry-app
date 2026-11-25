@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import ordo from "./sspx-ordo.mjs"
 import type { PoolClient } from "pg"
 import { getPool } from "../database"
 import { json } from "../request"
@@ -8,13 +9,10 @@ import {
   writeSchedulingAudit,
 } from "./authorization"
 
-const ORDO_INDEX_URL = "https://1962ordo.today/get-liturgical-days/"
-const ORDO_HOSTNAME = "1962ordo.today"
 const DIVINUM_FALLBACK_API = "https://www.missalemeum.com/en/api/v5/proper"
 const DIVINUM_FALLBACK_PAGE = "https://www.missalemeum.com/en"
 const DEFAULT_REFRESH_HOURS = 24
 const CHAPEL_TIME_ZONE = "America/New_York"
-const VESTMENT_COLORS = ["White", "Red", "Green", "Violet", "Rose", "Black"]
 const DIVINUM_COLORS: Record<string, string> = {
   b: "Black",
   g: "Green",
@@ -43,6 +41,7 @@ type ParsedOrdoDay = {
   vestmentColor: string | null
   commemorations: string[]
   generalInformation: string[]
+  fastingObservance?: string
   massOptions: MassOption[]
   breviary: Record<string, string>
   reminders: string[]
@@ -54,264 +53,6 @@ type ParsedOrdoDay = {
 
 const cleanText = (value: unknown, maximum = 5000) =>
   typeof value === "string" ? value.trim().slice(0, maximum) : ""
-
-const decodeHtml = (value: string) =>
-  value
-    .replace(/&nbsp;|&#160;/gi, " ")
-    .replace(/&#x([0-9a-f]+);/gi, (_, code) =>
-      String.fromCodePoint(Number.parseInt(code, 16)),
-    )
-    .replace(/&#(\d+);/g, (_, code) =>
-      String.fromCodePoint(Number.parseInt(code, 10)),
-    )
-    .replace(/&quot;/gi, '"')
-    .replace(/&#0?39;|&apos;/gi, "'")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&amp;/gi, "&")
-
-const htmlToText = (value: string) =>
-  decodeHtml(
-    value
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/p>/gi, "\n")
-      .replace(/<\/li>/gi, "\n")
-      .replace(/<[^>]+>/g, " "),
-  )
-    .split("\n")
-    .map((line) => line.replace(/\s+/g, " ").trim())
-    .filter(Boolean)
-    .join("\n")
-
-const extractTagText = (html: string, tag: string) => {
-  const match = html.match(
-    new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"),
-  )
-  return match ? htmlToText(match[1]) : ""
-}
-
-const extractParagraphs = (html: string) => {
-  const paragraphs = [
-    ...html.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi),
-  ].map((match) => htmlToText(match[1]))
-  return paragraphs.length
-    ? paragraphs.filter(Boolean)
-    : htmlToText(html)
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean)
-}
-
-const normalizeClass = (value: string) => {
-  const match = value.match(/\b(IV|III|II|I)\s+class\b/i)
-  return match ? `${match[1].toUpperCase()} Class` : null
-}
-
-const findVestmentColor = (value: string) => {
-  const match = value.match(
-    new RegExp(`\\b(${VESTMENT_COLORS.join("|")})\\b`, "i"),
-  )
-  if (!match) return null
-  return `${match[1][0].toUpperCase()}${match[1].slice(1).toLowerCase()}`
-}
-
-const extractInstructionPart = (value: string, pattern: RegExp) =>
-  value
-    .split(/[;,]\s*/)
-    .map((part) => part.trim())
-    .find((part) => pattern.test(part)) || null
-
-const parseMassOptions = (
-  paragraphs: string[],
-  primaryColor: string | null,
-) => {
-  const optionTexts: string[] = []
-  let current: string[] = []
-
-  for (const paragraph of paragraphs) {
-    const pieces = paragraph.split(/\n\s*OR\s*\n/i)
-    pieces.forEach((piece, index) => {
-      if ((index > 0 || /^OR$/i.test(piece.trim())) && current.length) {
-        optionTexts.push(current.join(" ").trim())
-        current = []
-      }
-      if (!/^OR$/i.test(piece.trim()) && piece.trim()) current.push(piece.trim())
-    })
-    if (/^OR$/i.test(paragraph.trim()) && current.length) {
-      optionTexts.push(current.join(" ").trim())
-      current = []
-    }
-  }
-  if (current.length) optionTexts.push(current.join(" ").trim())
-
-  const validOptions = optionTexts.filter(Boolean)
-  return validOptions.map((instructions, index): MassOption => {
-    const firstPart = instructions.split(/[;,]/)[0].trim()
-    const explicitColorMatch = instructions.match(
-      new RegExp(`\\((${VESTMENT_COLORS.join("|")})\\)`, "i"),
-    )
-    const explicitColor = explicitColorMatch
-      ? findVestmentColor(explicitColorMatch[1])
-      : null
-    return {
-      id: `mass-${index + 1}`,
-      label: firstPart || `Mass option ${index + 1}`,
-      instructions,
-      vestmentColor:
-        explicitColor || (validOptions.length === 1 ? primaryColor : null),
-      gloria: /\bno\s+Gloria\b/i.test(instructions)
-        ? false
-        : /\bGloria\b/i.test(instructions)
-          ? true
-          : null,
-      credo: /\bno\s+Credo\b/i.test(instructions)
-        ? false
-        : /\bCredo\b/i.test(instructions)
-          ? true
-          : null,
-      preface: extractInstructionPart(instructions, /\bpreface\b/i),
-      commemoration: extractInstructionPart(
-        instructions,
-        /\bcommemoration\b/i,
-      ),
-    }
-  })
-}
-
-const parseBreviary = (paragraphs: string[]) => {
-  const breviary: Record<string, string> = {}
-  for (const paragraph of paragraphs) {
-    const match = paragraph.match(/^([^:]{2,40}):\s*([\s\S]+)$/)
-    if (match) breviary[match[1].trim()] = match[2].trim()
-  }
-  return breviary
-}
-
-export const parseOrdoDayHtml = (
-  html: string,
-  sourceUrl: string,
-): ParsedOrdoDay => {
-  const sectionMatch = html.match(
-    /<section[^>]*data-liturgical-day=["'](\d{8})["'][^>]*>([\s\S]*?)<\/section>/i,
-  )
-  if (!sectionMatch) {
-    throw Object.assign(new Error("The 1962 Ordo page format was not recognized"), {
-      status: 502,
-    })
-  }
-
-  const compactDate = sectionMatch[1]
-  const liturgicalDate = `${compactDate.slice(0, 4)}-${compactDate.slice(
-    4,
-    6,
-  )}-${compactDate.slice(6, 8)}`
-  const contentBlocks = [
-    ...sectionMatch[2].matchAll(
-      /<div[^>]*class=["'][^"']*\bentry-content\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/gi,
-    ),
-  ].map((match) => match[1])
-
-  let celebration = ""
-  let classLabel: string | null = null
-  let vestmentColor: string | null = null
-  let commemorations: string[] = []
-  let generalInformation: string[] = []
-  let massParagraphs: string[] = []
-  let breviary: Record<string, string> = {}
-  let reminders: string[] = []
-
-  for (const block of contentBlocks) {
-    const heading = extractTagText(block, "h2")
-    const paragraphs = extractParagraphs(block)
-    const normalizedHeading = heading.replace(/:$/, "").toLowerCase()
-
-    if (
-      heading &&
-      !["general info", "mass", "breviary", "reminder", "local info"].includes(
-        normalizedHeading,
-      )
-    ) {
-      celebration = heading
-      const lines = paragraphs.flatMap((paragraph) => paragraph.split("\n"))
-      classLabel =
-        lines.map(normalizeClass).find((value) => Boolean(value)) || null
-      vestmentColor =
-        lines.map(findVestmentColor).find((value) => Boolean(value)) || null
-      commemorations = lines.filter((line) => /commemorat/i.test(line))
-    } else if (normalizedHeading === "general info") {
-      generalInformation = paragraphs
-    } else if (normalizedHeading === "mass") {
-      massParagraphs = paragraphs
-    } else if (normalizedHeading === "breviary") {
-      breviary = parseBreviary(paragraphs)
-    } else if (normalizedHeading === "reminder") {
-      reminders = paragraphs
-    } else if (normalizedHeading === "local info") {
-      generalInformation = [...generalInformation, ...paragraphs]
-    }
-  }
-
-  if (!celebration) {
-    throw Object.assign(new Error("The 1962 Ordo celebration was not found"), {
-      status: 502,
-    })
-  }
-
-  const publishedMatch = html.match(/"datePublished":"([^"]+)"/)
-  const modifiedMatch = html.match(/"dateModified":"([^"]+)"/)
-  const normalized = {
-    liturgicalDate,
-    celebration,
-    classLabel,
-    vestmentColor,
-    commemorations,
-    generalInformation,
-    massOptions: parseMassOptions(massParagraphs, vestmentColor),
-    breviary,
-    reminders,
-    sourceUrl,
-    sourcePublishedAt: publishedMatch?.[1] || null,
-    sourceModifiedAt: modifiedMatch?.[1] || null,
-  }
-
-  return {
-    ...normalized,
-    sourceHash: createHash("sha256")
-      .update(JSON.stringify(normalized))
-      .digest("hex"),
-  }
-}
-
-const isSafeOrdoUrl = (value: string) => {
-  try {
-    const url = new URL(value)
-    return url.protocol === "https:" && url.hostname === ORDO_HOSTNAME
-  } catch {
-    return false
-  }
-}
-
-const fetchOrdo = async (url: string) => {
-  if (!isSafeOrdoUrl(url)) {
-    throw Object.assign(new Error("The 1962 Ordo source URL is invalid"), {
-      status: 502,
-    })
-  }
-  const response = await fetch(url, {
-    headers: {
-      Accept: "text/html,application/json",
-      "User-Agent": "MyLatinMass-Ministry-Ordo/1.0",
-    },
-    signal: AbortSignal.timeout(15_000),
-  })
-  if (!response.ok) {
-    throw Object.assign(
-      new Error(`The 1962 Ordo source returned ${response.status}`),
-      { status: 502 },
-    )
-  }
-  return response
-}
 
 const firstSectionText = (proper: any, id: string) => {
   const section = Array.isArray(proper?.sections)
@@ -456,47 +197,27 @@ const placeholderOrdoDay = (liturgicalDate: string) => ({
     "1962 Ordo and the Divinum Officium fallback are unavailable. The readings, Mass, and vestment color must be entered and verified before sacristy preparation.",
 })
 
-const discoverOrdoUrl = async (liturgicalDate: string) => {
-  const response = await fetchOrdo(ORDO_INDEX_URL)
-  const result = await response.json()
-  const compactDate = liturgicalDate.replaceAll("-", "")
-  const day = Array.isArray(result?.liturgicalDays)
-    ? result.liturgicalDays.find((item: any) => item?.date === compactDate)
-    : null
-  const sourceUrl = cleanText(day?.permalink, 1000)
-  if (!sourceUrl || !isSafeOrdoUrl(sourceUrl)) {
-    throw Object.assign(
-      new Error("No 1962 Ordo entry is available for this date"),
-      { status: 404 },
-    )
-  }
-  return sourceUrl
-}
-
+type OrdoCatalogDay = { date: string; name: string; permalink: string }
+const yearCache = new Map<string, { fetchedAt: number; days: OrdoCatalogDay[] }>()
 const loadOrdoCatalog = async (year: string, query: string) => {
-  const response = await fetchOrdo(ORDO_INDEX_URL)
-  const result = await response.json()
-  const normalizedQuery = query.toLowerCase()
-  return (Array.isArray(result?.liturgicalDays) ? result.liturgicalDays : [])
-    .filter((item: any) => /^\d{8}$/.test(String(item?.date || "")))
-    .filter((item: any) => !year || String(item.date).startsWith(year))
-    .filter(
-      (item: any) =>
-        !normalizedQuery ||
-        cleanText(item?.name, 250).toLowerCase().includes(normalizedQuery) ||
-        String(item.date).includes(normalizedQuery.replaceAll("-", "")),
-    )
-    .map((item: any) => ({
-      liturgicalDate: `${String(item.date).slice(0, 4)}-${String(item.date).slice(4, 6)}-${String(item.date).slice(6, 8)}`,
-      celebration: cleanText(item?.name, 250) || "Mass",
-      sourceUrl: isSafeOrdoUrl(cleanText(item?.permalink, 1000))
-        ? cleanText(item?.permalink, 1000)
-        : null,
+  let cached = yearCache.get(year)
+  if (!cached || Date.now() - cached.fetchedAt >= DEFAULT_REFRESH_HOURS * 3600000) {
+    try {
+      cached = { fetchedAt: Date.now(), days: await ordo.getYear(year) }
+      yearCache.set(year, cached)
+    } catch (error) {
+      if (!cached) throw error
+      console.warn("SSPX Ordo catalog unavailable; using cached year", year)
+    }
+  }
+  const search = query.toLowerCase()
+  return cached.days
+    .filter(day => !search || day.name.toLowerCase().includes(search) || day.date.includes(search.replaceAll("-", "")))
+    .map(day => ({
+      liturgicalDate: `${day.date.slice(0, 4)}-${day.date.slice(4, 6)}-${day.date.slice(6, 8)}`,
+      celebration: day.name,
+      sourceUrl: day.permalink,
     }))
-    .sort((first: any, second: any) =>
-      first.liturgicalDate.localeCompare(second.liturgicalDate),
-    )
-    .slice(0, 500)
 }
 
 const toDateKey = (value: unknown) => {
@@ -529,14 +250,15 @@ const rowToOrdoDay = (row: any) => ({
   commemorations: row.commemorations || [],
   generalInformation: row.general_information || [],
   massOptions: row.mass_options || [],
-  breviary: row.breviary || {},
+  breviary: Object.fromEntries(Object.entries(row.breviary || {}).filter(([key]) => key !== "_fastingObservance")),
+  fastingObservance: row.breviary?._fastingObservance || "",
   reminders: row.reminders || [],
   sourceUrl: row.source_url,
   sourcePublishedAt: row.source_published_at || null,
   sourceModifiedAt: row.source_modified_at || null,
   sourceHash: row.source_hash,
   fetchedAt: row.fetched_at,
-  dataSource: "1962ordo",
+  dataSource: String(row.source_url || "").startsWith("https://ordo.fsspx.org/") ? "sspx_ordo" : "1962ordo",
   verificationRequired: false,
   verificationMessage: null,
 })
@@ -592,7 +314,7 @@ const storeOrdoDay = async (
       JSON.stringify(parsed.commemorations),
       JSON.stringify(parsed.generalInformation),
       JSON.stringify(parsed.massOptions),
-      JSON.stringify(parsed.breviary),
+      JSON.stringify({ ...parsed.breviary, _fastingObservance: parsed.fastingObservance || "" }),
       JSON.stringify(parsed.reminders),
       parsed.sourceUrl,
       parsed.sourcePublishedAt,
@@ -619,6 +341,8 @@ const loadOrdoDay = async (
   )
   const isFresh =
     current &&
+    typeof current.breviary?._fastingObservance === "string" &&
+    String(current.source_url || "").startsWith("https://ordo.fsspx.org/") &&
     Date.now() - new Date(current.fetched_at).getTime() <
       refreshHours * 60 * 60 * 1000
   if (current && isFresh && !forceRefresh) {
@@ -626,20 +350,17 @@ const loadOrdoDay = async (
   }
 
   try {
-    const sourceUrl =
-      current?.source_url || (await discoverOrdoUrl(liturgicalDate))
-    const response = await fetchOrdo(sourceUrl)
-    const parsed = parseOrdoDayHtml(await response.text(), sourceUrl)
-    if (parsed.liturgicalDate !== liturgicalDate) {
-      throw Object.assign(
-        new Error("The 1962 Ordo returned a different liturgical date"),
-        { status: 502 },
-      )
+    const payload = await ordo.getCalendar(liturgicalDate.replaceAll("-", "/"), { rules: true })
+    const { fastingObservance, ...normalized } = ordo.toMinistryDay(payload, liturgicalDate)
+    const parsed: ParsedOrdoDay = {
+      ...normalized,
+      fastingObservance,
+      sourceHash: createHash("sha256").update(JSON.stringify(normalized)).digest("hex"),
     }
     return { ...(await storeOrdoDay(client, parsed)), stale: false }
   } catch (error) {
     if (current) return { ...rowToOrdoDay(current), stale: true }
-    console.warn("1962 Ordo unavailable; trying Divinum Officium fallback", error)
+    console.warn("SSPX Ordo unavailable; trying Divinum Officium fallback", error)
     try {
       return await loadDivinumFallback(liturgicalDate)
     } catch (fallbackError) {
@@ -879,33 +600,37 @@ const updateSelection = async (
   const selectedMassOptionId = hasMassSelection
     ? cleanText(body.selectedMassOptionId, 100) || null
     : current?.selected_mass_option_id || null
-  const selectedMassOption = hasMassSelection
-    ? selectedMassOptionId
-      ? day.massOptions.find(
-          (option: MassOption) => option.id === selectedMassOptionId,
-        )
-      : null
+  const requestedOption = hasMassSelection && selectedMassOptionId
+    ? day.massOptions.find((option: MassOption) => option.id === selectedMassOptionId)
+    : null
+  const keepLegacySelection = Boolean(
+    current && selectedMassOptionId && !requestedOption &&
+    selectedMassOptionId === current.selected_mass_option_id,
+  )
+  const changesSelection = hasMassSelection && !keepLegacySelection
+  const selectedMassOption = changesSelection
+    ? requestedOption
     : current?.selected_mass_option_snapshot || null
-  if (hasMassSelection && selectedMassOptionId && !selectedMassOption) {
+  if (changesSelection && selectedMassOptionId && !selectedMassOption) {
     throw Object.assign(
-      new Error("Select a Mass option listed by the 1962 Ordo"),
+      new Error("Select a Mass option listed by the SSPX Ordo"),
       { status: 400 },
     )
   }
   const sacristyNotes = hasSacristyNotes
     ? cleanText(body.sacristyNotes)
     : current?.sacristy_notes || ""
-  const sourceHashAtSelection = hasMassSelection
+  const sourceHashAtSelection = changesSelection
     ? selectedMassOption
       ? day.sourceHash
       : null
     : current?.source_hash_at_selection || null
-  const selectedBy = hasMassSelection
+  const selectedBy = changesSelection
     ? selectedMassOption
       ? context.user.id
       : null
     : current?.selected_by || null
-  const selectedAt = hasMassSelection
+  const selectedAt = changesSelection
     ? selectedMassOption
       ? new Date()
       : null

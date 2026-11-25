@@ -8,13 +8,7 @@ import {
 import documentationSource from "../../../content/ministry-documentation.md?raw"
 import { useMinistryGuide } from "./MinistryGuide"
 import { buildGuide } from "./ministryGuideDefinitions"
-
-const normalizeSearchText = (value = "") =>
-  value
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim()
+import { indexDocumentation, searchDocumentation } from "./ministryDocumentationSearch"
 
 const parseDocumentation = (source) => {
   const topics = []
@@ -30,6 +24,7 @@ const parseDocumentation = (source) => {
         title: line.slice(3).trim(),
         purpose: "",
         note: "",
+        keywords: "",
         steps: [],
         guideMode: "auto",
         guideOverrides: {},
@@ -38,6 +33,10 @@ const parseDocumentation = (source) => {
       continue
     }
     if (!current) continue
+    if (line.startsWith("<!-- search:")) {
+      current.keywords = line.slice("<!-- search:".length).replace(/-->$/, "").trim()
+      continue
+    }
 
     if (line === "<!-- guide: auto -->") {
       current.guideMode = "auto"
@@ -98,39 +97,13 @@ const parseDocumentation = (source) => {
 }
 
 const documentationTopics = parseDocumentation(documentationSource)
+const documentationIndex = indexDocumentation(documentationTopics)
 
 const MinistryDocumentation = () => {
   const { startGuide } = useMinistryGuide()
   const [query, setQuery] = React.useState("")
   const [openTitle, setOpenTitle] = React.useState("")
-  const normalizedQuery = normalizeSearchText(query)
-
-  const visibleTopics = React.useMemo(() => {
-    if (!normalizedQuery) return documentationTopics
-
-    return documentationTopics
-      .map((topic) => {
-        const title = normalizeSearchText(topic.title)
-        const purpose = normalizeSearchText(topic.purpose)
-        const rank = title.startsWith(normalizedQuery)
-          ? 0
-          : title.includes(normalizedQuery)
-            ? 1
-            : purpose.includes(normalizedQuery)
-              ? 2
-              : null
-        return { topic, rank }
-      })
-      .filter(({ rank }) => rank !== null)
-      .sort(
-        (a, b) =>
-          a.rank - b.rank ||
-          a.topic.title.localeCompare(b.topic.title, "en", {
-            sensitivity: "base",
-          }),
-      )
-      .map(({ topic }) => topic)
-  }, [normalizedQuery])
+  const visibleTopics = React.useMemo(() => searchDocumentation(documentationIndex, query), [query])
 
   React.useEffect(() => {
     if (
@@ -151,8 +124,7 @@ const MinistryDocumentation = () => {
           How can we help?
         </h2>
         <p className="mt-3 max-w-3xl text-sm leading-relaxed text-gray-600">
-          Search completed Ministry App features by name or purpose, then open a
-          topic for step-by-step instructions.
+          Search for what you want to do, then open a guide for step-by-step instructions.
         </p>
 
         <label className="relative mt-6 block">

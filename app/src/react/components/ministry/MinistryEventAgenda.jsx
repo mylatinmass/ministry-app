@@ -22,6 +22,7 @@ const MinistryEventAgenda = ({
   label,
   emptyTitle,
   emptyText,
+  emptyAction,
   showDateHeadings = true,
   showDateRail = false,
   onEventSelect,
@@ -347,6 +348,7 @@ const MinistryEventAgenda = ({
           <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-gray-500">
             {emptyText}
           </p>
+          {emptyAction && <div className="mt-4">{emptyAction}</div>}
         </div>
       )}
     </section>

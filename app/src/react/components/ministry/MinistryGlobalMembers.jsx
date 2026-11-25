@@ -36,7 +36,7 @@ const channelReadiness = (channel, settings) => {
   if (!settings?.connected) {
     return {
       ready: false,
-      label: channel === "push" ? "No active device" : "Not connected",
+      label: channel === "email" ? "No email on file" : channel === "push" ? "No active device" : "Not connected",
       detail:
         channel === "email"
           ? "No email is configured on this account."
@@ -57,14 +57,14 @@ const channelReadiness = (channel, settings) => {
   if (!settings.enabled) {
     return {
       ready: false,
-      label: "Connected, turned off",
-      detail: "The member has this channel available but disabled notifications.",
+      label: channel === "email" ? "Email on file, turned off" : "Connected, turned off",
+      detail: "The member has disabled notifications for this channel.",
     }
   }
   return {
     ready: true,
     label: "Ready to receive",
-    detail: "Connected and enabled by the member.",
+    detail: channel === "email" ? "An email address is on file and email notifications are enabled." : "Connected and enabled by the member.",
   }
 }
 

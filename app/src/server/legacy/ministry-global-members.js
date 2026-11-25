@@ -278,7 +278,7 @@ const handler = async (event) => {
                   account.notification_schedule_changes_enabled,
                   account.notification_announcements_enabled,
                   account.notification_volunteer_opportunities_enabled,
-                  account.notification_email_connected_value IS NOT NULL AS email_connected,
+                  COALESCE(btrim(account.email), '') <> '' AS email_on_file,
                   account.notification_sms_connected_value IS NOT NULL AS sms_connected,
                   account.sms_transactional_consent_at IS NOT NULL AS sms_consented,
                   EXISTS (
@@ -307,7 +307,7 @@ const handler = async (event) => {
           channels: {
             email: {
               enabled: Boolean(row.notification_email_enabled),
-              connected: Boolean(row.email_connected),
+              connected: Boolean(row.email_on_file),
             },
             telegram: {
               enabled: Boolean(row.notification_telegram_enabled),

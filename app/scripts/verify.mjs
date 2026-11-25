@@ -848,6 +848,8 @@ assert.match(globalMembersServer, /membership\.ministry_id = ANY\(\$1::UUID\[\]\
 assert.match(globalMembersServer, /canManageAll/)
 assert.match(globalMembersUi, /data\.canManageAll/)
 assert.match(globalMembersServer, /communicationsResult/)
+assert.match(globalMembersServer, /COALESCE\(btrim\(account\.email\), ''\) <> '' AS email_on_file/)
+assert.match(globalMembersServer, /connected: Boolean\(row\.email_on_file\)/)
 assert.match(globalMembersServer, /telegram_connected/)
 assert.match(globalMembersServer, /active_push_devices/)
 assert.match(globalMembersServer, /sms_consented/)

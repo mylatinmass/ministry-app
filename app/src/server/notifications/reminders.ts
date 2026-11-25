@@ -6,12 +6,12 @@ import { processKlaviyoProfileSyncs } from "./klaviyo-profiles"
 import {
   processNotificationDigests,
   queueAssignmentReminderAlert,
-  queueDailyAdminAlerts,
   queueWeeklyAssignmentReviews,
 } from "./assignment-notifications"
 import { processMinistryMessageDeliveries } from "./messages"
 import { expireAssignmentSubstitutionRequests } from "../scheduling/substitutions"
 import { syncPrioryAllocationsIfDue } from "../scheduling/priory-allocations"
+import { finalReminderEventIds } from "./reminder-cadence"
 
 const ASSIGNMENT_STATUSES = [
   "pending",
@@ -19,7 +19,6 @@ const ASSIGNMENT_STATUSES = [
   "confirmed",
   "change_requested",
 ]
-const DAY_IN_MILLISECONDS = 24 * 60 * 60 * 1000
 const reminderKey = (...parts: unknown[]) =>
   crypto
     .createHash("sha256")
@@ -39,8 +38,8 @@ const reconcileReminders = async () => {
         ra.user_id AS subject_user_id,
         COALESCE(mp.guardian_user_id, ra.user_id) AS recipient_user_id,
         e.start_time,
-        e.start_time + COALESCE(responsibility.relative_start_minutes, 0)
-          * INTERVAL '1 minute' AS duty_start_time,
+        ((e.start_time AT TIME ZONE 'America/New_York') - INTERVAL '1 day')
+          AT TIME ZONE 'America/New_York' AS day_before_at,
         e.published_at,
         e.confirmation_deadline_at,
         e.updated_at::STRING AS event_updated_at,
@@ -58,10 +57,10 @@ const reconcileReminders = async () => {
       WHERE ra.user_id IS NOT NULL
         AND ra.status = ANY($1)
         AND e.status = 'published'
-        AND e.start_time + COALESCE(responsibility.relative_start_minutes, 0)
-          * INTERVAL '1 minute' > now() - INTERVAL '4 hours'
-        AND e.start_time + COALESCE(responsibility.relative_start_minutes, 0)
-          * INTERVAL '1 minute' < now() + INTERVAL '31 days'
+        AND responsibility.status <> 'cancelled'
+        AND e.start_time >= (date_trunc('day', now() AT TIME ZONE 'America/New_York') - INTERVAL '1 day')
+          AT TIME ZONE 'America/New_York'
+        AND e.start_time < now() + INTERVAL '31 days'
         AND recipient.status = 'active'
     `,
     [ASSIGNMENT_STATUSES],
@@ -70,26 +69,38 @@ const reconcileReminders = async () => {
   const currentAssignmentIds = candidates.rows.map(
     (row: { assignment_id: string }) => row.assignment_id,
   )
+  const finalEvents = finalReminderEventIds(candidates.rows)
   const client = await pool.connect()
 
   try {
     await client.query("BEGIN")
     for (const candidate of candidates.rows) {
-      const dutyStart = new Date(candidate.duty_start_time)
+      const eventStartsAt = new Date(candidate.start_time).getTime()
+      if (eventStartsAt <= reconciliationStartedAt) continue
       const schedules: Array<{ type: string; at: Date }> = [
         {
           type: "day_before",
-          at: new Date(dutyStart.getTime() - DAY_IN_MILLISECONDS),
+          at: new Date(candidate.day_before_at),
         },
         {
           type: "event_offset",
           at: new Date(
-            dutyStart.getTime() - Number(candidate.lead_minutes) * 60_000,
+            eventStartsAt - Number(candidate.lead_minutes) * 60_000,
           ),
         },
       ]
 
       for (const schedule of schedules) {
+        if (schedule.type === "event_offset" &&
+          !finalEvents.get(candidate.recipient_user_id)?.has(candidate.event_id)) {
+          await client.query(
+            `UPDATE ministry_reminders SET status = 'cancelled', canceled_at = now(), updated_at = now()
+             WHERE assignment_id = $1 AND recipient_user_id = $2 AND reminder_type = 'event_offset'
+               AND status IN ('pending', 'retry', 'processing')`,
+            [candidate.assignment_id, candidate.recipient_user_id],
+          )
+          continue
+        }
         // A reminder that already had a chance to run must not receive a new
         // dedupe key after an event sync. Any existing due reminder remains
         // available for the claiming step below.
@@ -139,9 +150,10 @@ const reconcileReminders = async () => {
             WHERE assignment_id = $1
               AND reminder_type = $2
               AND dedupe_key <> $3
+              AND recipient_user_id = $4
               AND status IN ('pending', 'retry', 'processing')
           `,
-          [candidate.assignment_id, schedule.type, dedupeKey],
+          [candidate.assignment_id, schedule.type, dedupeKey, candidate.recipient_user_id],
         )
       }
     }
@@ -254,7 +266,6 @@ export const handleReminderProcessing = async (request: Request) => {
   }
 
   const weeklyReviews = await queueWeeklyAssignmentReviews()
-  const dailyAdminAlerts = await queueDailyAdminAlerts()
   const processedAlerts = await processNotificationDigests()
   const processedMessages = await processMinistryMessageDeliveries()
 
@@ -265,7 +276,6 @@ export const handleReminderProcessing = async (request: Request) => {
     reconciledAssignments: reconciled,
     processedReminders: reminders.length,
     weeklyReviews,
-    dailyAdminAlerts,
     processedAlerts,
     processedMessages,
   })

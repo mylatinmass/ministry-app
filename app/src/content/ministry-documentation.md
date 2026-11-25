@@ -549,9 +549,9 @@ Admin only: 1. Open Templates and create/edit a template, or open an event and s
 ### How to
 
 No separate weekly emergency email is sent.
-1. The scheduler creates a detailed Daily Admin Staffing Report when substitute requests or unfilled positions need attention.
+1. The Monday Ministry summary includes a staffing report when upcoming events that week have pending substitute requests or unfilled required positions.
 2. The email identifies the intended administrator, ministry scope, affected events, dates, responsibilities, missing quantities, and substitute requests.
-3. Select Review event in the email, or open Home and select the applicable staffing item.
+3. Open the Ministry App from the email and select Pending Requests from Home to find the staffing item.
 4. Review and resolve the affected event.
 
 ## Export ministry reports and schedules
@@ -1434,7 +1434,7 @@ No separate monthly confirmation cycle is used.
 5. Ministry admins may edit their ministry’s section; Super Admins may edit all permitted ministry sections.
 6. Save changes and return to Open Roles to confirm the updated list.
 
-## Send assignment invitations and one consolidated weekly or monthly assignment review
+## Receive the Monday assignment summary
 <!-- guide: auto -->
 
 **Purpose:** Reduce notification fatigue and hidden commitments by presenting upcoming assignments in one consolidated review.
@@ -1442,10 +1442,11 @@ No separate monthly confirmation cycle is used.
 ### How to
 
 Automatic every Monday morning:
-1. The scheduler gathers published assignments from Monday through Sunday for each account.
+1. On Monday morning, the scheduler gathers the account’s published assignments for the week ending Sunday.
 2. It counts distinct events, not individual duties.
 3. For a parent account, it combines the parent's and all linked children's events into one profile-level alert.
-4. Email includes full event and duty details; SMS, Telegram, and push use a concise count and direct the user to the Ministry App.
+4. Email lists event names, dates, times, locations, and each person's duties. SMS, Telegram, and push give the event count and can name a single event.
+5. If you are an admin, the same Monday summary also includes any staffing alerts for the ministries you administer.
 
 ## Send guardian alerts for a child's critical assignment or schedule change
 <!-- guide: auto -->
@@ -1459,7 +1460,7 @@ Automatic household workflow:
 2. The scheduler includes the child's assignments in the parent's consolidated household summary and reminders.
 3. The parent opens the Ministry App and switches profiles when detailed child-specific action is needed.
 
-## Send midpoint, deadline, overdue, and one-week service reminders without duplicates
+## Receive day-before and profile-timed assignment reminders
 <!-- guide: auto -->
 
 **Purpose:** Prompt timely action at meaningful milestones while deduplication prevents repeated reminders for the same responsibility.
@@ -1467,12 +1468,11 @@ Automatic household workflow:
 ### How to
 
 Automatic reminder sequence:
-1. The scheduler reconciles published assignments and queues one day-before reminder for each upcoming event.
-2. It also queues the final reminder using the account's selected lead time.
-3. Parent accounts receive one combined profile alert when several linked members are assigned to the same event.
-4. The reminder worker runs every minute and sends through the account's enabled channels.
-5. Event-version timestamps are preserved and compared at millisecond precision so valid reminders are not canceled by database timestamp rounding.
-6. Duplicate keys prevent the same scheduled reminder from being sent twice.
+1. Around 24 hours before the first assigned event, the scheduler sends one reminder covering the account’s events for the next day.
+2. The final reminder names the earliest event in a group and uses the account’s selected lead time. An event starting at least three hours after the first event in that group gets a separate reminder.
+3. Parent accounts receive one reminder when several linked members are assigned to the same event. Email lists the event and duty details.
+4. Check My Profile, then Notifications, to select your channels and reminder lead time.
+5. Open the event from the notification or from My Events to review what you are assigned to do.
 
 ## Send schedule publication, change, cancellation, and substitute notifications
 <!-- guide: auto -->
